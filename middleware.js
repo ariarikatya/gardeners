@@ -1,17 +1,21 @@
 import { NextResponse } from 'next/server';
+// Импортируем строго jwtVerify напрямую из jose — это работает в Edge!
 import { jwtVerify } from 'jose';
 
-const SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'fallback-secret-use-env-in-prod');
+// Этот секрет будет использоваться для проверки токенов
+const SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'fallback-secret-key-123'
+);
 
 export async function middleware(req) {
   const { pathname } = req.nextUrl;
+  
+  // Вытаскиваем токен авторизации из кук браузера
   const token = req.cookies.get('token')?.value;
 
-  // Защита роута админа
+  // Если пользователь пытается зайти в админку диспетчера
   if (pathname.startsWith('/admin')) {
-    if (!token) {
-      return NextResponse.redirect(new URL('/login', req.url));
-    }
+    if (!token) return NextResponse.redirect(new URL('/login', req.url));
     try {
       const { payload } = await jwtVerify(token, SECRET);
       if (payload.role !== 'ADMIN') {
@@ -22,11 +26,9 @@ export async function middleware(req) {
     }
   }
 
-  // Защита роута садовника
+  // Если садовник пытается зайти в свой личный кабинет
   if (pathname.startsWith('/gardener')) {
-    if (!token) {
-      return NextResponse.redirect(new URL('/login', req.url));
-    }
+    if (!token) return NextResponse.redirect(new URL('/login', req.url));
     try {
       const { payload } = await jwtVerify(token, SECRET);
       if (payload.role !== 'GARDENER') {
@@ -40,6 +42,7 @@ export async function middleware(req) {
   return NextResponse.next();
 }
 
+// Защищаем только эти пути, чтобы middleware не срабатывал на картинки и шрифты
 export const config = {
   matcher: ['/admin/:path*', '/gardener/:path*'],
 };
