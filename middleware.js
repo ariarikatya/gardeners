@@ -8,6 +8,8 @@ export async function middleware(request) {
   const isAdminPage = pathname.startsWith('/admin');
   const isGardenerPage = pathname.startsWith('/gardener');
 
+  // API-роуты сами проверяют роль внутри каждого обработчика —
+  // здесь защищаем только сами страницы, чтобы чужой раздел не открывался в браузере.
   if (!isAdminPage && !isGardenerPage) {
     return NextResponse.next();
   }
@@ -26,6 +28,7 @@ export async function middleware(request) {
   if (isAdminPage && payload.role !== 'ADMIN') {
     return NextResponse.redirect(new URL('/gardener', request.url));
   }
+
   if (isGardenerPage && payload.role !== 'GARDENER') {
     return NextResponse.redirect(new URL('/admin', request.url));
   }
