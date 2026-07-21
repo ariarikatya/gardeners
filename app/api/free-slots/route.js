@@ -16,12 +16,12 @@ export async function GET(req) {
     const gardeners = await prisma.gardener.findMany();
     const orders = await prisma.order.findMany({
       where: {
-        date: {
-          gte: new Date(start),
-          lte: new Date(end),
-        },
+        date: { gte: new Date(start), lte: new Date(end) },
         status: { not: 'Отменен' }
       }
+    });
+    const dayOffs = await prisma.dayOff.findMany({
+      where: { date: { gte: new Date(start), lte: new Date(end) } }
     });
 
     // Строим список свободных слотов
@@ -31,11 +31,11 @@ export async function GET(req) {
 
     while (current <= stop) {
       const dateStr = current.toISOString().split('T')[0];
-      
+
       gardeners.forEach(g => {
-        // Ищем, есть ли у этого садовника заказ в этот день
         const isBusy = orders.some(o => o.gardenerId === g.id && o.date.toISOString().split('T')[0] === dateStr);
-        if (!isBusy) {
+        const isDayOff = dayOffs.some(d => d.gardenerId === g.id && d.date.toISOString().split('T')[0] === dateStr);
+        if (!isBusy && !isDayOff) {
           freeSlots.push({
             date: dateStr,
             gardenerId: g.id,
@@ -43,7 +43,7 @@ export async function GET(req) {
           });
         }
       });
-      
+
       current.setDate(current.getDate() + 1);
     }
 
