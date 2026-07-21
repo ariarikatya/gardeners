@@ -2,25 +2,36 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+const emptyOrderForm = {
+  clientName: '', clientPhone: '', address: '', description: '',
+  priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
+  status: 'Новый заказ', comment: '', date: '', gardenerId: ''
+};
+
+const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('calendar');
   const [gardeners, setGardeners] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [dayOffs, setDayOffs] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Состояния для форм
+  // Состояния для форм заказа
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState({ date: null, gardenerId: null });
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [formData, setFormData] = useState({
-    clientName: '', clientPhone: '', address: '', description: '',
-    priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-    status: 'Новый заказ', comment: ''
-  });
+  const [formData, setFormData] = useState(emptyOrderForm);
 
-  // Добавление садовника
+  // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '' });
+  const [editingGardener, setEditingGardener] = useState(null); // { id, name, phone } | null
+
+  // Фильтры календаря
+  const [filterGardenerId, setFilterGardenerId] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
   // Генерация дат на 30 дней вперед
   const dates = [];
@@ -37,14 +48,17 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resG, resO] = await Promise.all([
+      const [resG, resO, resD] = await Promise.all([
         fetch('/api/admin/gardeners'),
-        fetch('/api/admin/orders')
+        fetch('/api/admin/orders'),
+        fetch('/api/admin/dayoff')
       ]);
       const dataG = await resG.json();
       const dataO = await resO.json();
+      const dataD = await resD.json();
       setGardeners(dataG.gardeners || []);
       setOrders(dataO.orders || []);
+      setDayOffs(dataD.dayOffs || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -60,11 +74,7 @@ export default function AdminDashboard() {
   const openNewOrderModal = (dateStr, gardenerId) => {
     setSelectedOrder(null);
     setSelectedSlot({ date: dateStr, gardenerId });
-    setFormData({
-      clientName: '', clientPhone: '', address: '', description: '',
-      priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-      status: 'Новый заказ', comment: ''
-    });
+    setFormData({ ...emptyOrderForm, date: dateStr, gardenerId });
     setShowOrderModal(true);
   };
 
@@ -80,7 +90,9 @@ export default function AdminDashboard() {
       employeeSalary: order.employeeSalary,
       companyShare: order.companyShare,
       status: order.status,
-      comment: order.comment || ''
+      comment: order.comment || '',
+      date: order.date.split('T')[0],
+      gardenerId: order.gardenerId
     });
     setShowOrderModal(true);
   };
@@ -89,14 +101,33 @@ export default function AdminDashboard() {
     e.preventDefault();
     const endpoint = '/api/admin/orders';
     const method = selectedOrder ? 'PUT' : 'POST';
-    const payload = selectedOrder 
+    const payload = selectedOrder
       ? { id: selectedOrder.id, ...formData }
-      : { date: selectedSlot.date, gardenerId: selectedSlot.gardenerId, ...formData };
+      : { ...formData };
 
     const res = await fetch(endpoint, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      setShowOrderModal(false);
+      fetchData();
+    } else {
+      const data = await res.json();
+      alert(data.error);
+    }
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!selectedOrder) return;
+    if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
+
+    const res = await fetch('/api/admin/orders', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedOrder.id })
     });
 
     if (res.ok) {
@@ -124,6 +155,26 @@ export default function AdminDashboard() {
     }
   };
 
+  const openEditGardener = (g) => {
+    setEditingGardener({ id: g.id, name: g.name, phone: g.phone });
+  };
+
+  const handleUpdateGardener = async (e) => {
+    e.preventDefault();
+    const res = await fetch('/api/admin/gardeners', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editingGardener)
+    });
+    if (res.ok) {
+      setEditingGardener(null);
+      fetchData();
+    } else {
+      const data = await res.json();
+      alert(data.error);
+    }
+  };
+
   const handleDeleteGardener = async (id) => {
     if (!confirm('Удалить этого садовника и его личный кабинет?')) return;
     const res = await fetch('/api/admin/gardeners', {
@@ -133,6 +184,41 @@ export default function AdminDashboard() {
     });
     if (res.ok) fetchData();
   };
+
+  const handleMarkDayOff = async (dateStr, gardenerId) => {
+    const res = await fetch('/api/admin/dayoff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: dateStr, gardenerId })
+    });
+    if (res.ok) {
+      fetchData();
+    } else {
+      const data = await res.json();
+      alert(data.error);
+    }
+  };
+
+  const handleRemoveDayOff = async (id) => {
+    const res = await fetch('/api/admin/dayoff', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (res.ok) fetchData();
+  };
+
+  const toggleWeekday = (idx) => {
+    setSelectedWeekdays(prev =>
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+    );
+  };
+
+  const visibleGardeners = filterGardenerId === 'all'
+    ? gardeners
+    : gardeners.filter(g => g.id === filterGardenerId);
+
+  const visibleDates = dates.filter(d => selectedWeekdays.includes(d.getDay()));
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -148,13 +234,13 @@ export default function AdminDashboard() {
 
       {/* Меню вкладок */}
       <div className="bg-white border-b border-slate-200 flex px-6 py-2 gap-4">
-        <button 
+        <button
           onClick={() => setActiveTab('calendar')}
           className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           📅 Календарь загрузки
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('gardeners')}
           className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
@@ -167,60 +253,143 @@ export default function AdminDashboard() {
       ) : (
         <main className="p-6">
           {activeTab === 'calendar' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-slate-100 border-b border-slate-200">
-                    <th className="p-3 text-left font-semibold text-slate-600 border-r border-slate-200 w-44">Дата / День</th>
-                    {gardeners.map(g => (
-                      <th key={g.id} className="p-3 text-center font-semibold text-slate-600 border-r border-slate-200 min-w-44">
-                        {g.name}
-                      </th>
+            <>
+              {/* Фильтры */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-wrap gap-6 items-end">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Садовник</label>
+                  <select
+                    value={filterGardenerId}
+                    onChange={e => setFilterGardenerId(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                  >
+                    <option value="all">Все садовники</option>
+                    {gardeners.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Статус заказа</label>
+                  <select
+                    value={filterStatus}
+                    onChange={e => setFilterStatus(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                  >
+                    <option value="all">Любой</option>
+                    <option value="Новый заказ">Новый заказ</option>
+                    <option value="Выполнен">Выполнен</option>
+                    <option value="Отменен">Отменен</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Дни недели</label>
+                  <div className="flex gap-1">
+                    {WEEKDAY_LABELS.map((label, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => toggleWeekday(idx)}
+                        className={`w-9 h-9 rounded-lg text-xs font-medium border transition-all ${
+                          selectedWeekdays.includes(idx)
+                            ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                            : 'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}
+                      >
+                        {label}
+                      </button>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {dates.map(date => {
-                    const dateStr = date.toISOString().split('T')[0];
-                    const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-                    const dayLabel = days[date.getDay()];
-                    
-                    return (
-                      <tr key={dateStr} className="border-b border-slate-200 hover:bg-slate-50">
-                        <td className="p-3 font-medium text-slate-700 border-r border-slate-200 bg-slate-50">
-                          {dateStr} ({dayLabel})
-                        </td>
-                        {gardeners.map(g => {
-                          const order = orders.find(o => o.gardenerId === g.id && o.date.startsWith(dateStr));
-                          return (
-                            <td key={g.id} className="p-2 border-r border-slate-200 text-center text-sm">
-                              {order ? (
-                                <div 
-                                  onClick={() => openEditOrderModal(order)}
-                                  className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all ${
-                                    order.status === 'Выполнен' ? 'bg-slate-400 hover:bg-slate-500' : 'bg-red-500 hover:bg-red-600'
-                                  }`}
-                                >
-                                  {order.clientName}
-                                  <div className="text-xs opacity-90">{order.address}</div>
-                                </div>
-                              ) : (
-                                <button 
-                                  onClick={() => openNewOrderModal(dateStr, g.id)}
-                                  className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-medium border border-dashed border-emerald-300 transition-all"
-                                >
-                                  Свободно
-                                </button>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  </div>
+                </div>
+                <div className="ml-auto flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-50 border border-dashed border-emerald-300 inline-block"></span>Свободно</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-500 inline-block"></span>Можно вклинить</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block"></span>Занят</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-300 inline-block"></span>Выходной</span>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b border-slate-200">
+                      <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200">Дата</th>
+                      {visibleGardeners.map(g => (
+                        <th key={g.id} className="p-3 text-sm font-semibold text-slate-600 border-r border-slate-200 min-w-[180px]">
+                          {g.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleDates.map(date => {
+                      const dateStr = date.toISOString().split('T')[0];
+                      const dayLabel = WEEKDAY_LABELS[date.getDay()];
+
+                      return (
+                        <tr key={dateStr} className="border-b border-slate-200 hover:bg-slate-50">
+                          <td className="p-3 font-medium text-slate-700 border-r border-slate-200 bg-slate-50 align-top">
+                            {dateStr} ({dayLabel})
+                          </td>
+                          {visibleGardeners.map(g => {
+                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr));
+                            const dayOrders = filterStatus === 'all'
+                              ? dayOrdersAll
+                              : dayOrdersAll.filter(o => o.status === filterStatus);
+                            const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
+                            const activeCount = dayOrdersAll.filter(o => o.status === 'Новый заказ').length;
+
+                            return (
+                              <td key={g.id} className="p-2 border-r border-slate-200 text-center text-sm align-top">
+                                {dayOff && dayOrdersAll.length === 0 ? (
+                                  <div className="p-2 rounded-lg bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-1">
+                                    🚫 Выходной
+                                    <button onClick={() => handleRemoveDayOff(dayOff.id)} className="text-xs underline hover:text-slate-900">
+                                      Убрать
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1">
+                                    {dayOrders.map(order => (
+                                      <div
+                                        key={order.id}
+                                        onClick={() => openEditOrderModal(order)}
+                                        className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
+                                          order.status === 'Выполнен' ? 'bg-slate-400 hover:bg-slate-500' :
+                                          order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
+                                          activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
+                                        }`}
+                                      >
+                                        {order.clientName}
+                                        <div className="text-xs opacity-90">{order.address}</div>
+                                      </div>
+                                    ))}
+                                    <div className="flex gap-1">
+                                      <button
+                                        onClick={() => openNewOrderModal(dateStr, g.id)}
+                                        className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium border border-dashed border-emerald-300 transition-all"
+                                      >
+                                        {dayOrders.length === 0 ? 'Свободно' : '+ Ещё'}
+                                      </button>
+                                      {dayOrdersAll.length === 0 && (
+                                        <button
+                                          onClick={() => handleMarkDayOff(dateStr, g.id)}
+                                          className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg text-xs font-medium border border-dashed border-slate-300 transition-all"
+                                        >
+                                          Выходной
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
 
           {activeTab === 'gardeners' && (
@@ -231,16 +400,45 @@ export default function AdminDashboard() {
                 <div className="divide-y divide-slate-100">
                   {gardeners.map(g => (
                     <div key={g.id} className="py-3 flex justify-between items-center">
-                      <div>
-                        <div className="font-semibold text-slate-800">{g.name}</div>
-                        <div className="text-slate-500 text-sm">Телефон: {g.phone}</div>
-                      </div>
-                      <button 
-                        onClick={() => handleDeleteGardener(g.id)}
-                        className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-all"
-                      >
-                        Удалить
-                      </button>
+                      {editingGardener && editingGardener.id === g.id ? (
+                        <form onSubmit={handleUpdateGardener} className="flex-1 flex items-center gap-2">
+                          <input
+                            type="text" required
+                            value={editingGardener.name}
+                            onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
+                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
+                          />
+                          <input
+                            type="text" required
+                            value={editingGardener.phone}
+                            onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
+                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
+                          />
+                          <button type="submit" className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm">Сохранить</button>
+                          <button type="button" onClick={() => setEditingGardener(null)} className="text-slate-500 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm">Отмена</button>
+                        </form>
+                      ) : (
+                        <>
+                          <div>
+                            <div className="font-semibold text-slate-800">{g.name}</div>
+                            <div className="text-slate-500 text-sm">Телефон: {g.phone}</div>
+                          </div>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => openEditGardener(g)}
+                              className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm transition-all"
+                            >
+                              Редактировать
+                            </button>
+                            <button
+                              onClick={() => handleDeleteGardener(g.id)}
+                              className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-all"
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -252,8 +450,8 @@ export default function AdminDashboard() {
                 <form onSubmit={handleAddGardener} className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-600">ФИО Садовника</label>
-                    <input 
-                      type="text" required 
+                    <input
+                      type="text" required
                       value={newGardener.name}
                       onChange={e => setNewGardener({...newGardener, name: e.target.value})}
                       className="mt-1 block w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-emerald-500"
@@ -261,7 +459,7 @@ export default function AdminDashboard() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-600">Телефон для авторизации</label>
-                    <input 
+                    <input
                       type="text" required placeholder="79991234567"
                       value={newGardener.phone}
                       onChange={e => setNewGardener({...newGardener, phone: e.target.value})}
@@ -283,9 +481,24 @@ export default function AdminDashboard() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-xl">
             <h3 className="text-xl font-bold text-slate-800 mb-4">
-              {selectedOrder ? 'Редактировать заказ' : `Новая запись на ${selectedSlot.date}`}
+              {selectedOrder ? 'Редактировать / переместить заказ' : `Новая запись на ${selectedSlot.date}`}
             </h3>
             <form onSubmit={handleSaveOrder} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">Дата</label>
+                  <input type="date" required value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">Садовник</label>
+                  <select required value={formData.gardenerId} onChange={e => setFormData({...formData, gardenerId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                    <option value="" disabled>Выберите садовника</option>
+                    {gardeners.map(g => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">ФИО Клиента</label>
@@ -336,13 +549,22 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-semibold text-slate-500">Комментарий</label>
                 <input type="text" value={formData.comment} onChange={e => setFormData({...formData, comment: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
               </div>
-              <div className="flex gap-2 justify-end pt-4">
-                <button type="button" onClick={() => setShowOrderModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">
-                  Отмена
-                </button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
-                  Сохранить
-                </button>
+              <div className="flex gap-2 justify-between pt-4">
+                <div>
+                  {selectedOrder && (
+                    <button type="button" onClick={handleDeleteOrder} className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50">
+                      Удалить заказ
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowOrderModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">
+                    Отмена
+                  </button>
+                  <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
+                    Сохранить
+                  </button>
+                </div>
               </div>
             </form>
           </div>
