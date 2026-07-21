@@ -22,29 +22,39 @@ model User {
 }
 
 model Gardener {
-  id     String @id @default(uuid())
-  name   String
-  phone  String @unique
-  user   User?
-  orders Order[]
+  id      String   @id @default(uuid())
+  name    String
+  phone   String   @unique
+  user    User?
+  orders  Order[]
+  dayOffs DayOff[]
 }
 
 model Order {
   id             String   @id @default(uuid())
-  date           DateTime
+  date           DateTime // Только дата (без учета времени, YYYY-MM-DD)
   dayOfWeek      String
   clientName     String
   address        String
   clientPhone    String
   description    String
-  priceContract  Float    @default(0)
-  priceFact      Float    @default(0)
-  employeeSalary Float    @default(0)
-  companyShare   Float    @default(0)
-  status         String   @default("Новый заказ")
+  priceContract  Float    @default(0) // Оговоренная сумма
+  priceFact      Float    @default(0) // Сумма по факту
+  employeeSalary Float    @default(0) // З/п сотрудника
+  companyShare   Float    @default(0) // Доля фирмы
+  status         String   @default("Новый заказ") // "Новый заказ" | "Выполнен" | "Отменен"
   comment        String?
   gardenerId     String
   gardener       Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
 
-  @@index([date, gardenerId])
+  @@index([date, gardenerId]) // Один садовник может иметь несколько заказов в один день
+}
+
+model DayOff {
+  id         String   @id @default(uuid())
+  date       DateTime // Только дата (YYYY-MM-DD)
+  gardenerId String
+  gardener   Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+
+  @@unique([date, gardenerId]) // Выходной либо есть, либо нет — на один день одна отметка
 }
