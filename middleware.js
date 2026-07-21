@@ -1,11 +1,38 @@
 import { NextResponse } from 'next/server';
+import { verifyToken } from '@/lib/jwt';
 
-export function middleware(request) {
-  // Самый простой и легковесный пропуск запросов, который Vercel Edge переварит без ошибок
+export async function middleware(request) {
+  const { pathname } = request.nextUrl;
+  const token = request.cookies.get('token')?.value;
+
+  const isAdminPage = pathname.startsWith('/admin');
+  const isGardenerPage = pathname.startsWith('/gardener');
+
+  if (!isAdminPage && !isGardenerPage) {
+    return NextResponse.next();
+  }
+
+  if (!token) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  const payload = await verifyToken(token);
+  if (!payload) {
+    const response = NextResponse.redirect(new URL('/login', request.url));
+    response.cookies.set('token', '', { expires: new Date(0), path: '/' });
+    return response;
+  }
+
+  if (isAdminPage && payload.role !== 'ADMIN') {
+    return NextResponse.redirect(new URL('/gardener', request.url));
+  }
+  if (isGardenerPage && payload.role !== 'GARDENER') {
+    return NextResponse.redirect(new URL('/admin', request.url));
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  // Указываем пути, на которых должен срабатывать middleware
-  matcher: ['/api/:path*', '/admin/:path*'],
+  matcher: ['/admin/:path*', '/gardener/:path*'],
 };
