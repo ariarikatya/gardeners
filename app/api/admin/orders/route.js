@@ -24,7 +24,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment } = body;
+  const { date, gardenerId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -43,13 +43,14 @@ export async function POST(req) {
         priceFact: parseFloat(priceFact) || 0,
         employeeSalary: parseFloat(employeeSalary) || 0,
         companyShare: parseFloat(companyShare) || 0,
+        status: status || 'Новый заказ',
         comment,
         gardenerId,
       },
     });
     return NextResponse.json({ order });
   } catch (e) {
-    return NextResponse.json({ error: 'У этого садовника уже есть заказ на эту дату' }, { status: 400 });
+    return NextResponse.json({ error: 'Не удалось создать заказ' }, { status: 400 });
   }
 }
 
@@ -65,10 +66,30 @@ export async function PUT(req) {
     updateData.dayOfWeek = days[updateData.date.getDay()];
   }
 
-  const order = await prisma.order.update({
-    where: { id },
-    data: updateData,
+  // Числовые поля могут прийти строками из формы
+  ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
+    if (updateData[key] !== undefined) updateData[key] = parseFloat(updateData[key]) || 0;
   });
 
-  return NextResponse.json({ order });
+  try {
+    const order = await prisma.order.update({
+      where: { id },
+      data: updateData,
+    });
+    return NextResponse.json({ order });
+  } catch (e) {
+    return NextResponse.json({ error: 'Не удалось обновить заказ' }, { status: 400 });
+  }
+}
+
+export async function DELETE(req) {
+  if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const { id } = await req.json();
+  try {
+    await prisma.order.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    return NextResponse.json({ error: 'Не удалось удалить заказ' }, { status: 400 });
+  }
 }
