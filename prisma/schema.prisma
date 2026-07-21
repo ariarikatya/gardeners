@@ -31,20 +31,20 @@ model Gardener {
 
 model Order {
   id             String   @id @default(uuid())
-  date           DateTime // Только дата (без учета времени, YYYY-MM-DD)
+  date           DateTime
   dayOfWeek      String
   clientName     String
   address        String
   clientPhone    String
   description    String
-  priceContract  Float    @default(0) // Оговоренная сумма
-  priceFact      Float    @default(0) // Сумма по факту
-  employeeSalary Float    @default(0) // З/п сотрудника
-  companyShare   Float    @default(0) // Доля фирмы
-  status         String   @default("Новый заказ") // "Новый заказ" | "Выполнен" | "Отменен"
+  priceContract  Float    @default(0)
+  priceFact      Float    @default(0)
+  employeeSalary Float    @default(0)
+  companyShare   Float    @default(0)
+  status         String   @default("Новый заказ")
   comment        String?
   gardenerId     String
   gardener       Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
 
-  @@unique([date, gardenerId]) // У одного садовника не может быть двух заказов на один день
+  @@index([date, gardenerId])
 }
