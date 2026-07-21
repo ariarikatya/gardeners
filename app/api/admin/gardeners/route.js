@@ -48,6 +48,34 @@ export async function POST(req) {
   }
 }
 
+export async function PUT(req) {
+  if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const { id, name, phone } = await req.json();
+  const cleanPhone = phone.replace(/\D/g, '');
+
+  try {
+    // Обновляем и садовника, и его связанный логин-аккаунт, чтобы телефон входа совпадал
+    const gardener = await prisma.gardener.update({
+      where: { id },
+      data: {
+        name,
+        phone: cleanPhone,
+        user: {
+          update: {
+            name,
+            phone: cleanPhone,
+          },
+        },
+      },
+    });
+
+    return NextResponse.json({ gardener });
+  } catch (e) {
+    return NextResponse.json({ error: 'Не удалось обновить садовника (возможно, такой телефон уже занят)' }, { status: 400 });
+  }
+}
+
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
