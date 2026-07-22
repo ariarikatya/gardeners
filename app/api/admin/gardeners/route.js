@@ -16,6 +16,7 @@ export async function GET(req) {
 
   const gardeners = await prisma.gardener.findMany({
     orderBy: { name: 'asc' },
+    include: { services: true },
   });
   return NextResponse.json({ gardeners });
 }
@@ -23,15 +24,15 @@ export async function GET(req) {
 export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { name, phone } = await req.json();
+  const { name, phone, serviceIds } = await req.json();
   const cleanPhone = phone.replace(/\D/g, '');
 
   try {
-    // Создаем садовника и связываем его с системным юзером для входа
     const gardener = await prisma.gardener.create({
       data: {
         name,
         phone: cleanPhone,
+        services: serviceIds?.length ? { connect: serviceIds.map((id) => ({ id })) } : undefined,
         user: {
           create: {
             phone: cleanPhone,
@@ -40,6 +41,7 @@ export async function POST(req) {
           },
         },
       },
+      include: { services: true },
     });
 
     return NextResponse.json({ gardener });
@@ -51,16 +53,16 @@ export async function POST(req) {
 export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, name, phone } = await req.json();
+  const { id, name, phone, serviceIds } = await req.json();
   const cleanPhone = phone.replace(/\D/g, '');
 
   try {
-    // Обновляем и садовника, и его связанный логин-аккаунт, чтобы телефон входа совпадал
     const gardener = await prisma.gardener.update({
       where: { id },
       data: {
         name,
         phone: cleanPhone,
+        services: { set: (serviceIds || []).map((sid) => ({ id: sid })) },
         user: {
           update: {
             name,
@@ -68,6 +70,7 @@ export async function PUT(req) {
           },
         },
       },
+      include: { services: true },
     });
 
     return NextResponse.json({ gardener });
