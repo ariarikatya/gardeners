@@ -15,7 +15,7 @@ export async function GET(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const orders = await prisma.order.findMany({
-    include: { gardener: true },
+    include: { gardener: true, service: true },
   });
   return NextResponse.json({ orders });
 }
@@ -24,7 +24,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status } = body;
+  const { date, gardenerId, serviceId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -46,6 +46,7 @@ export async function POST(req) {
         status: status || 'Новый заказ',
         comment,
         gardenerId,
+        serviceId: serviceId || null,
       },
     });
     return NextResponse.json({ order });
@@ -66,7 +67,8 @@ export async function PUT(req) {
     updateData.dayOfWeek = days[updateData.date.getDay()];
   }
 
-  // Числовые поля могут прийти строками из формы
+  if (updateData.serviceId === '') updateData.serviceId = null;
+
   ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
     if (updateData[key] !== undefined) updateData[key] = parseFloat(updateData[key]) || 0;
   });
