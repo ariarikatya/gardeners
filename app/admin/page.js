@@ -9,6 +9,7 @@ const emptyOrderForm = {
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const SEARCH_HORIZON_DAYS = 60;
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -26,19 +27,32 @@ export default function AdminDashboard() {
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '' });
-  const [editingGardener, setEditingGardener] = useState(null); // { id, name, phone } | null
+  const [editingGardener, setEditingGardener] = useState(null);
 
   // Фильтры календаря
   const [filterGardenerId, setFilterGardenerId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
-  // Генерация дат на 30 дней вперед
+  // Поиск ближайшего окна под запрос клиента
+  const [showQuickSearch, setShowQuickSearch] = useState(false);
+  const [searchWeekdays, setSearchWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
+  const [searchGardenerId, setSearchGardenerId] = useState('all');
+
+  // Генерация дат на 30 дней вперед (для сетки календаря)
   const dates = [];
   for (let i = 0; i < 30; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
     dates.push(d);
+  }
+
+  // Более длинный горизонт для поиска окна (данные уже загружены целиком, доп. запросов не нужно)
+  const searchDates = [];
+  for (let i = 0; i < SEARCH_HORIZON_DAYS; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    searchDates.push(d);
   }
 
   useEffect(() => {
@@ -214,11 +228,47 @@ export default function AdminDashboard() {
     );
   };
 
+  const toggleSearchWeekday = (idx) => {
+    setSearchWeekdays(prev =>
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+    );
+  };
+
   const visibleGardeners = filterGardenerId === 'all'
     ? gardeners
     : gardeners.filter(g => g.id === filterGardenerId);
 
   const visibleDates = dates.filter(d => selectedWeekdays.includes(d.getDay()));
+
+  // Поиск ближайшего подходящего окна: сначала полностью свободные дни,
+  // затем дни с одним активным заказом ("можно вклинить"), отсортировано по дате
+  let searchResults = [];
+  if (showQuickSearch) {
+    const candidateGardeners = searchGardenerId === 'all' ? gardeners : gardeners.filter(g => g.id === searchGardenerId);
+    for (const date of searchDates) {
+      if (!searchWeekdays.includes(date.getDay())) continue;
+      const dateStr = date.toISOString().split('T')[0];
+      for (const g of candidateGardeners) {
+        const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
+        if (dayOff) continue;
+
+        const dayOrdersActive = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status === 'Новый заказ');
+
+        if (dayOrdersActive.length === 0) {
+          searchResults.push({ date: dateStr, dayLabel: WEEKDAY_LABELS[date.getDay()], gardener: g, type: 'free' });
+        } else if (dayOrdersActive.length === 1) {
+          searchResults.push({ date: dateStr, dayLabel: WEEKDAY_LABELS[date.getDay()], gardener: g, type: 'partial', existingOrder: dayOrdersActive[0] });
+        }
+        // 2 и более активных заказов — день считаем занятым, не предлагаем
+      }
+    }
+    searchResults.sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+      if (a.type !== b.type) return a.type === 'free' ? -1 : 1;
+      return 0;
+    });
+    searchResults = searchResults.slice(0, 15);
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -254,7 +304,88 @@ export default function AdminDashboard() {
         <main className="p-6">
           {activeTab === 'calendar' && (
             <>
-              {/* Фильтры */}
+              {/* Поиск ближайшего окна под запрос клиента */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickSearch(v => !v)}
+                  className="text-emerald-700 font-medium text-sm flex items-center gap-1"
+                >
+                  🔍 {showQuickSearch ? 'Скрыть поиск окна' : 'Найти окно для клиента (ближайшее свободное / можно вклинить)'}
+                </button>
+
+                {showQuickSearch && (
+                  <div className="mt-4 border-t border-slate-100 pt-4">
+                    <div className="flex flex-wrap gap-6 items-end mb-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Желаемые дни недели клиента</label>
+                        <div className="flex gap-1">
+                          {WEEKDAY_LABELS.map((label, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => toggleSearchWeekday(idx)}
+                              className={`w-9 h-9 rounded-lg text-xs font-medium border transition-all ${
+                                searchWeekdays.includes(idx)
+                                  ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-400'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Садовник</label>
+                        <select
+                          value={searchGardenerId}
+                          onChange={e => setSearchGardenerId(e.target.value)}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                        >
+                          <option value="all">Любой</option>
+                          {gardeners.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    {searchResults.length === 0 ? (
+                      <p className="text-sm text-slate-400">Подходящих окон не нашлось в ближайшие {SEARCH_HORIZON_DAYS} дней.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {searchResults.map((r, i) => (
+                          <div key={i} className="flex flex-wrap items-center justify-between gap-3 p-2 rounded-lg hover:bg-slate-50 border border-slate-100">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className={`text-xs font-semibold px-2 py-1 rounded ${r.type === 'free' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {r.type === 'free' ? 'Свободно' : 'Можно вклинить'}
+                              </span>
+                              <span className="text-sm font-medium text-slate-700">{r.date} ({r.dayLabel})</span>
+                              <span className="text-sm text-slate-500">{r.gardener.name}</span>
+                              {r.type === 'partial' && r.existingOrder && (
+                                <span className="text-xs text-slate-400 max-w-xs truncate">
+                                  уже стоит: {r.existingOrder.clientName} — {r.existingOrder.description}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openNewOrderModal(r.date, r.gardener.id)}
+                              className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
+                            >
+                              Записать сюда
+                            </button>
+                          </div>
+                        ))}
+                        <p className="text-xs text-slate-400 pt-2">
+                          Для «можно вклинить» решение — за вами: посмотрите, что уже стоит в этот день, и прикиньте, войдёт ли новый объём работы.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Фильтры отображения календаря */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-wrap gap-6 items-end">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Садовник</label>
