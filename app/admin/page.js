@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-  status: 'Новый заказ', comment: '', date: '', gardenerId: ''
+  status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: ''
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -17,6 +17,7 @@ export default function AdminDashboard() {
   const [gardeners, setGardeners] = useState([]);
   const [orders, setOrders] = useState([]);
   const [dayOffs, setDayOffs] = useState([]);
+  const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Состояния для форм заказа
@@ -26,18 +27,23 @@ export default function AdminDashboard() {
   const [formData, setFormData] = useState(emptyOrderForm);
 
   // Добавление / редактирование садовника
-  const [newGardener, setNewGardener] = useState({ name: '', phone: '' });
+  const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
   const [editingGardener, setEditingGardener] = useState(null);
+
+  // Добавление услуги в каталог
+  const [newServiceName, setNewServiceName] = useState('');
 
   // Фильтры календаря
   const [filterGardenerId, setFilterGardenerId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterServiceId, setFilterServiceId] = useState('all');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
   // Поиск ближайшего окна под запрос клиента
   const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [searchWeekdays, setSearchWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
   const [searchGardenerId, setSearchGardenerId] = useState('all');
+  const [searchServiceId, setSearchServiceId] = useState('all');
 
   // Генерация дат на 30 дней вперед (для сетки календаря)
   const dates = [];
@@ -62,17 +68,20 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resG, resO, resD] = await Promise.all([
+      const [resG, resO, resD, resS] = await Promise.all([
         fetch('/api/admin/gardeners'),
         fetch('/api/admin/orders'),
-        fetch('/api/admin/dayoff')
+        fetch('/api/admin/dayoff'),
+        fetch('/api/admin/services')
       ]);
       const dataG = await resG.json();
       const dataO = await resO.json();
       const dataD = await resD.json();
+      const dataS = await resS.json();
       setGardeners(dataG.gardeners || []);
       setOrders(dataO.orders || []);
       setDayOffs(dataD.dayOffs || []);
+      setServices(dataS.services || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -88,7 +97,7 @@ export default function AdminDashboard() {
   const openNewOrderModal = (dateStr, gardenerId) => {
     setSelectedOrder(null);
     setSelectedSlot({ date: dateStr, gardenerId });
-    setFormData({ ...emptyOrderForm, date: dateStr, gardenerId });
+    setFormData({ ...emptyOrderForm, date: dateStr, gardenerId, serviceId: '' });
     setShowOrderModal(true);
   };
 
@@ -106,7 +115,8 @@ export default function AdminDashboard() {
       status: order.status,
       comment: order.comment || '',
       date: order.date.split('T')[0],
-      gardenerId: order.gardenerId
+      gardenerId: order.gardenerId,
+      serviceId: order.serviceId || ''
     });
     setShowOrderModal(true);
   };
@@ -161,7 +171,7 @@ export default function AdminDashboard() {
       body: JSON.stringify(newGardener)
     });
     if (res.ok) {
-      setNewGardener({ name: '', phone: '' });
+      setNewGardener({ name: '', phone: '', serviceIds: [] });
       fetchData();
     } else {
       const data = await res.json();
@@ -169,8 +179,26 @@ export default function AdminDashboard() {
     }
   };
 
+  const toggleNewGardenerService = (serviceId) => {
+    setNewGardener(prev => ({
+      ...prev,
+      serviceIds: prev.serviceIds.includes(serviceId)
+        ? prev.serviceIds.filter(id => id !== serviceId)
+        : [...prev.serviceIds, serviceId]
+    }));
+  };
+
   const openEditGardener = (g) => {
-    setEditingGardener({ id: g.id, name: g.name, phone: g.phone });
+    setEditingGardener({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services || []).map(s => s.id) });
+  };
+
+  const toggleEditGardenerService = (serviceId) => {
+    setEditingGardener(prev => ({
+      ...prev,
+      serviceIds: prev.serviceIds.includes(serviceId)
+        ? prev.serviceIds.filter(id => id !== serviceId)
+        : [...prev.serviceIds, serviceId]
+    }));
   };
 
   const handleUpdateGardener = async (e) => {
@@ -192,6 +220,33 @@ export default function AdminDashboard() {
   const handleDeleteGardener = async (id) => {
     if (!confirm('Удалить этого садовника и его личный кабинет?')) return;
     const res = await fetch('/api/admin/gardeners', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (res.ok) fetchData();
+  };
+
+  const handleAddService = async (e) => {
+    e.preventDefault();
+    if (!newServiceName.trim()) return;
+    const res = await fetch('/api/admin/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newServiceName.trim() })
+    });
+    if (res.ok) {
+      setNewServiceName('');
+      fetchData();
+    } else {
+      const data = await res.json();
+      alert(data.error);
+    }
+  };
+
+  const handleDeleteService = async (id) => {
+    if (!confirm('Удалить эту услугу из списка? У заказов с этой услугой она просто станет пустой.')) return;
+    const res = await fetch('/api/admin/services', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
@@ -234,9 +289,12 @@ export default function AdminDashboard() {
     );
   };
 
-  const visibleGardeners = filterGardenerId === 'all'
+  let visibleGardeners = filterGardenerId === 'all'
     ? gardeners
     : gardeners.filter(g => g.id === filterGardenerId);
+  if (filterServiceId !== 'all') {
+    visibleGardeners = visibleGardeners.filter(g => (g.services || []).some(s => s.id === filterServiceId));
+  }
 
   const visibleDates = dates.filter(d => selectedWeekdays.includes(d.getDay()));
 
@@ -244,7 +302,10 @@ export default function AdminDashboard() {
   // затем дни с одним активным заказом ("можно вклинить"), отсортировано по дате
   let searchResults = [];
   if (showQuickSearch) {
-    const candidateGardeners = searchGardenerId === 'all' ? gardeners : gardeners.filter(g => g.id === searchGardenerId);
+    let candidateGardeners = searchGardenerId === 'all' ? gardeners : gardeners.filter(g => g.id === searchGardenerId);
+    if (searchServiceId !== 'all') {
+      candidateGardeners = candidateGardeners.filter(g => (g.services || []).some(s => s.id === searchServiceId));
+    }
     for (const date of searchDates) {
       if (!searchWeekdays.includes(date.getDay())) continue;
       const dateStr = date.toISOString().split('T')[0];
@@ -296,6 +357,12 @@ export default function AdminDashboard() {
         >
           🧑‍🌾 Садовники
         </button>
+        <button
+          onClick={() => setActiveTab('services')}
+          className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          🌿 Услуги
+        </button>
       </div>
 
       {loading ? (
@@ -345,6 +412,17 @@ export default function AdminDashboard() {
                         >
                           <option value="all">Любой</option>
                           {gardeners.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Услуга</label>
+                        <select
+                          value={searchServiceId}
+                          onChange={e => setSearchServiceId(e.target.value)}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                        >
+                          <option value="all">Любая</option>
+                          {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                       </div>
                     </div>
@@ -409,6 +487,17 @@ export default function AdminDashboard() {
                     <option value="Новый заказ">Новый заказ</option>
                     <option value="Выполнен">Выполнен</option>
                     <option value="Отменен">Отменен</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Услуга (специализация)</label>
+                  <select
+                    value={filterServiceId}
+                    onChange={e => setFilterServiceId(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                  >
+                    <option value="all">Любая</option>
+                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
                 <div>
@@ -545,6 +634,14 @@ export default function AdminDashboard() {
                             onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
                             className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
                           />
+                          <div className="flex flex-wrap gap-2">
+                            {services.map(s => (
+                              <label key={s.id} className={`text-xs px-2 py-1 rounded-lg border cursor-pointer ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                                <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
+                                {s.name}
+                              </label>
+                            ))}
+                          </div>
                           <button type="submit" className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm">Сохранить</button>
                           <button type="button" onClick={() => setEditingGardener(null)} className="text-slate-500 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm">Отмена</button>
                         </form>
@@ -553,6 +650,9 @@ export default function AdminDashboard() {
                           <div>
                             <div className="font-semibold text-slate-800">{g.name}</div>
                             <div className="text-slate-500 text-sm">Телефон: {g.phone}</div>
+                            {g.services && g.services.length > 0 && (
+                              <div className="text-xs text-emerald-700 mt-1">{g.services.map(s => s.name).join(', ')}</div>
+                            )}
                           </div>
                           <div className="flex gap-1">
                             <button
@@ -597,8 +697,60 @@ export default function AdminDashboard() {
                       className="mt-1 block w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600 mb-1">Умеет делать</label>
+                    <div className="flex flex-wrap gap-2">
+                      {services.length === 0 && <span className="text-xs text-slate-400">Сначала добавьте услуги во вкладке «Услуги»</span>}
+                      {services.map(s => (
+                        <label key={s.id} className={`text-xs px-2 py-1 rounded-lg border cursor-pointer ${newGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                          <input type="checkbox" className="hidden" checked={newGardener.serviceIds.includes(s.id)} onChange={() => toggleNewGardenerService(s.id)} />
+                          {s.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   <button type="submit" className="w-full bg-emerald-600 text-white py-2 rounded-lg font-medium hover:bg-emerald-700">
                     Добавить садовника
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'services' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <h3 className="text-lg font-bold text-slate-700 mb-4">Каталог услуг ({services.length})</h3>
+                <div className="divide-y divide-slate-100">
+                  {services.map(s => (
+                    <div key={s.id} className="py-3 flex justify-between items-center">
+                      <div className="font-medium text-slate-800">{s.name}</div>
+                      <button
+                        onClick={() => handleDeleteService(s.id)}
+                        className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm transition-all"
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                  {services.length === 0 && <p className="text-sm text-slate-400 py-3">Пока ни одной услуги не добавлено.</p>}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 h-fit">
+                <h3 className="text-lg font-bold text-slate-700 mb-4">Добавить услугу</h3>
+                <form onSubmit={handleAddService} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600">Название услуги</label>
+                    <input
+                      type="text" required placeholder="Например: Обрезка деревьев"
+                      value={newServiceName}
+                      onChange={e => setNewServiceName(e.target.value)}
+                      className="mt-1 block w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <button type="submit" className="w-full bg-emerald-600 text-white py-2 rounded-lg font-medium hover:bg-emerald-700">
+                    Добавить
                   </button>
                 </form>
               </div>
@@ -643,6 +795,15 @@ export default function AdminDashboard() {
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Адрес</label>
                 <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500">Услуга</label>
+                <select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                  <option value="">Не указана</option>
+                  {services.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Описание работ (Что делать)</label>
