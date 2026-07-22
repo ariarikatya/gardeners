@@ -22,12 +22,20 @@ model User {
 }
 
 model Gardener {
-  id      String   @id @default(uuid())
-  name    String
-  phone   String   @unique
-  user    User?
-  orders  Order[]
-  dayOffs DayOff[]
+  id       String    @id @default(uuid())
+  name     String
+  phone    String    @unique
+  user     User?
+  orders   Order[]
+  dayOffs  DayOff[]
+  services Service[] @relation("GardenerServices")
+}
+
+model Service {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  gardeners Gardener[] @relation("GardenerServices")
+  orders    Order[]
 }
 
 model Order {
@@ -46,6 +54,8 @@ model Order {
   comment        String?
   gardenerId     String
   gardener       Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+  serviceId      String?
+  service        Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
   @@index([date, gardenerId]) // Один садовник может иметь несколько заказов в один день
 }
