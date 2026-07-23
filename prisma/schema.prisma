@@ -50,8 +50,10 @@ model Order {
   priceFact      Float    @default(0) // Сумма по факту
   employeeSalary Float    @default(0) // З/п сотрудника
   companyShare   Float    @default(0) // Доля фирмы
-  status         String   @default("Новый заказ") // "Новый заказ" | "Выполнен" | "Отменен"
+  status         String   @default("Новый заказ") // "Новый заказ" | "Перенос" | "Отказ" | "Выполнен" | "Отменен"
   comment        String?
+  transferRequestedDate DateTime? // Желаемая дата клиента при запросе переноса от садовника
+  refusalReason  String?  // Причина отказа, вводит садовник
   gardenerId     String
   gardener       Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   serviceId      String?
