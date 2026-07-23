@@ -338,9 +338,17 @@ export default function AdminDashboard() {
         <h1 className="text-xl font-bold flex items-center gap-2">
           🌲 Анемон Агро — Панель Диспетчера
         </h1>
-        <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm">
-          Выйти
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/api/admin/export"
+            className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm"
+          >
+            📊 Экспорт в Excel
+          </a>
+          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm">
+            Выйти
+          </button>
+        </div>
       </header>
 
       {/* Меню вкладок */}
