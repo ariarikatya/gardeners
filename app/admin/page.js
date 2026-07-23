@@ -493,6 +493,8 @@ export default function AdminDashboard() {
                   >
                     <option value="all">Любой</option>
                     <option value="Новый заказ">Новый заказ</option>
+                    <option value="Перенос">Перенос (ждёт решения)</option>
+                    <option value="Отказ">Отказ</option>
                     <option value="Выполнен">Выполнен</option>
                     <option value="Отменен">Отменен</option>
                   </select>
@@ -583,11 +585,15 @@ export default function AdminDashboard() {
                                         className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
                                           order.status === 'Выполнен' ? 'bg-slate-400 hover:bg-slate-500' :
                                           order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
+                                          order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
+                                          order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
                                           activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
                                         }`}
                                       >
                                         {order.clientName}
                                         <div className="text-xs opacity-90">{order.address}</div>
+                                        {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
+                                        {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
                                       </div>
                                     ))}
                                     <div className="flex gap-1">
@@ -774,6 +780,16 @@ export default function AdminDashboard() {
             <h3 className="text-xl font-bold text-slate-800 mb-4">
               {selectedOrder ? 'Редактировать / переместить заказ' : `Новая запись на ${selectedSlot.date}`}
             </h3>
+            {selectedOrder && selectedOrder.status === 'Перенос' && selectedOrder.transferRequestedDate && (
+              <div className="mb-4 text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-100">
+                🗓 Садовник запросил перенос на <b>{new Date(selectedOrder.transferRequestedDate).toLocaleDateString('ru-RU')}</b>. Смените дату/садовника ниже и статус на «Новый заказ», либо назначьте другого свободного садовника.
+              </div>
+            )}
+            {selectedOrder && selectedOrder.status === 'Отказ' && selectedOrder.refusalReason && (
+              <div className="mb-4 text-sm text-rose-800 bg-rose-50 p-3 rounded-lg border border-rose-100">
+                ✕ Садовник отказался: «{selectedOrder.refusalReason}». Назначьте другого садовника и смените статус на «Новый заказ».
+              </div>
+            )}
             <form onSubmit={handleSaveOrder} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -841,6 +857,8 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-semibold text-slate-500">Статус заказа</label>
                 <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
                   <option value="Новый заказ">Новый заказ</option>
+                  <option value="Перенос">Перенос</option>
+                  <option value="Отказ">Отказ</option>
                   <option value="Выполнен">Выполнен</option>
                   <option value="Отменен">Отменен</option>
                 </select>
