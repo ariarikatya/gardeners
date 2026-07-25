@@ -54,6 +54,9 @@ model Order {
   comment        String?
   transferRequestedDate DateTime? // Желаемая дата клиента при запросе переноса от садовника
   refusalReason  String?  // Причина отказа, вводит садовник
+  photoBefore    String?  // Ссылка на фото "До" (ImgBB)
+  photoAfter     String?  // Ссылка на фото "После" (ImgBB)
+  photoAct       String?  // Ссылка на фото акта/документа (ImgBB)
   gardenerId     String
   gardener       Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   serviceId      String?
