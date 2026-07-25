@@ -16,7 +16,6 @@ export async function GET(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  // Садовник видит только свои заказы
   const orders = await prisma.order.findMany({
     where: { gardenerId: payload.gardenerId },
     include: { service: true },
@@ -30,7 +29,7 @@ export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, action, transferRequestedDate, refusalReason, priceFact } = await req.json();
+  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct } = await req.json();
 
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order || order.gardenerId !== payload.gardenerId) {
@@ -54,7 +53,10 @@ export async function PUT(req) {
     if (!amount || amount <= 0) {
       return NextResponse.json({ error: 'Укажите фактическую сумму заказа' }, { status: 400 });
     }
-    data = { status: 'Выполнен', priceFact: amount };
+    if (!photoBefore || !photoAfter || !photoAct) {
+      return NextResponse.json({ error: 'Прикрепите все три фото: до, после и акт/документ' }, { status: 400 });
+    }
+    data = { status: 'Выполнен', priceFact: amount, photoBefore, photoAfter, photoAct };
   } else {
     return NextResponse.json({ error: 'Неизвестное действие' }, { status: 400 });
   }
