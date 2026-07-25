@@ -15,6 +15,32 @@ function statusStyle(status) {
   }
 }
 
+// Сжимаем фото перед загрузкой, чтобы не упереться в лимит размера запроса
+function compressImage(file, maxWidth = 1600, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = Math.round(height * (maxWidth / width));
+          width = maxWidth;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Не удалось обработать фото'))), 'image/jpeg', quality);
+      };
+      img.onerror = () => reject(new Error('Не удалось прочитать фото'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
@@ -32,6 +58,10 @@ export default function GardenerDashboard() {
   const [transferDate, setTransferDate] = useState('');
   const [refusalText, setRefusalText] = useState('');
   const [factAmount, setFactAmount] = useState('');
+  const [photoBeforeUrl, setPhotoBeforeUrl] = useState('');
+  const [photoAfterUrl, setPhotoAfterUrl] = useState('');
+  const [photoActUrl, setPhotoActUrl] = useState('');
+  const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -61,6 +91,9 @@ export default function GardenerDashboard() {
     setTransferDate('');
     setRefusalText('');
     setFactAmount('');
+    setPhotoBeforeUrl('');
+    setPhotoAfterUrl('');
+    setPhotoActUrl('');
   };
 
   const closeAction = () => {
@@ -68,15 +101,51 @@ export default function GardenerDashboard() {
     setActionType(null);
   };
 
+  const handlePhotoSelect = async (e, which) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadingWhich(which);
+    try {
+      const compressed = await compressImage(file);
+      const formData = new FormData();
+      formData.append('image', compressed, 'photo.jpg');
+      const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (res.ok) {
+        if (which === 'before') setPhotoBeforeUrl(data.url);
+        if (which === 'after') setPhotoAfterUrl(data.url);
+        if (which === 'act') setPhotoActUrl(data.url);
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Не удалось загрузить фото: ' + err.message);
+    } finally {
+      setUploadingWhich(null);
+      e.target.value = '';
+    }
+  };
+
   const submitAction = async (e) => {
     e.preventDefault();
     if (!actionOrder) return;
+
+    if (actionType === 'complete' && (!photoBeforeUrl || !photoAfterUrl || !photoActUrl)) {
+      alert('Прикрепите все три фото: до, после и акт/документ');
+      return;
+    }
+
     setSubmitting(true);
 
     const payload = { id: actionOrder.id, action: actionType };
     if (actionType === 'transfer') payload.transferRequestedDate = transferDate;
     if (actionType === 'refuse') payload.refusalReason = refusalText;
-    if (actionType === 'complete') payload.priceFact = factAmount;
+    if (actionType === 'complete') {
+      payload.priceFact = factAmount;
+      payload.photoBefore = photoBeforeUrl;
+      payload.photoAfter = photoAfterUrl;
+      payload.photoAct = photoActUrl;
+    }
 
     try {
       const res = await fetch('/api/gardener/orders', {
@@ -300,23 +369,50 @@ export default function GardenerDashboard() {
               )}
 
               {actionType === 'complete' && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500">Фактическая сумма заказа, ₽</label>
-                  <input
-                    type="number" required min="1" step="1"
-                    value={factAmount}
-                    onChange={e => setFactAmount(e.target.value)}
-                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
-                  />
-                  <p className="text-xs text-slate-400 mt-2">Без указания суммы заказ нельзя закрыть как выполненный.</p>
-                </div>
+                <>
+                  {[
+                    { key: 'before', label: 'Фото «До»', url: photoBeforeUrl },
+                    { key: 'after', label: 'Фото «После»', url: photoAfterUrl },
+                    { key: 'act', label: 'Фото акта / документа', url: photoActUrl },
+                  ].map(({ key, label, url }) => (
+                    <div key={key}>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">{label}</label>
+                      {url ? (
+                        <div className="flex items-center gap-2">
+                          <img src={url} alt={label} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <span className="text-xs text-emerald-700 font-medium">Загружено ✓</span>
+                          <label className="text-xs text-slate-400 underline cursor-pointer ml-auto">
+                            Заменить
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handlePhotoSelect(e, key)} />
+                          </label>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                          {uploadingWhich === key ? 'Загружаю...' : '📷 Выбрать фото'}
+                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handlePhotoSelect(e, key)} disabled={uploadingWhich === key} />
+                        </label>
+                      )}
+                    </div>
+                  ))}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500">Фактическая сумма заказа, ₽</label>
+                    <input
+                      type="number" required min="1" step="1"
+                      value={factAmount}
+                      onChange={e => setFactAmount(e.target.value)}
+                      className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
+                    />
+                    <p className="text-xs text-slate-400 mt-2">Без всех трёх фото и суммы заказ нельзя закрыть как выполненный.</p>
+                  </div>
+                </>
               )}
 
               <div className="flex gap-2 justify-end pt-2">
                 <button type="button" onClick={closeAction} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">
                   Отмена
                 </button>
-                <button type="submit" disabled={submitting} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50">
+                <button type="submit" disabled={submitting || uploadingWhich !== null} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50">
                   {submitting ? 'Сохраняю...' : 'Подтвердить'}
                 </button>
               </div>
