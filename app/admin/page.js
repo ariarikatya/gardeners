@@ -790,6 +790,31 @@ export default function AdminDashboard() {
                 ✕ Садовник отказался: «{selectedOrder.refusalReason}». Назначьте другого садовника и смените статус на «Новый заказ».
               </div>
             )}
+            {selectedOrder && selectedOrder.status === 'Выполнен' && (selectedOrder.photoBefore || selectedOrder.photoAfter || selectedOrder.photoAct) && (
+              <div className="mb-4">
+                <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
+                <div className="flex gap-2">
+                  {selectedOrder.photoBefore && (
+                    <a href={selectedOrder.photoBefore} target="_blank" rel="noopener noreferrer" className="block">
+                      <img src={selectedOrder.photoBefore} alt="До" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                      <span className="text-[10px] text-slate-400">До</span>
+                    </a>
+                  )}
+                  {selectedOrder.photoAfter && (
+                    <a href={selectedOrder.photoAfter} target="_blank" rel="noopener noreferrer" className="block">
+                      <img src={selectedOrder.photoAfter} alt="После" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                      <span className="text-[10px] text-slate-400">После</span>
+                    </a>
+                  )}
+                  {selectedOrder.photoAct && (
+                    <a href={selectedOrder.photoAct} target="_blank" rel="noopener noreferrer" className="block">
+                      <img src={selectedOrder.photoAct} alt="Акт" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                      <span className="text-[10px] text-slate-400">Акт</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
             <form onSubmit={handleSaveOrder} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
