@@ -1,0 +1,51 @@
+import { NextResponse } from 'next/server';
+import { verifyToken } from '@/lib/jwt';
+
+async function checkGardener(req) {
+  const token = req.cookies.get('token')?.value;
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  if (!payload || payload.role !== 'GARDENER') return null;
+  return payload;
+}
+
+export async function POST(req) {
+  const payload = await checkGardener(req);
+  if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const apiKey = process.env.IMGBB_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: 'Загрузка фото ещё не настроена на сервере (нет IMGBB_API_KEY)' }, { status: 500 });
+  }
+
+  try {
+    const incomingForm = await req.formData();
+    const file = incomingForm.get('image');
+    if (!file) {
+      return NextResponse.json({ error: 'Файл не передан' }, { status: 400 });
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+    const uploadForm = new URLSearchParams();
+    uploadForm.append('key', apiKey);
+    uploadForm.append('image', base64);
+
+    const imgbbRes = await fetch('https://api.imgbb.com/1/upload', {
+      method: 'POST',
+      body: uploadForm,
+    });
+    const data = await imgbbRes.json();
+
+    if (!data.success) {
+      console.error('ImgBB error:', data);
+      return NextResponse.json({ error: 'ImgBB отклонил загрузку фото' }, { status: 500 });
+    }
+
+    return NextResponse.json({ url: data.data.url });
+  } catch (e) {
+    console.error('Upload error:', e);
+    return NextResponse.json({ error: 'Не удалось загрузить фото' }, { status: 500 });
+  }
+}
