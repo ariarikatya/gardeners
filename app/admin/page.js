@@ -18,6 +18,7 @@ export default function AdminDashboard() {
   const [orders, setOrders] = useState([]);
   const [dayOffs, setDayOffs] = useState([]);
   const [services, setServices] = useState([]);
+  const [webLeads, setWebLeads] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Состояния для форм заказа
@@ -25,6 +26,8 @@ export default function AdminDashboard() {
   const [selectedSlot, setSelectedSlot] = useState({ date: null, gardenerId: null });
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [formData, setFormData] = useState(emptyOrderForm);
+  const [convertingLeadId, setConvertingLeadId] = useState(null);
+  const [exportPeriod, setExportPeriod] = useState('all');
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
@@ -68,20 +71,23 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resG, resO, resD, resS] = await Promise.all([
+      const [resG, resO, resD, resS, resW] = await Promise.all([
         fetch('/api/admin/gardeners'),
         fetch('/api/admin/orders'),
         fetch('/api/admin/dayoff'),
-        fetch('/api/admin/services')
+        fetch('/api/admin/services'),
+        fetch('/api/admin/webleads')
       ]);
       const dataG = await resG.json();
       const dataO = await resO.json();
       const dataD = await resD.json();
       const dataS = await resS.json();
+      const dataW = await resW.json();
       setGardeners(dataG.gardeners || []);
       setOrders(dataO.orders || []);
       setDayOffs(dataD.dayOffs || []);
       setServices(dataS.services || []);
+      setWebLeads(dataW.webLeads || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -96,13 +102,51 @@ export default function AdminDashboard() {
 
   const openNewOrderModal = (dateStr, gardenerId) => {
     setSelectedOrder(null);
+    setConvertingLeadId(null);
     setSelectedSlot({ date: dateStr, gardenerId });
     setFormData({ ...emptyOrderForm, date: dateStr, gardenerId, serviceId: '' });
     setShowOrderModal(true);
   };
 
+  const openLeadAsOrder = (lead) => {
+    setSelectedOrder(null);
+    setConvertingLeadId(lead.id);
+    const dateStr = lead.preferredDate ? lead.preferredDate.split('T')[0] : '';
+    setSelectedSlot({ date: dateStr, gardenerId: '' });
+    setFormData({
+      ...emptyOrderForm,
+      clientName: lead.name,
+      clientPhone: lead.phone,
+      address: lead.address || '',
+      description: lead.comment || '',
+      date: dateStr,
+      serviceId: lead.serviceId || ''
+    });
+    setShowOrderModal(true);
+  };
+
+  const handleMarkLeadProcessed = async (id) => {
+    await fetch('/api/admin/webleads', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: 'Обработана' })
+    });
+    fetchData();
+  };
+
+  const handleDeleteLead = async (id) => {
+    if (!confirm('Удалить эту заявку?')) return;
+    await fetch('/api/admin/webleads', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    fetchData();
+  };
+
   const openEditOrderModal = (order) => {
     setSelectedOrder(order);
+    setConvertingLeadId(null);
     setFormData({
       clientName: order.clientName,
       clientPhone: order.clientPhone,
@@ -136,6 +180,14 @@ export default function AdminDashboard() {
     });
 
     if (res.ok) {
+      if (convertingLeadId) {
+        await fetch('/api/admin/webleads', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: convertingLeadId, status: 'Обработана' })
+        });
+        setConvertingLeadId(null);
+      }
       setShowOrderModal(false);
       fetchData();
     } else {
@@ -331,6 +383,20 @@ export default function AdminDashboard() {
     searchResults = searchResults.slice(0, 15);
   }
 
+  const getExportUrl = (period) => {
+    if (period === 'all') return '/api/admin/export';
+    const now = new Date();
+    let start;
+    if (period === 'year') {
+      start = new Date(now.getFullYear(), 0, 1);
+    } else {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    const startStr = start.toISOString().split('T')[0];
+    const endStr = now.toISOString().split('T')[0];
+    return `/api/admin/export?start=${startStr}&end=${endStr}`;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Шапка */}
@@ -339,8 +405,17 @@ export default function AdminDashboard() {
           🌲 Анемон Агро — Панель Диспетчера
         </h1>
         <div className="flex items-center gap-2">
+          <select
+            value={exportPeriod}
+            onChange={e => setExportPeriod(e.target.value)}
+            className="bg-emerald-700 text-white text-sm rounded-lg px-2 py-2 border-none"
+          >
+            <option value="all">За всё время</option>
+            <option value="year">Этот год</option>
+            <option value="month">Этот месяц</option>
+          </select>
           <a
-            href="/api/admin/export"
+            href={getExportUrl(exportPeriod)}
             className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm"
           >
             📊 Экспорт в Excel
@@ -370,6 +445,17 @@ export default function AdminDashboard() {
           className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           🌿 Услуги
+        </button>
+        <button
+          onClick={() => setActiveTab('webleads')}
+          className={`px-4 py-2 rounded-lg font-medium relative ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          🌐 Заявки с сайта
+          {webLeads.filter(l => l.status === 'Новая').length > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {webLeads.filter(l => l.status === 'Новая').length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -768,6 +854,62 @@ export default function AdminDashboard() {
                   </button>
                 </form>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'webleads' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <h3 className="text-lg font-bold text-slate-700 mb-4">Заявки с сайта ({webLeads.length})</h3>
+              {webLeads.length === 0 ? (
+                <p className="text-sm text-slate-400 py-3">Пока нет заявок с виджета онлайн-записи.</p>
+              ) : (
+                <div className="space-y-3">
+                  {webLeads.map(lead => (
+                    <div key={lead.id} className={`p-4 rounded-lg border ${lead.status === 'Новая' ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-800">{lead.name}</span>
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${lead.status === 'Новая' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                              {lead.status}
+                            </span>
+                          </div>
+                          <div className="text-sm text-slate-600 mt-1">
+                            📞 {lead.phone}
+                            {lead.address && <> · 📍 {lead.address}</>}
+                          </div>
+                          {lead.serviceName && <div className="text-xs text-emerald-700 mt-1">🌿 {lead.serviceName}</div>}
+                          {lead.preferredDate && <div className="text-xs text-slate-500 mt-1">Желаемая дата: {lead.preferredDate.split('T')[0]}</div>}
+                          {lead.comment && <div className="text-xs text-slate-500 mt-1 bg-white p-2 rounded border border-slate-100">{lead.comment}</div>}
+                          <div className="text-[11px] text-slate-400 mt-1">{new Date(lead.createdAt).toLocaleString('ru-RU')}</div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => openLeadAsOrder(lead)}
+                            className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
+                          >
+                            Назначить
+                          </button>
+                          {lead.status === 'Новая' && (
+                            <button
+                              onClick={() => handleMarkLeadProcessed(lead.id)}
+                              className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg"
+                            >
+                              Отметить обработанной
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteLead(lead.id)}
+                            className="text-xs text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg"
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </main>
