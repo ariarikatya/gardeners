@@ -73,3 +73,15 @@ model DayOff {
 
   @@unique([date, gardenerId]) // Выходной либо есть, либо нет — на один день одна отметка
 }
+
+model WebLead {
+  id             String    @id @default(uuid())
+  name           String
+  phone          String
+  address        String?
+  comment        String?
+  serviceId      String?
+  preferredDate  DateTime? // Дата, которую выбрал клиент в виджете
+  status         String    @default("Новая") // "Новая" | "Обработана"
+  createdAt      DateTime  @default(now())
+}
