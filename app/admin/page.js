@@ -100,6 +100,24 @@ export default function AdminDashboard() {
     router.push('/login');
   };
 
+  const [syncing, setSyncing] = useState(false);
+  const handleSyncSheets = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/admin/sync-sheets', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Синхронизировано с Google Таблицами: ${data.count} заказов`);
+      } else {
+        alert(data.error);
+      }
+    } catch (e) {
+      alert('Не удалось синхронизировать');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const openNewOrderModal = (dateStr, gardenerId) => {
     setSelectedOrder(null);
     setConvertingLeadId(null);
@@ -420,6 +438,13 @@ export default function AdminDashboard() {
           >
             📊 Экспорт в Excel
           </a>
+          <button
+            onClick={handleSyncSheets}
+            disabled={syncing}
+            className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+          >
+            {syncing ? 'Синхронизирую...' : '🔄 Google Таблицы'}
+          </button>
           <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm">
             Выйти
           </button>
