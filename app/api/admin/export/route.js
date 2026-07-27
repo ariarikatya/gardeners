@@ -15,7 +15,19 @@ async function checkAdmin(req) {
 export async function GET(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const { searchParams } = new URL(req.url);
+  const start = searchParams.get('start');
+  const end = searchParams.get('end');
+
+  const where = {};
+  if (start || end) {
+    where.date = {};
+    if (start) where.date.gte = new Date(start);
+    if (end) where.date.lte = new Date(end);
+  }
+
   const orders = await prisma.order.findMany({
+    where,
     include: { gardener: true, service: true },
     orderBy: { date: 'asc' },
   });
