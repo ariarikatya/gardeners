@@ -57,20 +57,25 @@ export async function PUT(req) {
   const cleanPhone = phone.replace(/\D/g, '');
 
   try {
+    // Некоторые садовники (например, импортированные из старой таблицы) созданы
+    // без привязанного логина — nested "update" в Prisma падает, если строки нет.
+    // Если логина нет, создаём его прямо сейчас, вместо того чтобы падать.
+    const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'Садовник не найден' }, { status: 404 });
+    }
+
     const gardener = await prisma.gardener.update({
       where: { id },
       data: {
         name,
         phone: cleanPhone,
         services: { set: (serviceIds || []).map((sid) => ({ id: sid })) },
-        user: {
-          update: {
-            name,
-            phone: cleanPhone,
-          },
-        },
+        user: existing.user
+          ? { update: { name, phone: cleanPhone } }
+          : { create: { name, phone: cleanPhone, role: 'GARDENER' } },
       },
-      include: { services: true },
+      include: { services: true, user: true },
     });
 
     return NextResponse.json({ gardener });
