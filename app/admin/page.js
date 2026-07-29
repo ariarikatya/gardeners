@@ -199,10 +199,15 @@ export default function AdminDashboard() {
 
     if (res.ok) {
       if (convertingLeadId) {
+        const assignedGardener = gardeners.find(g => g.id === formData.gardenerId);
         await fetch('/api/admin/webleads', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: convertingLeadId, status: 'Обработана' })
+          body: JSON.stringify({
+            id: convertingLeadId,
+            status: 'Обработана',
+            assignedTo: assignedGardener ? assignedGardener.name : null
+          })
         });
         setConvertingLeadId(null);
       }
@@ -368,9 +373,9 @@ export default function AdminDashboard() {
 
   const visibleDates = dates.filter(d => selectedWeekdays.includes(d.getDay()));
 
-  // Поиск ближайшего подходящего окна: сначала полностью свободные дни,
-  // затем дни с одним активным заказом ("можно вклинить"), отсортировано по дате
-  let searchResults = [];
+  // Поиск ближайшего подходящего окна: группируем по дате, чтобы при большом
+  // количестве садовников список не превращался в десятки строк на одну дату
+  let searchGroups = [];
   if (showQuickSearch) {
     let candidateGardeners = searchGardenerId === 'all' ? gardeners : gardeners.filter(g => g.id === searchGardenerId);
     if (searchServiceId !== 'all') {
@@ -379,6 +384,8 @@ export default function AdminDashboard() {
     for (const date of searchDates) {
       if (!searchWeekdays.includes(date.getDay())) continue;
       const dateStr = date.toISOString().split('T')[0];
+      const slots = [];
+
       for (const g of candidateGardeners) {
         const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
         if (dayOff) continue;
@@ -386,19 +393,19 @@ export default function AdminDashboard() {
         const dayOrdersActive = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status === 'Новый заказ');
 
         if (dayOrdersActive.length === 0) {
-          searchResults.push({ date: dateStr, dayLabel: WEEKDAY_LABELS[date.getDay()], gardener: g, type: 'free' });
+          slots.push({ gardener: g, type: 'free' });
         } else if (dayOrdersActive.length === 1) {
-          searchResults.push({ date: dateStr, dayLabel: WEEKDAY_LABELS[date.getDay()], gardener: g, type: 'partial', existingOrder: dayOrdersActive[0] });
+          slots.push({ gardener: g, type: 'partial', existingOrder: dayOrdersActive[0] });
         }
         // 2 и более активных заказов — день считаем занятым, не предлагаем
       }
+
+      if (slots.length > 0) {
+        slots.sort((a, b) => (a.type === b.type ? 0 : a.type === 'free' ? -1 : 1));
+        searchGroups.push({ date: dateStr, dayLabel: WEEKDAY_LABELS[date.getDay()], slots });
+      }
+      if (searchGroups.length >= 10) break;
     }
-    searchResults.sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-      if (a.type !== b.type) return a.type === 'free' ? -1 : 1;
-      return 0;
-    });
-    searchResults = searchResults.slice(0, 15);
   }
 
   const getExportUrl = (period) => {
@@ -418,15 +425,15 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Шапка */}
-      <header className="bg-emerald-900 text-white py-4 px-6 flex justify-between items-center shadow-md">
-        <h1 className="text-xl font-bold flex items-center gap-2">
-          🌲 Анемон Агро — Панель Диспетчера
+      <header className="bg-emerald-900 text-white py-3 px-3 sm:px-6 flex flex-wrap gap-2 justify-between items-center shadow-md">
+        <h1 className="text-base sm:text-xl font-bold flex items-center gap-2">
+          🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
           <select
             value={exportPeriod}
             onChange={e => setExportPeriod(e.target.value)}
-            className="bg-emerald-700 text-white text-sm rounded-lg px-2 py-2 border-none"
+            className="bg-emerald-700 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 sm:py-2 border-none"
           >
             <option value="all">За всё время</option>
             <option value="year">Этот год</option>
@@ -434,48 +441,48 @@ export default function AdminDashboard() {
           </select>
           <a
             href={getExportUrl(exportPeriod)}
-            className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm"
+            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap"
           >
-            📊 Экспорт в Excel
+            📊 <span className="hidden sm:inline">Экспорт в </span>Excel
           </a>
           <button
             onClick={handleSyncSheets}
             disabled={syncing}
-            className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
           >
-            {syncing ? 'Синхронизирую...' : '🔄 Google Таблицы'}
+            {syncing ? '...' : <>🔄 <span className="hidden sm:inline">Google </span>Таблицы</>}
           </button>
-          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm">
+          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
             Выйти
           </button>
         </div>
       </header>
 
       {/* Меню вкладок */}
-      <div className="bg-white border-b border-slate-200 flex px-6 py-2 gap-4">
+      <div className="bg-white border-b border-slate-200 flex overflow-x-auto px-3 sm:px-6 py-2 gap-2 sm:gap-4 text-sm sm:text-base">
         <button
           onClick={() => setActiveTab('calendar')}
-          className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
-          📅 Календарь загрузки
+          📅 Календарь
         </button>
         <button
           onClick={() => setActiveTab('gardeners')}
-          className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           🧑‍🌾 Садовники
         </button>
         <button
           onClick={() => setActiveTab('services')}
-          className={`px-4 py-2 rounded-lg font-medium ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
           🌿 Услуги
         </button>
         <button
           onClick={() => setActiveTab('webleads')}
-          className={`px-4 py-2 rounded-lg font-medium relative ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
         >
-          🌐 Заявки с сайта
+          🌐 Заявки
           {webLeads.filter(l => l.status === 'Новая').length > 0 && (
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
               {webLeads.filter(l => l.status === 'Новая').length}
@@ -487,7 +494,7 @@ export default function AdminDashboard() {
       {loading ? (
         <div className="p-8 text-center text-slate-500">Загрузка данных...</div>
       ) : (
-        <main className="p-6">
+        <main className="p-3 sm:p-6">
           {activeTab === 'calendar' && (
             <>
               {/* Поиск ближайшего окна под запрос клиента */}
@@ -546,35 +553,34 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    {searchResults.length === 0 ? (
+                    {searchGroups.length === 0 ? (
                       <p className="text-sm text-slate-400">Подходящих окон не нашлось в ближайшие {SEARCH_HORIZON_DAYS} дней.</p>
                     ) : (
-                      <div className="space-y-1">
-                        {searchResults.map((r, i) => (
-                          <div key={i} className="flex flex-wrap items-center justify-between gap-3 p-2 rounded-lg hover:bg-slate-50 border border-slate-100">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <span className={`text-xs font-semibold px-2 py-1 rounded ${r.type === 'free' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {r.type === 'free' ? 'Свободно' : 'Можно вклинить'}
-                              </span>
-                              <span className="text-sm font-medium text-slate-700">{r.date} ({r.dayLabel})</span>
-                              <span className="text-sm text-slate-500">{r.gardener.name}</span>
-                              {r.type === 'partial' && r.existingOrder && (
-                                <span className="text-xs text-slate-400 max-w-xs truncate">
-                                  уже стоит: {r.existingOrder.clientName} — {r.existingOrder.description}
-                                </span>
-                              )}
+                      <div className="space-y-2">
+                        {searchGroups.map((group) => (
+                          <div key={group.date} className="p-2.5 rounded-lg border border-slate-100">
+                            <div className="text-sm font-semibold text-slate-700 mb-1.5">{group.date} ({group.dayLabel})</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {group.slots.map((s) => (
+                                <button
+                                  key={s.gardener.id}
+                                  type="button"
+                                  onClick={() => openNewOrderModal(group.date, s.gardener.id)}
+                                  title={s.type === 'partial' && s.existingOrder ? `Уже стоит: ${s.existingOrder.clientName} — ${s.existingOrder.description}` : ''}
+                                  className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
+                                    s.type === 'free'
+                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                      : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                  }`}
+                                >
+                                  {s.gardener.name} {s.type === 'partial' ? '(можно вклинить)' : ''}
+                                </button>
+                              ))}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => openNewOrderModal(r.date, r.gardener.id)}
-                              className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
-                            >
-                              Записать сюда
-                            </button>
                           </div>
                         ))}
                         <p className="text-xs text-slate-400 pt-2">
-                          Для «можно вклинить» решение — за вами: посмотрите, что уже стоит в этот день, и прикиньте, войдёт ли новый объём работы.
+                          Жёлтым — уже есть один заказ в этот день, наведите на кнопку, чтобы посмотреть что именно, и оцените, войдёт ли новый.
                         </p>
                       </div>
                     )}
@@ -906,6 +912,7 @@ export default function AdminDashboard() {
                           {lead.serviceName && <div className="text-xs text-emerald-700 mt-1">🌿 {lead.serviceName}</div>}
                           {lead.preferredDate && <div className="text-xs text-slate-500 mt-1">Желаемая дата: {lead.preferredDate.split('T')[0]}</div>}
                           {lead.comment && <div className="text-xs text-slate-500 mt-1 bg-white p-2 rounded border border-slate-100">{lead.comment}</div>}
+                          {lead.assignedTo && <div className="text-xs font-semibold text-emerald-800 mt-1">👤 Назначен садовник: {lead.assignedTo}</div>}
                           <div className="text-[11px] text-slate-400 mt-1">{new Date(lead.createdAt).toLocaleString('ru-RU')}</div>
                         </div>
                         <div className="flex gap-2">
@@ -913,7 +920,7 @@ export default function AdminDashboard() {
                             onClick={() => openLeadAsOrder(lead)}
                             className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
                           >
-                            Назначить
+                            {lead.assignedTo ? 'Переназначить' : 'Назначить'}
                           </button>
                           {lead.status === 'Новая' && (
                             <button
