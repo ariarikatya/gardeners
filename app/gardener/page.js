@@ -253,10 +253,15 @@ export default function GardenerDashboard() {
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <header className="bg-emerald-800 text-white py-4 px-4 flex justify-between items-center shadow">
         <h1 className="text-lg font-bold flex items-center gap-1">🌿 Мой Кабинет</h1>
-        <button onClick={handleLogout} className="text-xs bg-emerald-700 px-3 py-1.5 rounded-lg">Выйти</button>
+        <div className="flex items-center gap-2">
+          <a href="tel:88452650206" className="text-xs bg-emerald-700 hover:bg-emerald-600 px-3 py-1.5 rounded-lg flex items-center gap-1">
+            📞 Диспетчер
+          </a>
+          <button onClick={handleLogout} className="text-xs bg-emerald-700 px-3 py-1.5 rounded-lg">Выйти</button>
+        </div>
       </header>
 
-      <main className="p-4 max-w-md mx-auto">
+      <main className="p-4 max-w-md md:max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
           <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
@@ -280,12 +285,12 @@ export default function GardenerDashboard() {
         ) : orders.length === 0 ? (
           <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
         ) : viewMode === 'list' ? (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {orders.map(renderOrderCard)}
           </div>
         ) : (
           <div>
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 mb-4">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 mb-4 max-w-sm mx-auto">
               <div className="flex items-center justify-between mb-3">
                 <button onClick={goToPrevMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">←</button>
                 <div className="font-semibold text-slate-700 text-sm">{MONTH_LABELS[month]} {year}</div>
@@ -319,9 +324,9 @@ export default function GardenerDashboard() {
             </div>
 
             {selectedDateStr && (
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(ordersByDate[selectedDateStr] || []).length === 0 ? (
-                  <p className="text-sm text-slate-400 text-center">В этот день заказов нет</p>
+                  <p className="text-sm text-slate-400 text-center col-span-full">В этот день заказов нет</p>
                 ) : (
                   ordersByDate[selectedDateStr].map(renderOrderCard)
                 )}
