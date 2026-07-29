@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
+import { forwardToAmo } from '@/lib/amo';
 
 const prisma = new PrismaClient();
 
@@ -49,6 +50,23 @@ export async function POST(req) {
         serviceId: serviceId || null,
       },
     });
+
+    // Каждый новый заказ (неважно, откуда — с виджета сайта или заведён диспетчером
+    // вручную по звонку) улетает в amoCRM. Дожидаемся ответа, чтобы запрос не оборвался.
+    let serviceName = '';
+    if (serviceId) {
+      const service = await prisma.service.findUnique({ where: { id: serviceId } });
+      serviceName = service ? service.name : '';
+    }
+    const noteParts = [];
+    if (description) noteParts.push(description);
+    if (address) noteParts.push('Адрес: ' + address);
+    if (serviceName) noteParts.push('Услуга: ' + serviceName);
+    noteParts.push('Дата визита: ' + orderDate.toISOString().split('T')[0]);
+    noteParts.push('Заказ из панели диспетчера');
+
+    await forwardToAmo({ name: clientName, phone: clientPhone, note: noteParts.join(' | ') });
+
     return NextResponse.json({ order });
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось создать заказ' }, { status: 400 });
