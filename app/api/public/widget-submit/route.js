@@ -16,13 +16,15 @@ export async function OPTIONS() {
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { name, phone, address, comment, serviceId, preferredDate, serviceName } = body;
+    const { name, phone, address, comment, serviceId, preferredDate } = body;
 
     if (!phone) {
       return NextResponse.json({ error: 'Укажите телефон' }, { status: 400, headers: CORS_HEADERS });
     }
 
-    // 1. Сохраняем заявку — она появится во вкладке «Заявки с сайта» у диспетчера
+    // Заявка попадает во вкладку «Заявки с сайта» у диспетчера.
+    // В amoCRM она уйдёт не отсюда, а в момент, когда диспетчер назначит по ней
+    // реальный заказ (так же, как и для заказов, заведённых вручную по звонку).
     const lead = await prisma.webLead.create({
       data: {
         name: name ? String(name).trim() : 'Не указано',
@@ -33,32 +35,6 @@ export async function POST(req) {
         preferredDate: preferredDate ? new Date(preferredDate) : null,
       },
     });
-
-    // 2. Параллельно отправляем в amoCRM (тем же способом, что и остальные формы сайта)
-    const formId = process.env.AMO_FORM_ID;
-    const formHash = process.env.AMO_FORM_HASH;
-    if (formId && formHash) {
-      const noteParts = [];
-      if (comment) noteParts.push(comment);
-      if (address) noteParts.push('Адрес: ' + address);
-      if (serviceName) noteParts.push('Услуга: ' + serviceName);
-      if (preferredDate) noteParts.push('Желаемая дата: ' + preferredDate);
-      noteParts.push('Заявка с онлайн-записи (диспетчерская)');
-
-      const amoFormData = new URLSearchParams();
-      amoFormData.append('form_id', formId);
-      amoFormData.append('hash', formHash);
-      amoFormData.append('fields[name_1]', name ? String(name).trim() : 'Не указано');
-      amoFormData.append('fields[phone_1]', String(phone).trim());
-      amoFormData.append('fields[note_2]', noteParts.join(' | '));
-
-      // Не блокируем ответ клиенту, если amoCRM не ответит быстро
-      fetch('https://forms.amocrm.ru/queue/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: amoFormData.toString(),
-      }).catch((e) => console.error('amo forward error:', e));
-    }
 
     return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
   } catch (e) {
