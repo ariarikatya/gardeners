@@ -18,7 +18,6 @@ export async function GET(req) {
     orderBy: { createdAt: 'desc' },
   });
 
-  // Подтягиваем названия услуг отдельно (у WebLead нет прямой связи в Prisma, только serviceId)
   const services = await prisma.service.findMany();
   const withServiceNames = webLeads.map((l) => ({
     ...l,
@@ -31,8 +30,12 @@ export async function GET(req) {
 export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, status } = await req.json();
-  const lead = await prisma.webLead.update({ where: { id }, data: { status } });
+  const { id, status, assignedTo } = await req.json();
+  const data = {};
+  if (status !== undefined) data.status = status;
+  if (assignedTo !== undefined) data.assignedTo = assignedTo;
+
+  const lead = await prisma.webLead.update({ where: { id }, data });
   return NextResponse.json({ lead });
 }
 
