@@ -30,10 +30,11 @@ export async function GET(req) {
 export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, status, assignedTo } = await req.json();
+  const { id, status, assignedTo, createdOrderId } = await req.json();
   const data = {};
   if (status !== undefined) data.status = status;
   if (assignedTo !== undefined) data.assignedTo = assignedTo;
+  if (createdOrderId !== undefined) data.createdOrderId = createdOrderId;
 
   const lead = await prisma.webLead.update({ where: { id }, data });
   return NextResponse.json({ lead });
