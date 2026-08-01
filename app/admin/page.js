@@ -127,8 +127,35 @@ export default function AdminDashboard() {
   };
 
   const openLeadAsOrder = (lead) => {
-    setSelectedOrder(null);
     setConvertingLeadId(lead.id);
+
+    if (lead.createdOrderId) {
+      const existingOrder = orders.find(o => o.id === lead.createdOrderId);
+      if (existingOrder) {
+        // Уже назначали раньше — редактируем ТОТ ЖЕ заказ, а не создаём новый
+        setSelectedOrder(existingOrder);
+        setFormData({
+          clientName: existingOrder.clientName,
+          clientPhone: existingOrder.clientPhone,
+          address: existingOrder.address,
+          description: existingOrder.description,
+          priceContract: existingOrder.priceContract,
+          priceFact: existingOrder.priceFact,
+          employeeSalary: existingOrder.employeeSalary,
+          companyShare: existingOrder.companyShare,
+          status: existingOrder.status,
+          comment: existingOrder.comment || '',
+          date: existingOrder.date.split('T')[0],
+          gardenerId: existingOrder.gardenerId,
+          serviceId: existingOrder.serviceId || ''
+        });
+        setShowOrderModal(true);
+        return;
+      }
+    }
+
+    // Первое назначение — создаём новый заказ
+    setSelectedOrder(null);
     const dateStr = lead.preferredDate ? lead.preferredDate.split('T')[0] : '';
     setSelectedSlot({ date: dateStr, gardenerId: '' });
     setFormData({
@@ -164,7 +191,6 @@ export default function AdminDashboard() {
 
   const openEditOrderModal = (order) => {
     setSelectedOrder(order);
-    setConvertingLeadId(null);
     setFormData({
       clientName: order.clientName,
       clientPhone: order.clientPhone,
@@ -198,16 +224,22 @@ export default function AdminDashboard() {
     });
 
     if (res.ok) {
+      const data = await res.json();
       if (convertingLeadId) {
         const assignedGardener = gardeners.find(g => g.id === formData.gardenerId);
+        const leadUpdate = {
+          id: convertingLeadId,
+          status: 'Обработана',
+          assignedTo: assignedGardener ? assignedGardener.name : null
+        };
+        if (!selectedOrder && data.order) {
+          // Первое назначение — запоминаем, какой заказ создан по этой заявке
+          leadUpdate.createdOrderId = data.order.id;
+        }
         await fetch('/api/admin/webleads', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: convertingLeadId,
-            status: 'Обработана',
-            assignedTo: assignedGardener ? assignedGardener.name : null
-          })
+          body: JSON.stringify(leadUpdate)
         });
         setConvertingLeadId(null);
       }
@@ -650,7 +682,11 @@ export default function AdminDashboard() {
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-50 border border-dashed border-emerald-300 inline-block"></span>Свободно</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-500 inline-block"></span>Можно вклинить</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block"></span>Занят</span>
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-300 inline-block"></span>Выходной</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span>Выполнен</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500 inline-block"></span>Перенос</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-rose-500 inline-block"></span>Отказ</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-300 inline-block"></span>Отменён</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-300 border border-slate-400 inline-block"></span>Выходной</span>
                 </div>
               </div>
 
@@ -698,9 +734,9 @@ export default function AdminDashboard() {
                                     {dayOrders.map(order => (
                                       <div
                                         key={order.id}
-                                        onClick={() => openEditOrderModal(order)}
+                                        onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
                                         className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
-                                          order.status === 'Выполнен' ? 'bg-slate-400 hover:bg-slate-500' :
+                                          order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
                                           order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
                                           order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
                                           order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
