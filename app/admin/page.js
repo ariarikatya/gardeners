@@ -19,6 +19,7 @@ export default function AdminDashboard() {
   const [dayOffs, setDayOffs] = useState([]);
   const [services, setServices] = useState([]);
   const [webLeads, setWebLeads] = useState([]);
+  const [showAllLeads, setShowAllLeads] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Состояния для форм заказа
@@ -926,12 +927,28 @@ export default function AdminDashboard() {
 
           {activeTab === 'webleads' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-              <h3 className="text-lg font-bold text-slate-700 mb-4">Заявки с сайта ({webLeads.length})</h3>
-              {webLeads.length === 0 ? (
-                <p className="text-sm text-slate-400 py-3">Пока нет заявок с виджета онлайн-записи.</p>
-              ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-lg font-bold text-slate-700">Заявки с сайта</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAllLeads(v => !v)}
+                  className="text-xs text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200"
+                >
+                  {showAllLeads ? 'Скрыть старые обработанные' : 'Показать все, включая старые обработанные'}
+                </button>
+              </div>
+              {(() => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const visibleLeads = showAllLeads
+                  ? webLeads
+                  : webLeads.filter(l => l.status === 'Новая' || l.createdAt.split('T')[0] === todayStr);
+                return visibleLeads.length === 0 ? (
+                  <p className="text-sm text-slate-400 py-3">
+                    {webLeads.length === 0 ? 'Пока нет заявок с виджета онлайн-записи.' : 'Новых заявок нет — старые обработанные скрыты.'}
+                  </p>
+                ) : (
                 <div className="space-y-3">
-                  {webLeads.map(lead => (
+                  {visibleLeads.map(lead => (
                     <div key={lead.id} className={`p-4 rounded-lg border ${lead.status === 'Новая' ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50'}`}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -977,7 +994,8 @@ export default function AdminDashboard() {
                     </div>
                   ))}
                 </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </main>
