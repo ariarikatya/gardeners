@@ -324,13 +324,17 @@ export default function GardenerDashboard() {
             </div>
 
             {selectedDateStr && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(ordersByDate[selectedDateStr] || []).length === 0 ? (
-                  <p className="text-sm text-slate-400 text-center col-span-full">В этот день заказов нет</p>
-                ) : (
-                  ordersByDate[selectedDateStr].map(renderOrderCard)
-                )}
-              </div>
+              (ordersByDate[selectedDateStr] || []).length === 0 ? (
+                <p className="text-sm text-slate-400 text-center">В этот день заказов нет</p>
+              ) : ordersByDate[selectedDateStr].length === 1 ? (
+                <div className="flex justify-center">
+                  <div className="w-full md:max-w-md">{renderOrderCard(ordersByDate[selectedDateStr][0])}</div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {ordersByDate[selectedDateStr].map(renderOrderCard)}
+                </div>
+              )
             )}
           </div>
         )}
