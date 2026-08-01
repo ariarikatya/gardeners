@@ -84,5 +84,6 @@ model WebLead {
   preferredDate  DateTime? // Дата, которую выбрал клиент в виджете
   status         String    @default("Новая") // "Новая" | "Обработана"
   assignedTo     String?   // Имя садовника, которому назначили заказ
+  createdOrderId String?   // ID реального заказа, созданного по этой заявке — чтобы "Переназначить" редактировал его, а не плодил дубли
   createdAt      DateTime  @default(now())
 }
