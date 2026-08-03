@@ -216,7 +216,7 @@ export default function AdminDashboard() {
     const method = selectedOrder ? 'PUT' : 'POST';
     const payload = selectedOrder
       ? { id: selectedOrder.id, ...formData }
-      : { ...formData };
+      : { ...formData, fromLead: !!convertingLeadId };
 
     const res = await fetch(endpoint, {
       method,
