@@ -5,6 +5,8 @@ import { forwardToAmo } from '@/lib/amo';
 
 const prisma = new PrismaClient();
 
+const ADMIN_PANEL_URL = 'https://gardenersorders.vercel.app/admin';
+
 async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
   if (!token) return false;
@@ -25,7 +27,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, serviceId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status } = body;
+  const { date, gardenerId, serviceId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -51,21 +53,26 @@ export async function POST(req) {
       },
     });
 
-    // Каждый новый заказ (неважно, откуда — с виджета сайта или заведён диспетчером
-    // вручную по звонку) улетает в amoCRM. Дожидаемся ответа, чтобы запрос не оборвался.
-    let serviceName = '';
-    if (serviceId) {
-      const service = await prisma.service.findUnique({ where: { id: serviceId } });
-      serviceName = service ? service.name : '';
-    }
-    const noteParts = [];
-    if (description) noteParts.push(description);
-    if (address) noteParts.push('Адрес: ' + address);
-    if (serviceName) noteParts.push('Услуга: ' + serviceName);
-    noteParts.push('Дата визита: ' + orderDate.toISOString().split('T')[0]);
-    noteParts.push('Заказ из панели диспетчера');
+    // В amoCRM шлём только если это НЕ заказ, созданный из заявки с сайта —
+    // такие заявки уже улетели в amoCRM в момент, когда клиент их оставил.
+    // А вот заказ, который диспетчер завёл сам (например, по телефонному звонку),
+    // нигде раньше не фигурировал — его отправляем сейчас.
+    if (!fromLead) {
+      let serviceName = '';
+      if (serviceId) {
+        const service = await prisma.service.findUnique({ where: { id: serviceId } });
+        serviceName = service ? service.name : '';
+      }
+      const noteParts = [];
+      if (description) noteParts.push(description);
+      if (address) noteParts.push('Адрес: ' + address);
+      if (serviceName) noteParts.push('Услуга: ' + serviceName);
+      noteParts.push('Дата визита: ' + orderDate.toISOString().split('T')[0]);
+      noteParts.push('Заказ заведён диспетчером напрямую');
+      noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-    await forwardToAmo({ name: clientName, phone: clientPhone, note: noteParts.join(' | ') });
+      await forwardToAmo({ name: clientName, phone: clientPhone, note: noteParts.join(' | ') });
+    }
 
     return NextResponse.json({ order });
   } catch (e) {
@@ -86,6 +93,7 @@ export async function PUT(req) {
   }
 
   if (updateData.serviceId === '') updateData.serviceId = null;
+  delete updateData.fromLead;
 
   ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
     if (updateData[key] !== undefined) updateData[key] = parseFloat(updateData[key]) || 0;
