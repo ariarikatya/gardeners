@@ -816,7 +816,7 @@ export default function AdminDashboard() {
                             <span className="inline-flex items-center gap-2">
                               <span>{dateStr}</span>
                               <span>({dayLabel})</span>
-                              {holiday && <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Праздник</span>}
+                              {holiday && <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Выходной</span>}
                             </span>
                           </td>
                           {visibleGardeners.map(g => {

@@ -24,6 +24,12 @@ export default function LeaderDashboard() {
   const [data, setData] = useState({ totals: {}, gardeners: [] });
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
+  const [opsModalGardener, setOpsModalGardener] = useState(null);
+  const [opsList, setOpsList] = useState([]);
+  const [loadingOps, setLoadingOps] = useState(false);
+  const [ordersModalGardener, setOrdersModalGardener] = useState(null);
+  const [ordersList, setOrdersList] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
 
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
@@ -98,22 +104,26 @@ export default function LeaderDashboard() {
   };
 
   const saveGardenerSettings = async (gardener) => {
+    // Новая логика: если введены суммы премии/штрафа/списания — создать операции (начисления) для садовника
     setSavingId(gardener.id);
     try {
-      const res = await fetch('/api/leader', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: gardener.id,
-          bonusPercent: Number(gardener.bonusPercent || 0),
-          finePercent: Number(gardener.finePercent || 0),
-          writeoffPercent: Number(gardener.writeoffPercent || 0),
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Ошибка сохранения');
+      const opsToCreate = [];
+      if (Number(gardener.bonusAmount || 0) > 0) opsToCreate.push({ type: 'bonus', amount: Number(gardener.bonusAmount) });
+      if (Number(gardener.fineAmount || 0) > 0) opsToCreate.push({ type: 'fine', amount: Number(gardener.fineAmount) });
+      if (Number(gardener.writeoffAmount || 0) > 0) opsToCreate.push({ type: 'writeoff', amount: Number(gardener.writeoffAmount) });
+
+      for (const op of opsToCreate) {
+        const res = await fetch('/api/leader/operations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gardenerId: gardener.id, type: op.type, amount: op.amount })
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Ошибка создания операции');
+      }
+
       await fetchData();
-      alert('Параметры садавника сохранены');
+      alert('Операции добавлены');
     } catch (error) {
       alert(error.message);
     } finally {
@@ -126,6 +136,75 @@ export default function LeaderDashboard() {
       ...prev,
       gardeners: prev.gardeners.map((g) => g.id === id ? { ...g, [field]: value } : g),
     }));
+  };
+
+  const openOpsModal = async (gardenerId) => {
+    setOpsModalGardener(gardenerId);
+    setLoadingOps(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('gardenerId', gardenerId);
+      const res = await fetch(`/api/leader/operations?${params.toString()}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Ошибка');
+      setOpsList(json.operations || []);
+    } catch (err) {
+      alert(err.message || 'Ошибка загрузки операций');
+    } finally {
+      setLoadingOps(false);
+    }
+  };
+
+  const closeOpsModal = () => { setOpsModalGardener(null); setOpsList([]); };
+
+  const deleteOperation = async (id) => {
+    if (!confirm('Удалить операцию?')) return;
+    try {
+      const res = await fetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Ошибка удаления');
+      // обновим список
+      if (opsModalGardener) await openOpsModal(opsModalGardener);
+      await fetchData();
+    } catch (err) {
+      alert(err.message || 'Ошибка удаления');
+    }
+  };
+
+  const openOrdersModal = async (gardenerId) => {
+    setOrdersModalGardener(gardenerId);
+    setLoadingOrders(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('gardenerId', gardenerId);
+      const res = await fetch(`/api/leader/orders?${params.toString()}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Ошибка');
+      setOrdersList(json.orders || []);
+    } catch (err) {
+      alert(err.message || 'Ошибка загрузки заказов');
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); };
+
+  const toggleOrderPaid = async (orderId, paid) => {
+    try {
+      const res = await fetch('/api/leader/order-paid', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: orderId, paid: !!paid })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Ошибка');
+      // обновим список и данные
+      if (ordersModalGardener) await openOrdersModal(ordersModalGardener);
+      await fetchData();
+    } catch (err) {
+      alert(err.message || 'Ошибка изменения статуса выплаты');
+    }
   };
 
   return (
@@ -210,9 +289,9 @@ export default function LeaderDashboard() {
                       <th className="px-3 py-2 font-semibold">Заработано</th>
                       <th className="px-3 py-2 font-semibold">Долг фирме</th>
                       <th className="px-3 py-2 font-semibold">Будет начислено</th>
-                      <th className="px-3 py-2 font-semibold">Премия %</th>
-                      <th className="px-3 py-2 font-semibold">Штраф %</th>
-                      <th className="px-3 py-2 font-semibold">Списание %</th>
+                      <th className="px-3 py-2 font-semibold">Премия ₽</th>
+                      <th className="px-3 py-2 font-semibold">Штраф ₽</th>
+                      <th className="px-3 py-2 font-semibold">Списание ₽</th>
                       <th className="px-3 py-2 font-semibold">Действие</th>
                     </tr>
                   </thead>
@@ -231,40 +310,53 @@ export default function LeaderDashboard() {
                           <input
                             type="number"
                             min="0"
-                            step="0.1"
-                            value={g.bonusPercent}
-                            onChange={(e) => updateGardenerField(g.id, 'bonusPercent', e.target.value)}
-                            className="w-20 border border-slate-300 rounded-lg px-2 py-1.5"
+                            step="1"
+                            value={g.bonusAmount || ''}
+                            onChange={(e) => updateGardenerField(g.id, 'bonusAmount', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5"
+                            placeholder="0"
                           />
                         </td>
                         <td className="px-3 py-3">
                           <input
                             type="number"
                             min="0"
-                            step="0.1"
-                            value={g.finePercent}
-                            onChange={(e) => updateGardenerField(g.id, 'finePercent', e.target.value)}
-                            className="w-20 border border-slate-300 rounded-lg px-2 py-1.5"
+                            step="1"
+                            value={g.fineAmount || ''}
+                            onChange={(e) => updateGardenerField(g.id, 'fineAmount', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5"
+                            placeholder="0"
                           />
                         </td>
                         <td className="px-3 py-3">
                           <input
                             type="number"
                             min="0"
-                            step="0.1"
-                            value={g.writeoffPercent}
-                            onChange={(e) => updateGardenerField(g.id, 'writeoffPercent', e.target.value)}
-                            className="w-20 border border-slate-300 rounded-lg px-2 py-1.5"
+                            step="1"
+                            value={g.writeoffAmount || ''}
+                            onChange={(e) => updateGardenerField(g.id, 'writeoffAmount', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5"
+                            placeholder="0"
                           />
                         </td>
                         <td className="px-3 py-3">
-                          <button
-                            onClick={() => saveGardenerSettings(g)}
-                            disabled={savingId === g.id}
-                            className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-medium disabled:bg-emerald-400"
-                          >
-                            {savingId === g.id ? 'Сохраняю...' : 'Сохранить'}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => saveGardenerSettings(g)}
+                              disabled={savingId === g.id}
+                              className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-medium disabled:bg-emerald-400"
+                            >
+                              {savingId === g.id ? 'Сохраняю...' : 'Сохранить'}
+                            </button>
+                            <button
+                              onClick={() => openOpsModal(g.id)}
+                              className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-xs border border-slate-200 hover:bg-slate-200"
+                            >Операции</button>
+                            <button
+                              onClick={() => openOrdersModal(g.id)}
+                              className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-xs border border-slate-200 hover:bg-slate-200"
+                            >Заказы</button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -273,6 +365,67 @@ export default function LeaderDashboard() {
               </div>
             </div>
           </>
+        )}
+
+        {opsModalGardener && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-4 max-w-lg w-full">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-bold">Операции садовника</h3>
+                <button onClick={closeOpsModal} className="text-slate-500">Закрыть</button>
+              </div>
+              {loadingOps ? (
+                <div className="text-center text-slate-500 py-4">Загрузка...</div>
+              ) : opsList.length === 0 ? (
+                <div className="text-center text-slate-500 py-4">Операций нет</div>
+              ) : (
+                <ul className="space-y-2 max-h-64 overflow-auto">
+                  {opsList.map(op => (
+                    <li key={op.id} className="flex justify-between items-center border p-2 rounded">
+                      <div>
+                        <div className="text-sm font-medium">{op.type} — {formatMoney(op.amount)}</div>
+                        {op.description && <div className="text-xs text-slate-500">{op.description}</div>}
+                        <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
+                      </div>
+                      <button onClick={() => deleteOperation(op.id)} className="text-rose-600 text-xs">Удалить</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {ordersModalGardener && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-4 max-w-2xl w-full">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-bold">Заказы садовника</h3>
+                <button onClick={closeOrdersModal} className="text-slate-500">Закрыть</button>
+              </div>
+              {loadingOrders ? (
+                <div className="text-center text-slate-500 py-4">Загрузка...</div>
+              ) : ordersList.length === 0 ? (
+                <div className="text-center text-slate-500 py-4">Заказов нет</div>
+              ) : (
+                <ul className="space-y-2 max-h-72 overflow-auto">
+                  {ordersList.map(o => (
+                    <li key={o.id} className="flex justify-between items-center border p-2 rounded">
+                      <div>
+                        <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
+                        <div className="text-xs text-slate-500">Сумма: {o.priceFact || o.priceContract} ₽</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm">
+                          <input type="checkbox" checked={!!o.paid} onChange={(e) => toggleOrderPaid(o.id, e.target.checked)} /> <span className="text-xs">Выплачено</span>
+                        </label>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         )}
       </main>
     </div>

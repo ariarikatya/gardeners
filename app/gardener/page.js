@@ -45,6 +45,7 @@ function compressImage(file, maxWidth = 1600, quality = 0.8) {
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
+  const [operations, setOperations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
   const [walletRange, setWalletRange] = useState('month');
@@ -53,6 +54,7 @@ export default function GardenerDashboard() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [selectedDateStr, setSelectedDateStr] = useState(null);
+  const [showPastOrders, setShowPastOrders] = useState(false);
 
   // Модалка действия по заказу
   const [actionOrder, setActionOrder] = useState(null);
@@ -72,9 +74,14 @@ export default function GardenerDashboard() {
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch('/api/gardener/orders');
-      const data = await res.json();
+      const [resOrders, resOps] = await Promise.all([
+        fetch('/api/gardener/orders'),
+        fetch('/api/gardener/operations')
+      ]);
+      const data = await resOrders.json();
+      const ops = await resOps.json();
       setOrders(data.orders || []);
+      setOperations(ops.operations || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -192,27 +199,38 @@ export default function GardenerDashboard() {
     const { start, end } = getWalletRange(walletRange);
     let earned = 0;
     let companyDebt = 0;
-    let pending = 0;
-    let payout = 0;
+    let paidEarned = 0;
 
+    // Учитываем только завершённые заказы (Выполнен). Незавершённые — не включаем в расчёты.
     orders.forEach((order) => {
       const orderDate = new Date(order.date);
       if (orderDate < start || orderDate > end) return;
+      if (order.status !== 'Выполнен') return;
 
-      const gross = Number(order.status === 'Выполнен' ? (order.priceFact || 0) : (order.priceContract || order.priceFact || 0));
+      const gross = Number(order.priceFact || 0);
       const companyShare = Number(order.companyShare || 0);
-      const net = Math.max(gross - companyShare, 0);
 
-      if (order.status === 'Выполнен') {
-        earned += Number(order.priceFact || 0);
-        companyDebt += companyShare;
-        payout += net;
-      } else if (!['Отменен', 'Отказ'].includes(order.status)) {
-        pending += net;
-      }
+      earned += gross;
+      companyDebt += companyShare;
+      if (order.paid) paidEarned += gross;
     });
 
-    return { earned, companyDebt, pending, payout: earned - companyDebt + pending };
+    // Операции лидера: премии/штрафы/списания
+    const bonusOps = operations
+      .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'bonus')
+      .reduce((s, o) => s + Number(o.amount || 0), 0);
+    const fineOps = operations
+      .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'fine')
+      .reduce((s, o) => s + Number(o.amount || 0), 0);
+    const writeoffOps = operations
+      .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'writeoff')
+      .reduce((s, o) => s + Number(o.amount || 0), 0);
+
+    const revenueWithOps = earned + bonusOps;
+    const debtWithOps = companyDebt + fineOps + writeoffOps;
+    const payout = Math.max(revenueWithOps - debtWithOps, 0);
+
+    return { earned: revenueWithOps, paid: paidEarned, companyDebt: debtWithOps, pending: 0, payout };
   })();
 
   const formatMoney = (value) => currency.format(Number(value || 0));
@@ -232,12 +250,12 @@ export default function GardenerDashboard() {
 
         <div className="space-y-2 text-sm text-slate-600">
           <div>📍 <span className="font-medium text-slate-800">{order.district ? `${order.district} • ${order.address}` : order.address}</span></div>
-          {/* Показывать телефон только за сутки до заказа или после выполнения */}
+          {/* Показывать телефон только за 24 часа ДО заказа. После выполнения или после даты заказа — скрывать. */}
           {(() => {
             const now = new Date();
             const orderDate = new Date(order.date);
             const msUntil = orderDate.getTime() - now.getTime();
-            const showPhone = order.status === 'Выполнен' || (msUntil <= 24 * 3600 * 1000 && msUntil >= 0);
+            const showPhone = (msUntil >= 0 && msUntil <= 24 * 3600 * 1000) && order.status !== 'Выполнен';
             return showPhone ? (
               <div>📞 <a href={`tel:${order.clientPhone}`} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
             ) : (
@@ -340,6 +358,7 @@ export default function GardenerDashboard() {
             <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-emerald-700">Заработано</div>
               <div className="text-2xl font-bold text-emerald-800">{formatMoney(walletSummary.earned)}</div>
+              <div className="text-xs text-slate-500 mt-1">Выплачено: {formatMoney(walletSummary.paid)}</div>
             </div>
             <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-rose-700">Должен фирме</div>
@@ -372,6 +391,9 @@ export default function GardenerDashboard() {
               Календарь
             </button>
           </div>
+          <div className="ml-3">
+            <button onClick={() => setShowPastOrders(s => !s)} className="px-3 py-1.5 text-sm rounded-lg bg-white border border-slate-200">{showPastOrders ? 'Скрыть прошедшие' : 'Показать прошедшие'}</button>
+          </div>
         </div>
 
         {loading ? (
@@ -380,7 +402,12 @@ export default function GardenerDashboard() {
           <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
         ) : viewMode === 'list' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {orders.map(renderOrderCard)}
+            {(() => {
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              const visible = orders.filter(o => showPastOrders ? true : new Date(o.date) >= today);
+              return visible.map(renderOrderCard);
+            })()}
           </div>
         ) : (
           <div>
@@ -400,30 +427,29 @@ export default function GardenerDashboard() {
                   const dayOrders = ordersByDate[dateStr] || [];
                   const isSelected = selectedDateStr === dateStr;
                   return (
-                    <button
-                      key={i}
-                      onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
-                      className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${
-                        isSelected ? 'border-emerald-500 bg-emerald-50' : dayOrders.length > 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100'
-                      }`}
-                    >
-                      {/* Чёрным/тёмно-серым помечаем выходные (сб/вс) */}
-                      {(() => {
-                        const cellDate = new Date(`${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
-                        const wd = cellDate.getDay();
-                        const isWeekend = wd === 0 || wd === 6;
-                        return (
-                          <span className={`font-medium ${isWeekend ? 'text-white bg-slate-800 rounded-full px-2 py-0.5' : 'text-slate-700'}`}>{d}</span>
-                        );
-                      })()}
-                      {dayOrders.length > 0 && (
-                        <div className="flex items-center gap-0.5 mt-1">
-                          {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (
-                            <span key={idx} className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                          ))}
-                        </div>
-                      )}
-                    </button>
+                    {(() => {
+                      const cellDate = new Date(dateStr);
+                      const wd = cellDate.getDay();
+                      const isWeekend = wd === 0 || wd === 6;
+                      const baseBorderBg = isSelected ? 'border-emerald-500 bg-emerald-50' : dayOrders.length > 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100';
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
+                          className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend ? 'border-slate-700 bg-slate-50/30' : ''}`}
+                        >
+                          {/* Выходные: помечаем тёмной рамкой (border). Сам номер и индикаторы выглядят как у остальных */}
+                          <span className={`font-medium text-slate-700`}>{d}</span>
+                          {dayOrders.length > 0 && (
+                            <div className="flex items-center gap-0.5 mt-1">
+                              {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (
+                                <span key={idx} className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                              ))}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })()}
                   );
                 })}
               </div>

@@ -53,6 +53,14 @@ export async function GET(req) {
   const totalSalary = orders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
   const totalCompanyShare = orders.reduce((sum, o) => sum + Number(o.companyShare || 0), 0);
 
+  // Загрузим операции лидера за период и сгруппируем по садовнику
+  const operations = await prisma.operation.findMany({ where: { createdAt: { gte: start, lte: end } } });
+  const opsByGardener = {};
+  operations.forEach(op => {
+    if (!opsByGardener[op.gardenerId]) opsByGardener[op.gardenerId] = [];
+    opsByGardener[op.gardenerId].push(op);
+  });
+
   const perGardener = gardeners.map((gardener) => {
     const gardenerOrders = orders.filter((o) => o.gardenerId === gardener.id);
     const completedOrders = gardenerOrders.filter((o) => o.status === 'Выполнен');
@@ -64,29 +72,35 @@ export async function GET(req) {
     const share = gardenerOrders.reduce((sum, o) => sum + Number(o.companyShare || 0), 0);
     const estimated = pendingOrders.reduce((sum, o) => sum + Math.max(Number(o.priceContract || o.priceFact || 0) - Number(o.companyShare || 0), 0), 0);
     const payout = Math.max(earned - share, 0);
-    const bonus = (Number(gardener.bonusPercent || 0) / 100) * earned;
-    const fine = (Number(gardener.finePercent || 0) / 100) * earned;
-    const writeoff = (Number(gardener.writeoffPercent || 0) / 100) * earned;
-    const net = earned - salary - share - bonus + fine + writeoff;
+
+    const ops = opsByGardener[gardener.id] || [];
+    const bonusOps = ops.filter(op => op.type === 'bonus').reduce((s, o) => s + Number(o.amount || 0), 0);
+    const fineOps = ops.filter(op => op.type === 'fine').reduce((s, o) => s + Number(o.amount || 0), 0);
+    const writeoffOps = ops.filter(op => op.type === 'writeoff').reduce((s, o) => s + Number(o.amount || 0), 0);
+
+    // Бонусы добавляют к заработанному, штрафы и списания учитываются как долг/вычет
+    const revenueWithOps = earned + bonusOps;
+    const shareWithOps = share + fineOps + writeoffOps;
+    const payoutWithOps = Math.max(revenueWithOps - shareWithOps, 0);
 
     return {
       id: gardener.id,
       name: gardener.name,
       phone: gardener.phone,
-      bonusPercent: Number(gardener.bonusPercent || 0),
-      finePercent: Number(gardener.finePercent || 0),
-      writeoffPercent: Number(gardener.writeoffPercent || 0),
+      bonusAmount: bonusOps,
+      fineAmount: fineOps,
+      writeoffAmount: writeoffOps,
       totalOrders: gardenerOrders.length,
       revenue: earned,
       contract,
       salary,
       share,
       estimated,
-      payout,
-      bonus,
-      fine,
-      writeoff,
-      net,
+      payout: payoutWithOps,
+      bonus: bonusOps,
+      fine: fineOps,
+      writeoff: writeoffOps,
+      net: revenueWithOps - salary - shareWithOps,
     };
   });
 
