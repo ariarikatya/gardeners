@@ -326,6 +326,34 @@ export default function GardenerDashboard() {
   const goToPrevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
   const goToNextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
 
+  const renderCalendarCell = (d, i) => {
+    if (d === null) return <div key={i}></div>;
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const dayOrders = ordersByDate[dateStr] || [];
+    const isSelected = selectedDateStr === dateStr;
+    const cellDate = new Date(dateStr);
+    const wd = cellDate.getDay();
+    const isWeekend = wd === 0 || wd === 6;
+    const baseBorderBg = isSelected ? 'border-emerald-500 bg-emerald-50' : dayOrders.length > 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100';
+    return (
+      <button
+        key={i}
+        onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
+        className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend ? 'border-slate-700 bg-slate-50/30' : ''}`}
+      >
+        {/* Выходные: помечаем тёмной рамкой (border). Сам номер и индикаторы выглядят как у остальных */}
+        <span className={`font-medium text-slate-700`}>{d}</span>
+        {dayOrders.length > 0 && (
+          <div className="flex items-center gap-0.5 mt-1">
+            {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (
+              <span key={idx} className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+            ))}
+          </div>
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <header className="bg-emerald-800 text-white py-4 px-4 flex justify-between items-center shadow">
@@ -421,37 +449,7 @@ export default function GardenerDashboard() {
                 {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(l => <div key={l}>{l}</div>)}
               </div>
               <div className="grid grid-cols-7 gap-1">
-                {calendarCells.map((d, i) => {
-                  if (d === null) return <div key={i}></div>;
-                  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                  const dayOrders = ordersByDate[dateStr] || [];
-                  const isSelected = selectedDateStr === dateStr;
-                  return (
-                    {(() => {
-                      const cellDate = new Date(dateStr);
-                      const wd = cellDate.getDay();
-                      const isWeekend = wd === 0 || wd === 6;
-                      const baseBorderBg = isSelected ? 'border-emerald-500 bg-emerald-50' : dayOrders.length > 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100';
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
-                          className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend ? 'border-slate-700 bg-slate-50/30' : ''}`}
-                        >
-                          {/* Выходные: помечаем тёмной рамкой (border). Сам номер и индикаторы выглядят как у остальных */}
-                          <span className={`font-medium text-slate-700`}>{d}</span>
-                          {dayOrders.length > 0 && (
-                            <div className="flex items-center gap-0.5 mt-1">
-                              {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (
-                                <span key={idx} className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                              ))}
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })()}
-                  );
-                })}
+                {calendarCells.map((d, i) => renderCalendarCell(d, i))}
               </div>
             </div>
 
