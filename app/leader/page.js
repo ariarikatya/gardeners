@@ -190,12 +190,12 @@ export default function LeaderDashboard() {
 
   const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); };
 
-  const toggleOrderPaid = async (orderId, paid) => {
+  const toggleOrderPaid = async (orderId, paidTo) => {
     try {
       const res = await fetch('/api/leader/order-paid', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, paid: !!paid })
+        body: JSON.stringify({ id: orderId, paidTo: paidTo || null })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
@@ -416,8 +416,17 @@ export default function LeaderDashboard() {
                         <div className="text-xs text-slate-500">Сумма: {o.priceFact || o.priceContract} ₽</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <label className="text-sm">
-                          <input type="checkbox" checked={!!o.paid} onChange={(e) => toggleOrderPaid(o.id, e.target.checked)} /> <span className="text-xs">Выплачено</span>
+                        <label className="text-sm flex items-center gap-2">
+                          <span className="text-xs">Статус выплаты:</span>
+                          <select
+                            value={o.paidTo || (o.paid ? 'GARDENER' : '')}
+                            onChange={(e) => toggleOrderPaid(o.id, e.target.value === '' ? null : e.target.value)}
+                            className="border border-slate-200 rounded px-2 py-1 text-sm"
+                          >
+                            <option value="">Не выплачено</option>
+                            <option value="GARDENER">Выплачено садовнику</option>
+                            <option value="COMPANY">Выплачено фирмой</option>
+                          </select>
                         </label>
                       </div>
                     </li>
