@@ -27,7 +27,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, serviceId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead } = body;
+  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -40,6 +40,7 @@ export async function POST(req) {
         dayOfWeek,
         clientName,
         address,
+        district: district || null,
         clientPhone,
         description,
         priceContract: parseFloat(priceContract) || 0,
@@ -86,13 +87,25 @@ export async function PUT(req) {
   const body = await req.json();
   const { id, ...updateData } = body;
 
+  // Получим текущий заказ, чтобы правильно обрабатывать смену даты/переноса
+  const existing = await prisma.order.findUnique({ where: { id } });
+
   if (updateData.date) {
     updateData.date = new Date(updateData.date);
     const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
     updateData.dayOfWeek = days[updateData.date.getDay()];
+
+    // Если админ сам меняет дату — отменяем запрос переноса и возвращаем статус в новый заказ
+    updateData.transferRequestedDate = null;
+    if (existing && existing.status === 'Перенос') {
+      updateData.status = 'Новый заказ';
+      updateData.refusalReason = null;
+    }
   }
 
   if (updateData.serviceId === '') updateData.serviceId = null;
+  // Allow updating/clearing district
+  if (updateData.district === '') updateData.district = null;
   delete updateData.fromLead;
 
   ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
