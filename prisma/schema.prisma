@@ -10,6 +10,7 @@ generator client {
 enum Role {
   ADMIN
   GARDENER
+  LEADER
 }
 
 model User {
@@ -22,13 +23,16 @@ model User {
 }
 
 model Gardener {
-  id       String    @id @default(uuid())
-  name     String
-  phone    String    @unique
-  user     User?
-  orders   Order[]
-  dayOffs  DayOff[]
-  services Service[] @relation("GardenerServices")
+  id             String    @id @default(uuid())
+  name           String
+  phone          String    @unique
+  bonusPercent   Float     @default(0)
+  finePercent    Float     @default(0)
+  writeoffPercent Float    @default(0)
+  user           User?
+  orders         Order[]
+  dayOffs        DayOff[]
+  services       Service[] @relation("GardenerServices")
 }
 
 model Service {
@@ -44,6 +48,7 @@ model Order {
   dayOfWeek      String
   clientName     String
   address        String
+  district       String?
   clientPhone    String
   description    String
   priceContract  Float    @default(0) // Оговоренная сумма
@@ -79,6 +84,7 @@ model WebLead {
   name           String
   phone          String
   address        String?
+  district       String?
   comment        String?
   serviceId      String?
   preferredDate  DateTime? // Дата, которую выбрал клиент в виджете

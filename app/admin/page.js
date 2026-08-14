@@ -3,13 +3,59 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 const emptyOrderForm = {
-  clientName: '', clientPhone: '', address: '', description: '',
+  clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
   status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: ''
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const SEARCH_HORIZON_DAYS = 60;
+
+function toDateKey(date) {
+  const d = new Date(date);
+  d.setHours(12, 0, 0, 0);
+  return d.toISOString().split('T')[0];
+}
+
+function calculateOrthodoxEaster(year) {
+  const a = year % 4;
+  const b = year % 7;
+  const c = year % 19;
+  const d = (19 * c + 16) % 30;
+  const e = (2 * a + 4 * b - d + 6) % 7;
+  const f = (d + e + 114) % 31;
+  const day = f + 1;
+  const month = Math.floor((d + e + 114) / 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function isRussianHoliday(date) {
+  const d = new Date(date);
+  d.setHours(12, 0, 0, 0);
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const day = d.getDate();
+  const holidayKeys = new Set();
+
+  for (let i = 1; i <= 8; i++) holidayKeys.add(`${year}-01-${String(i).padStart(2, '0')}`);
+  holidayKeys.add(`${year}-02-23`);
+  holidayKeys.add(`${year}-03-08`);
+  holidayKeys.add(`${year}-04-01`);
+  holidayKeys.add(`${year}-05-01`);
+  holidayKeys.add(`${year}-05-09`);
+  holidayKeys.add(`${year}-06-12`);
+  holidayKeys.add(`${year}-11-04`);
+
+  const orthodoxEaster = calculateOrthodoxEaster(year);
+  const easterMonday = new Date(orthodoxEaster);
+  easterMonday.setDate(orthodoxEaster.getDate() + 1);
+  holidayKeys.add(toDateKey(orthodoxEaster));
+  holidayKeys.add(toDateKey(easterMonday));
+  holidayKeys.add(toDateKey(new Date(year, 0, 7)));
+
+  const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return holidayKeys.has(key) || d.getDay() === 0 || d.getDay() === 6;
+}
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -48,6 +94,8 @@ export default function AdminDashboard() {
   const [searchWeekdays, setSearchWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
   const [searchGardenerId, setSearchGardenerId] = useState('all');
   const [searchServiceId, setSearchServiceId] = useState('all');
+  const [longPressInfo, setLongPressInfo] = useState(null);
+  const [longPressTimer, setLongPressTimer] = useState(null);
 
   // Генерация дат на 30 дней вперед (для сетки календаря)
   const dates = [];
@@ -139,6 +187,7 @@ export default function AdminDashboard() {
           clientName: existingOrder.clientName,
           clientPhone: existingOrder.clientPhone,
           address: existingOrder.address,
+          district: existingOrder.district || '',
           description: existingOrder.description,
           priceContract: existingOrder.priceContract,
           priceFact: existingOrder.priceFact,
@@ -164,6 +213,7 @@ export default function AdminDashboard() {
       clientName: lead.name,
       clientPhone: lead.phone,
       address: lead.address || '',
+      district: lead.district || '',
       description: lead.comment || '',
       date: dateStr,
       serviceId: lead.serviceId || ''
@@ -397,6 +447,27 @@ export default function AdminDashboard() {
     );
   };
 
+  const clearLongPressInfo = () => {
+    if (longPressTimer) clearTimeout(longPressTimer);
+    setLongPressInfo(null);
+  };
+
+  const handleLongPressSlot = (slot, dateStr) => {
+    if (!slot || !slot.gardener || !slot.existingOrder) return;
+    const details = [
+      slot.existingOrder.address ? `Адрес: ${slot.existingOrder.address}` : null,
+      slot.existingOrder.description ? `Описание: ${slot.existingOrder.description}` : null,
+      slot.existingOrder.clientName ? `Клиент: ${slot.existingOrder.clientName}` : null,
+      slot.existingOrder.status ? `Статус: ${slot.existingOrder.status}` : null,
+    ].filter(Boolean);
+
+    setLongPressInfo({
+      dateStr,
+      gardenerName: slot.gardener.name,
+      details: details.length ? details : ['Заказов нет в этом окне'],
+    });
+  };
+
   let visibleGardeners = filterGardenerId === 'all'
     ? gardeners
     : gardeners.filter(g => g.id === filterGardenerId);
@@ -595,19 +666,49 @@ export default function AdminDashboard() {
                             <div className="text-sm font-semibold text-slate-700 mb-1.5">{group.date} ({group.dayLabel})</div>
                             <div className="flex flex-wrap gap-1.5">
                               {group.slots.map((s) => (
-                                <button
-                                  key={s.gardener.id}
-                                  type="button"
-                                  onClick={() => openNewOrderModal(group.date, s.gardener.id)}
-                                  title={s.type === 'partial' && s.existingOrder ? `Уже стоит: ${s.existingOrder.clientName} — ${s.existingOrder.description}` : ''}
-                                  className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
-                                    s.type === 'free'
-                                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
-                                      : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
-                                  }`}
-                                >
-                                  {s.gardener.name} {s.type === 'partial' ? '(можно вклинить)' : ''}
-                                </button>
+                                <div key={s.gardener.id} className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={() => openNewOrderModal(group.date, s.gardener.id)}
+                                    onMouseDown={() => {
+                                      if (s.type === 'partial' && s.existingOrder) {
+                                        const timer = setTimeout(() => handleLongPressSlot(s, group.date), 500);
+                                        setLongPressTimer(timer);
+                                      }
+                                    }}
+                                    onMouseUp={() => {
+                                      if (longPressTimer) clearTimeout(longPressTimer);
+                                    }}
+                                    onMouseLeave={() => {
+                                      if (longPressTimer) clearTimeout(longPressTimer);
+                                    }}
+                                    onTouchStart={() => {
+                                      if (s.type === 'partial' && s.existingOrder) {
+                                        const timer = setTimeout(() => handleLongPressSlot(s, group.date), 500);
+                                        setLongPressTimer(timer);
+                                      }
+                                    }}
+                                    onTouchEnd={() => {
+                                      if (longPressTimer) clearTimeout(longPressTimer);
+                                    }}
+                                    title={s.type === 'partial' && s.existingOrder ? `Уже стоит: ${s.existingOrder.clientName} — ${s.existingOrder.description}` : ''}
+                                    className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
+                                      s.type === 'free'
+                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                        : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                    }`}
+                                  >
+                                    {s.gardener.name} {s.type === 'partial' ? '(можно вклинить)' : ''}
+                                  </button>
+                                  {longPressInfo && longPressInfo.dateStr === group.date && longPressInfo.gardenerName === s.gardener.name && (
+                                    <div className="absolute left-0 top-full mt-2 z-20 w-72 bg-slate-900 text-white text-[11px] rounded-xl shadow-xl p-3">
+                                      <div className="font-semibold mb-1">{longPressInfo.gardenerName}</div>
+                                      {longPressInfo.details.map((d, i) => (
+                                        <div key={i} className="mb-1 text-slate-200">{d}</div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                               ))}
                             </div>
                           </div>
@@ -707,11 +808,16 @@ export default function AdminDashboard() {
                     {visibleDates.map(date => {
                       const dateStr = date.toISOString().split('T')[0];
                       const dayLabel = WEEKDAY_LABELS[date.getDay()];
+                      const holiday = isRussianHoliday(date);
 
                       return (
-                        <tr key={dateStr} className="border-b border-slate-200 hover:bg-slate-50">
-                          <td className="p-3 font-medium text-slate-700 border-r border-slate-200 bg-slate-50 align-top">
-                            {dateStr} ({dayLabel})
+                        <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
+                          <td className={`p-3 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
+                            <span className="inline-flex items-center gap-2">
+                              <span>{dateStr}</span>
+                              <span>({dayLabel})</span>
+                              {holiday && <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Праздник</span>}
+                            </span>
                           </td>
                           {visibleGardeners.map(g => {
                             const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr));
@@ -745,7 +851,8 @@ export default function AdminDashboard() {
                                         }`}
                                       >
                                         {order.clientName}
-                                        <div className="text-xs opacity-90">{order.address}</div>
+                                        <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}{order.address}</div>
+                                        <div className="text-xs opacity-90">{order.description}</div>
                                         {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
                                         {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
                                       </div>
@@ -1069,9 +1176,32 @@ export default function AdminDashboard() {
                   <input type="text" required value={formData.clientPhone} onChange={e => setFormData({...formData, clientPhone: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500">Адрес</label>
-                <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">Район</label>
+                  <select required value={formData.district} onChange={e => setFormData({...formData, district: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                    <option value="" disabled>Выберите район</option>
+                    <option>Шумейка</option>
+                    <option>Генеральское</option>
+                    <option>Малая Тополевка</option>
+                    <option>Усть курдюм</option>
+                    <option>Зоналка</option>
+                    <option>Юбилейный</option>
+                    <option>Кумыска</option>
+                    <option>Центр</option>
+                    <option>Поливановка</option>
+                    <option>Ленинский район</option>
+                    <option>Трещиха</option>
+                    <option>Маркс</option>
+                    <option>Заводской район</option>
+                    <option>Дальняк</option>
+                    <option>Другое</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">Адрес</label>
+                  <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Услуга</label>

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
 function statusStyle(status) {
   switch (status) {
@@ -46,6 +47,7 @@ export default function GardenerDashboard() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
+  const [walletRange, setWalletRange] = useState('month');
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -169,6 +171,52 @@ export default function GardenerDashboard() {
     day: 'numeric', month: 'long', weekday: 'long'
   });
 
+  const getWalletRange = (scope) => {
+    const now = new Date();
+    if (scope === 'quarter') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { start, end };
+    }
+    if (scope === 'year') {
+      const start = new Date(now.getFullYear(), 0, 1);
+      const end = new Date(now.getFullYear(), 11, 31);
+      return { start, end };
+    }
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { start, end };
+  };
+
+  const walletSummary = (() => {
+    const { start, end } = getWalletRange(walletRange);
+    let earned = 0;
+    let companyDebt = 0;
+    let pending = 0;
+    let payout = 0;
+
+    orders.forEach((order) => {
+      const orderDate = new Date(order.date);
+      if (orderDate < start || orderDate > end) return;
+
+      const gross = Number(order.status === 'Выполнен' ? (order.priceFact || 0) : (order.priceContract || order.priceFact || 0));
+      const companyShare = Number(order.companyShare || 0);
+      const net = Math.max(gross - companyShare, 0);
+
+      if (order.status === 'Выполнен') {
+        earned += Number(order.priceFact || 0);
+        companyDebt += companyShare;
+        payout += net;
+      } else if (!['Отменен', 'Отказ'].includes(order.status)) {
+        pending += net;
+      }
+    });
+
+    return { earned, companyDebt, pending, payout: earned - companyDebt + pending };
+  })();
+
+  const formatMoney = (value) => currency.format(Number(value || 0));
+
   const renderOrderCard = (order) => (
     <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 relative overflow-hidden">
       <div className={`absolute left-0 top-0 bottom-0 w-2 ${statusStyle(order.status)}`}></div>
@@ -183,8 +231,19 @@ export default function GardenerDashboard() {
         )}
 
         <div className="space-y-2 text-sm text-slate-600">
-          <div>📍 <span className="font-medium text-slate-800">{order.address}</span></div>
-          <div>📞 <a href={`tel:${order.clientPhone}`} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+          <div>📍 <span className="font-medium text-slate-800">{order.district ? `${order.district} • ${order.address}` : order.address}</span></div>
+          {/* Показывать телефон только за сутки до заказа или после выполнения */}
+          {(() => {
+            const now = new Date();
+            const orderDate = new Date(order.date);
+            const msUntil = orderDate.getTime() - now.getTime();
+            const showPhone = order.status === 'Выполнен' || (msUntil <= 24 * 3600 * 1000 && msUntil >= 0);
+            return showPhone ? (
+              <div>📞 <a href={`tel:${order.clientPhone}`} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+            ) : (
+              <div>📞 <span className="text-slate-400">Номер скрыт</span></div>
+            );
+          })()}
           <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-slate-700 mt-2">
             <div className="text-xs font-semibold text-slate-400 mb-0.5">Что делать:</div>
             {order.description}
@@ -262,6 +321,41 @@ export default function GardenerDashboard() {
       </header>
 
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
+        <div className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+            <h2 className="text-xl font-bold text-emerald-900">Кошелёк</h2>
+            <div className="flex gap-2 bg-slate-100 rounded-lg p-1">
+              {['month', 'quarter', 'year'].map((scope) => (
+                <button
+                  key={scope}
+                  onClick={() => setWalletRange(scope)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${walletRange === scope ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
+                >
+                  {scope === 'month' ? 'Месяц' : scope === 'quarter' ? 'Квартал' : 'Год'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+              <div className="text-[11px] uppercase text-emerald-700">Заработано</div>
+              <div className="text-2xl font-bold text-emerald-800">{formatMoney(walletSummary.earned)}</div>
+            </div>
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
+              <div className="text-[11px] uppercase text-rose-700">Должен фирме</div>
+              <div className="text-2xl font-bold text-rose-800">{formatMoney(walletSummary.companyDebt)}</div>
+            </div>
+            <div className="bg-violet-50 border border-violet-100 rounded-xl p-3">
+              <div className="text-[11px] uppercase text-violet-700">Будет начислено</div>
+              <div className="text-2xl font-bold text-violet-800">{formatMoney(walletSummary.pending)}</div>
+            </div>
+            <div className="bg-sky-50 border border-sky-100 rounded-xl p-3">
+              <div className="text-[11px] uppercase text-sky-700">К выплате</div>
+              <div className="text-2xl font-bold text-sky-800">{formatMoney(walletSummary.payout)}</div>
+            </div>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
           <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
@@ -313,9 +407,21 @@ export default function GardenerDashboard() {
                         isSelected ? 'border-emerald-500 bg-emerald-50' : dayOrders.length > 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100'
                       }`}
                     >
-                      <span className="font-medium text-slate-700">{d}</span>
+                      {/* Чёрным/тёмно-серым помечаем выходные (сб/вс) */}
+                      {(() => {
+                        const cellDate = new Date(`${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+                        const wd = cellDate.getDay();
+                        const isWeekend = wd === 0 || wd === 6;
+                        return (
+                          <span className={`font-medium ${isWeekend ? 'text-white bg-slate-800 rounded-full px-2 py-0.5' : 'text-slate-700'}`}>{d}</span>
+                        );
+                      })()}
                       {dayOrders.length > 0 && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        <div className="flex items-center gap-0.5 mt-1">
+                          {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (
+                            <span key={idx} className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                          ))}
+                        </div>
                       )}
                     </button>
                   );
@@ -396,9 +502,9 @@ export default function GardenerDashboard() {
                           </label>
                         </div>
                       ) : (
-                        <label className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                        <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
                           {uploadingWhich === key ? 'Загружаю...' : '📷 Выбрать фото'}
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handlePhotoSelect(e, key)} disabled={uploadingWhich === key} />
+                          <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" capture="environment" onChange={e => handlePhotoSelect(e, key)} disabled={uploadingWhich === key} />
                         </label>
                       )}
                     </div>
