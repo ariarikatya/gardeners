@@ -58,6 +58,7 @@ model Order {
   companyShare          Float     @default(0) // Доля фирмы
   status                String    @default("Новый заказ") // "Новый заказ" | "Перенос" | "Отказ" | "Выполнен" | "Отменен"
   paid                  Boolean   @default(false) // Отметка, что по заказу выплачено всё
+  paidTo                String?    // 'GARDENER' | 'COMPANY' — кто получил выплату
   comment               String?
   transferRequestedDate DateTime? // Желаемая дата клиента при запросе переноса от садовника
   refusalReason         String? // Причина отказа, вводит садовник
