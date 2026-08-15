@@ -178,6 +178,14 @@ export default function GardenerDashboard() {
     day: 'numeric', month: 'long', weekday: 'long'
   });
 
+  const getPaidTargets = (paidTo) => {
+    if (!paidTo) return [];
+    const raw = Array.isArray(paidTo) ? paidTo : String(paidTo).split(',');
+    return raw
+      .map((value) => String(value).trim())
+      .filter((value) => value === 'GARDENER' || value === 'COMPANY');
+  };
+
   const getWalletRange = (scope) => {
     const now = new Date();
     if (scope === 'quarter') {
@@ -210,14 +218,15 @@ export default function GardenerDashboard() {
 
       const gross = Number(order.priceFact || 0);
       const companyShare = Number(order.companyShare || 0);
+      const paidTargets = getPaidTargets(order.paidTo);
 
       if (order.status === 'Выполнен') {
         earned += gross;
         companyDebt += companyShare;
-        if (order.paidTo === 'COMPANY') {
+        if (paidTargets.includes('COMPANY')) {
           paidToCompany += gross;
         }
-        if (order.paidTo === 'GARDENER' || (order.paid && !order.paidTo)) {
+        if (paidTargets.includes('GARDENER') || (!paidTargets.length && order.paid)) {
           paidToGardener += gross;
         }
       } else if (!['Отменен', 'Отказ'].includes(order.status)) {
@@ -237,7 +246,7 @@ export default function GardenerDashboard() {
 
     const revenueWithOps = earned + bonusOps;
     const debtWithOps = companyDebt + fineOps + writeoffOps;
-    const payout = Math.max(revenueWithOps - debtWithOps - paidToGardener, 0);
+    const payout = Math.max(revenueWithOps - debtWithOps - paidToGardener - paidToCompany, 0);
 
     return {
       earned: revenueWithOps,
@@ -273,8 +282,12 @@ export default function GardenerDashboard() {
           {(() => {
             const now = new Date();
             const orderDate = new Date(order.date);
-            const msUntil = orderDate.getTime() - now.getTime();
-            const showPhone = (msUntil >= 0 && msUntil <= 24 * 3600 * 1000) && order.status !== 'Выполнен';
+            const orderDateAtMidnight = new Date(orderDate);
+            const hideStart = new Date(orderDateAtMidnight);
+            const hideEnd = new Date(orderDateAtMidnight);
+            hideStart.setHours(hideStart.getHours() - 24);
+            hideEnd.setHours(hideEnd.getHours() + 24);
+            const showPhone = order.status !== 'Выполнен' && !(now >= hideStart && now <= hideEnd);
             return showPhone ? (
               <div>📞 <a href={`tel:${order.clientPhone}`} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
             ) : (
@@ -404,7 +417,7 @@ export default function GardenerDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-emerald-700">Заработано</div>
-              <div className="text-2xl font-bold text-emerald-800">{formatMoney(walletSummary.earned)}</div>
+              <div className="text-xl font-bold text-emerald-800">{formatMoney(walletSummary.earned)}</div>
               <div className="text-xs text-slate-500 mt-1">Выплачено садовнику: {formatMoney(walletSummary.paid)}</div>
             </div>
             <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">

@@ -18,13 +18,23 @@ export async function PUT(req) {
   if (!id) return NextResponse.json({ error: 'Не указан заказ' }, { status: 400 });
 
   try {
+    const rawTargets = Array.isArray(paidTo)
+      ? paidTo
+      : typeof paidTo === 'string'
+        ? paidTo.split(',')
+        : [];
+
+    const validTargets = Array.from(new Set(rawTargets
+      .map((value) => String(value).trim())
+      .filter((value) => value === 'GARDENER' || value === 'COMPANY')));
+
     const updateData = {};
-    if (paidTo === null || paidTo === undefined || paidTo === '') {
+    if (validTargets.length === 0) {
       updateData.paid = false;
       updateData.paidTo = null;
     } else {
       updateData.paid = true;
-      updateData.paidTo = String(paidTo);
+      updateData.paidTo = validTargets.join(',');
     }
 
     const order = await prisma.order.update({ where: { id }, data: updateData });

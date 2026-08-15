@@ -48,6 +48,14 @@ export async function GET(req) {
     orderBy: { date: 'asc' },
   });
 
+  const normalizePaidTargets = (paidTo) => {
+    if (!paidTo) return [];
+    const raw = Array.isArray(paidTo) ? paidTo : String(paidTo).split(',');
+    return raw
+      .map((value) => String(value).trim())
+      .filter((value) => value === 'GARDENER' || value === 'COMPANY');
+  };
+
   const totalRevenue = orders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0);
   const totalContract = orders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
   const totalSalary = orders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
@@ -70,7 +78,15 @@ export async function GET(req) {
     const contract = gardenerOrders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
     const salary = gardenerOrders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
     const share = gardenerOrders.reduce((sum, o) => sum + Number(o.companyShare || 0), 0);
-    const paidToGardener = completedOrders.filter((o) => o.paidTo === 'GARDENER' || (o.paid && !o.paidTo)).reduce((sum, o) => sum + Number(o.priceFact || o.priceContract || 0), 0);
+    const paidToGardener = completedOrders.reduce((sum, o) => {
+      const targets = normalizePaidTargets(o.paidTo);
+      const hasGardenerPayment = targets.includes('GARDENER') || (!targets.length && o.paid);
+      return sum + (hasGardenerPayment ? Number(o.priceFact || o.priceContract || 0) : 0);
+    }, 0);
+    const paidToCompany = completedOrders.reduce((sum, o) => {
+      const targets = normalizePaidTargets(o.paidTo);
+      return sum + (targets.includes('COMPANY') ? Number(o.priceFact || o.priceContract || 0) : 0);
+    }, 0);
     const estimated = pendingOrders.reduce((sum, o) => sum + Math.max(Number(o.priceContract || o.priceFact || 0) - Number(o.companyShare || 0), 0), 0);
 
     const ops = opsByGardener[gardener.id] || [];
@@ -80,7 +96,7 @@ export async function GET(req) {
 
     const revenueWithOps = earned + bonusOps;
     const shareWithOps = share + fineOps + writeoffOps;
-    const payoutWithOps = Math.max(revenueWithOps - shareWithOps - paidToGardener, 0);
+    const payoutWithOps = Math.max(revenueWithOps - shareWithOps - paidToGardener - paidToCompany, 0);
 
     return {
       id: gardener.id,
