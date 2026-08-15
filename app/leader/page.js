@@ -104,24 +104,40 @@ export default function LeaderDashboard() {
   };
 
   const saveGardenerSettings = async (gardener) => {
-    // Новая логика: если введены суммы премии/штрафа/списания — создать операции (начисления) для садовника
     setSavingId(gardener.id);
     try {
       const opsToCreate = [];
-      if (Number(gardener.bonusAmount || 0) > 0) opsToCreate.push({ type: 'bonus', amount: Number(gardener.bonusAmount) });
-      if (Number(gardener.fineAmount || 0) > 0) opsToCreate.push({ type: 'fine', amount: Number(gardener.fineAmount) });
-      if (Number(gardener.writeoffAmount || 0) > 0) opsToCreate.push({ type: 'writeoff', amount: Number(gardener.writeoffAmount) });
+      if (Number(gardener.bonusDraft || 0) > 0) opsToCreate.push({ type: 'bonus', amount: Number(gardener.bonusDraft), description: (gardener.bonusNote || '').trim() || 'Премия' });
+      if (Number(gardener.fineDraft || 0) > 0) opsToCreate.push({ type: 'fine', amount: Number(gardener.fineDraft), description: (gardener.fineNote || '').trim() || 'Штраф' });
+      if (Number(gardener.writeoffDraft || 0) > 0) opsToCreate.push({ type: 'writeoff', amount: Number(gardener.writeoffDraft), description: (gardener.writeoffNote || '').trim() || 'Списание' });
+
+      if (opsToCreate.length === 0) {
+        alert('Задайте сумму для премии, штрафа или списания');
+        return;
+      }
 
       for (const op of opsToCreate) {
         const res = await fetch('/api/leader/operations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gardenerId: gardener.id, type: op.type, amount: op.amount })
+          body: JSON.stringify({ gardenerId: gardener.id, type: op.type, amount: op.amount, description: op.description })
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Ошибка создания операции');
       }
 
+      setData((prev) => ({
+        ...prev,
+        gardeners: prev.gardeners.map((g) => g.id === gardener.id ? {
+          ...g,
+          bonusDraft: '',
+          fineDraft: '',
+          writeoffDraft: '',
+          bonusNote: '',
+          fineNote: '',
+          writeoffNote: '',
+        } : g),
+      }));
       await fetchData();
       alert('Операции добавлены');
     } catch (error) {
@@ -264,12 +280,14 @@ export default function LeaderDashboard() {
                 <div className="text-3xl font-bold text-emerald-700 mt-2">{formatMoney(summary.revenue)}</div>
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <div className="text-xs uppercase tracking-wide text-slate-500">Долг фирмы</div>
+                <div className="text-xs uppercase tracking-wide text-slate-500">Долг садовника фирме</div>
                 <div className="text-2xl font-bold text-rose-700 mt-2">{formatMoney(summary.companyShare)}</div>
+                <div className="text-[11px] text-slate-500 mt-1">Считается по долям фирмы, штрафам и списаниям по заказам.</div>
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">К выплате</div>
                 <div className="text-2xl font-bold text-violet-700 mt-2">{formatMoney(summary.payout)}</div>
+                <div className="text-[11px] text-slate-500 mt-1">Заработано + премии − штрафы − списания − долг садовника фирме.</div>
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Прогноз продаж</div>
@@ -277,7 +295,11 @@ export default function LeaderDashboard() {
                 <div className="text-[11px] text-slate-500 mt-1">Будет начислено: {formatMoney(summary.estimated)}</div>
               </div>
             </div>
-
+ 
+            <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3 text-xs text-slate-600">
+              Как считается кошелёк: «Заработано» = суммы выполненных заказов; «Премии» = начисленные бонусы; «Штрафы» = удержания; «Долг садовника фирме» = доля фирмы, штрафы и списания; «К выплате» = заработано + премии − штрафы − списания − долг садовника фирме.
+            </div>
+ 
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
               <h2 className="text-lg font-bold text-slate-800 mb-4">По садовникам</h2>
               <div className="overflow-x-auto">
@@ -287,7 +309,7 @@ export default function LeaderDashboard() {
                       <th className="px-3 py-2 font-semibold">Садовник</th>
                       <th className="px-3 py-2 font-semibold">Заказы</th>
                       <th className="px-3 py-2 font-semibold">Заработано</th>
-                      <th className="px-3 py-2 font-semibold">Долг фирме</th>
+                      <th className="px-3 py-2 font-semibold">Долг садовника фирме</th>
                       <th className="px-3 py-2 font-semibold">Будет начислено</th>
                       <th className="px-3 py-2 font-semibold">Премия ₽</th>
                       <th className="px-3 py-2 font-semibold">Штраф ₽</th>
@@ -307,36 +329,60 @@ export default function LeaderDashboard() {
                         <td className="px-3 py-3 text-rose-700 font-semibold">{formatMoney(g.share)}</td>
                         <td className="px-3 py-3 text-violet-700 font-semibold">{formatMoney(g.estimated)}</td>
                         <td className="px-3 py-3">
+                          <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.bonus)}</div>
                           <input
                             type="number"
                             min="0"
                             step="1"
-                            value={g.bonusAmount || ''}
-                            onChange={(e) => updateGardenerField(g.id, 'bonusAmount', e.target.value)}
-                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5"
-                            placeholder="0"
+                            value={g.bonusDraft ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'bonusDraft', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
+                            placeholder="Добавить"
+                          />
+                          <input
+                            type="text"
+                            value={g.bonusNote ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'bonusNote', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
+                            placeholder="Причина"
                           />
                         </td>
                         <td className="px-3 py-3">
+                          <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.fine)}</div>
                           <input
                             type="number"
                             min="0"
                             step="1"
-                            value={g.fineAmount || ''}
-                            onChange={(e) => updateGardenerField(g.id, 'fineAmount', e.target.value)}
-                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5"
-                            placeholder="0"
+                            value={g.fineDraft ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'fineDraft', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
+                            placeholder="Добавить"
+                          />
+                          <input
+                            type="text"
+                            value={g.fineNote ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'fineNote', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
+                            placeholder="Причина"
                           />
                         </td>
                         <td className="px-3 py-3">
+                          <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.writeoff)}</div>
                           <input
                             type="number"
                             min="0"
                             step="1"
-                            value={g.writeoffAmount || ''}
-                            onChange={(e) => updateGardenerField(g.id, 'writeoffAmount', e.target.value)}
-                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5"
-                            placeholder="0"
+                            value={g.writeoffDraft ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'writeoffDraft', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
+                            placeholder="Добавить"
+                          />
+                          <input
+                            type="text"
+                            value={g.writeoffNote ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'writeoffNote', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
+                            placeholder="Причина"
                           />
                         </td>
                         <td className="px-3 py-3">
@@ -425,7 +471,7 @@ export default function LeaderDashboard() {
                           >
                             <option value="">Не выплачено</option>
                             <option value="GARDENER">Выплачено садовнику</option>
-                            <option value="COMPANY">Выплачено фирмой</option>
+                            <option value="COMPANY">Садовник оплатил фирме</option>
                           </select>
                         </label>
                       </div>

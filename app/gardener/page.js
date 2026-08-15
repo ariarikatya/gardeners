@@ -200,9 +200,10 @@ export default function GardenerDashboard() {
     let earned = 0;
     let companyDebt = 0;
     let paidToGardener = 0;
+    let paidToCompany = 0;
     let pending = 0;
 
-    // Завершённые заказы — считаем заработанное и уже отмеченные выплаты
+    // Завершённые заказы — считаем заработанное, долг садовника фирме и уже отмеченные выплаты
     orders.forEach((order) => {
       const orderDate = new Date(order.date);
       if (orderDate < start || orderDate > end) return;
@@ -213,17 +214,17 @@ export default function GardenerDashboard() {
       if (order.status === 'Выполнен') {
         earned += gross;
         companyDebt += companyShare;
-        // учитываем, что в базе может быть новое поле paidTo: 'GARDENER' | 'COMPANY'
+        if (order.paidTo === 'COMPANY') {
+          paidToCompany += gross;
+        }
         if (order.paidTo === 'GARDENER' || (order.paid && !order.paidTo)) {
           paidToGardener += gross;
         }
       } else if (!['Отменен', 'Отказ'].includes(order.status)) {
-        // незавершённые заказы — предполагаемая сумма к начислению (net)
         pending += Math.max(Number(order.priceContract || order.priceFact || 0) - companyShare, 0);
       }
     });
 
-    // Операции лидера: премии/штрафы/списания
     const bonusOps = operations
       .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'bonus')
       .reduce((s, o) => s + Number(o.amount || 0), 0);
@@ -236,10 +237,19 @@ export default function GardenerDashboard() {
 
     const revenueWithOps = earned + bonusOps;
     const debtWithOps = companyDebt + fineOps + writeoffOps;
-    // К выплате — что ещё нужно выплатить садовнику: заработано + премии - (штрафы + долг фирмы + списания) - уже выплачено садовнику
     const payout = Math.max(revenueWithOps - debtWithOps - paidToGardener, 0);
 
-    return { earned: revenueWithOps, paid: paidToGardener, companyDebt: debtWithOps, pending, payout };
+    return {
+      earned: revenueWithOps,
+      bonus: bonusOps,
+      fine: fineOps,
+      writeoff: writeoffOps,
+      paid: paidToGardener,
+      paidToCompany,
+      companyDebt: debtWithOps,
+      pending,
+      payout,
+    };
   })();
 
   const formatMoney = (value) => currency.format(Number(value || 0));
@@ -391,26 +401,37 @@ export default function GardenerDashboard() {
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-emerald-700">Заработано</div>
               <div className="text-2xl font-bold text-emerald-800">{formatMoney(walletSummary.earned)}</div>
               <div className="text-xs text-slate-500 mt-1">Выплачено садовнику: {formatMoney(walletSummary.paid)}</div>
             </div>
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+              <div className="text-[11px] uppercase text-amber-700">Премии</div>
+              <div className="text-2xl font-bold text-amber-800">{formatMoney(walletSummary.bonus)}</div>
+            </div>
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
+              <div className="text-[11px] uppercase text-rose-700">Штрафы</div>
+              <div className="text-2xl font-bold text-rose-800">{formatMoney(walletSummary.fine)}</div>
+            </div>
             <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-rose-700">Должен фирме</div>
               <div className="text-2xl font-bold text-rose-800">{formatMoney(walletSummary.companyDebt)}</div>
+              <div className="text-xs text-slate-500 mt-1">Списания: {formatMoney(walletSummary.writeoff)} · Оплачено фирме: {formatMoney(walletSummary.paidToCompany)}</div>
             </div>
             <div className="bg-violet-50 border border-violet-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-violet-700">Будет начислено</div>
               <div className="text-2xl font-bold text-violet-800">{formatMoney(walletSummary.pending)}</div>
-              <div className="text-xs text-slate-500 mt-1">По незавершённым/новым заказам (оценка, ещё не начислено)</div>
+              <div className="text-xs text-slate-500 mt-1">По незавершённым/новым заказам</div>
             </div>
             <div className="bg-sky-50 border border-sky-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-sky-700">К выплате</div>
               <div className="text-2xl font-bold text-sky-800">{formatMoney(walletSummary.payout)}</div>
-              <div className="text-xs text-slate-500 mt-1">Итог к выплате: заработано + премии − штрафы/долг − уже выплачено</div>
             </div>
+          </div>
+          <div className="mt-3 text-xs text-slate-500 leading-relaxed">
+            Расчёт: заработано + премии − штрафы − списания − долг садовника фирме − уже выплачено садовнику = итог к выплате.
           </div>
         </div>
 

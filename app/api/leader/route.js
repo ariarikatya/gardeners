@@ -70,18 +70,17 @@ export async function GET(req) {
     const contract = gardenerOrders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
     const salary = gardenerOrders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
     const share = gardenerOrders.reduce((sum, o) => sum + Number(o.companyShare || 0), 0);
+    const paidToGardener = completedOrders.filter((o) => o.paidTo === 'GARDENER' || (o.paid && !o.paidTo)).reduce((sum, o) => sum + Number(o.priceFact || o.priceContract || 0), 0);
     const estimated = pendingOrders.reduce((sum, o) => sum + Math.max(Number(o.priceContract || o.priceFact || 0) - Number(o.companyShare || 0), 0), 0);
-    const payout = Math.max(earned - share, 0);
 
     const ops = opsByGardener[gardener.id] || [];
     const bonusOps = ops.filter(op => op.type === 'bonus').reduce((s, o) => s + Number(o.amount || 0), 0);
     const fineOps = ops.filter(op => op.type === 'fine').reduce((s, o) => s + Number(o.amount || 0), 0);
     const writeoffOps = ops.filter(op => op.type === 'writeoff').reduce((s, o) => s + Number(o.amount || 0), 0);
 
-    // Бонусы добавляют к заработанному, штрафы и списания учитываются как долг/вычет
     const revenueWithOps = earned + bonusOps;
     const shareWithOps = share + fineOps + writeoffOps;
-    const payoutWithOps = Math.max(revenueWithOps - shareWithOps, 0);
+    const payoutWithOps = Math.max(revenueWithOps - shareWithOps - paidToGardener, 0);
 
     return {
       id: gardener.id,
