@@ -239,7 +239,46 @@ export default function LeaderDashboard() {
     const nextValue = Array.isArray(paidTo) ? paidTo : (paidTo ? [paidTo] : []);
     const previousOrder = ordersList.find((o) => o.id === orderId);
     const nextSerialized = nextValue.length > 0 ? nextValue.join(',') : null;
+
+    // Optimistically update orders list (checkbox state)
     setOrdersList((prev) => prev.map((o) => o.id === orderId ? { ...o, paid: nextValue.length > 0, paidTo: nextSerialized } : o));
+
+    // Prepare a snapshot to allow revert on error
+    const prevDataSnapshot = data;
+
+    // Optimistically update dashboard totals and gardener row to avoid full refetch/flicker
+    if (previousOrder && previousOrder.status === 'Выполнен') {
+      const orderAmount = Number(previousOrder.priceFact || previousOrder.priceContract || 0);
+      const prevTargets = normalizePaidTargets(previousOrder.paidTo);
+      if (prevTargets.length === 0 && previousOrder.paid) prevTargets.push('GARDENER');
+      const nextTargets = nextValue;
+
+      setData((prev) => {
+        if (!prev || !prev.gardeners) return prev;
+        let deltaTotal = 0;
+        const gardeners = prev.gardeners.map((g) => {
+          if (g.id !== previousOrder.gardenerId) return g;
+          const oldPayout = Number(g.payout || 0);
+          let newPayout = oldPayout;
+
+          // If gardener payment was removed -> payout increases by orderAmount
+          if (prevTargets.includes('GARDENER') && !nextTargets.includes('GARDENER')) newPayout += orderAmount;
+          // If gardener payment was added -> payout decreases by orderAmount
+          if (!prevTargets.includes('GARDENER') && nextTargets.includes('GARDENER')) newPayout -= orderAmount;
+
+          // Company target affects payout similarly
+          if (prevTargets.includes('COMPANY') && !nextTargets.includes('COMPANY')) newPayout += orderAmount;
+          if (!prevTargets.includes('COMPANY') && nextTargets.includes('COMPANY')) newPayout -= orderAmount;
+
+          deltaTotal = newPayout - oldPayout;
+          return { ...g, payout: newPayout };
+        });
+
+        const totals = { ...(prev.totals || {}) };
+        totals.payout = Number(totals.payout || 0) + deltaTotal;
+        return { ...prev, gardeners, totals };
+      });
+    }
 
     try {
       const res = await fetch('/api/leader/order-paid', {
@@ -249,10 +288,12 @@ export default function LeaderDashboard() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
-      await fetchData();
+      // success - keep optimistic state. No full refetch to avoid flicker.
     } catch (err) {
+      // revert optimistic updates
       if (previousOrder) {
         setOrdersList((prev) => prev.map((o) => o.id === orderId ? previousOrder : o));
+        setData(prevDataSnapshot);
       }
       alert(err.message || 'Ошибка изменения статуса выплаты');
     }

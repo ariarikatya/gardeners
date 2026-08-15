@@ -278,16 +278,16 @@ export default function GardenerDashboard() {
 
         <div className="space-y-2 text-sm text-slate-600">
           <div>📍 <span className="font-medium text-slate-800">{order.district ? `${order.district} • ${order.address}` : order.address}</span></div>
-          {/* Показывать телефон только за 24 часа ДО заказа. После выполнения или после даты заказа — скрывать. */}
+          {/* Показывать телефон ТОЛЬКО в день заказа. Скрывать за день до и начиная со следующего дня. Также скрывать, если статус 'Выполнен'. */}
           {(() => {
             const now = new Date();
             const orderDate = new Date(order.date);
             const orderDateAtMidnight = new Date(orderDate);
-            const hideStart = new Date(orderDateAtMidnight);
-            const hideEnd = new Date(orderDateAtMidnight);
-            hideStart.setHours(hideStart.getHours() - 24);
-            hideEnd.setHours(hideEnd.getHours() + 24);
-            const showPhone = order.status !== 'Выполнен' && !(now >= hideStart && now <= hideEnd);
+            orderDateAtMidnight.setHours(0,0,0,0);
+            const showStart = new Date(orderDateAtMidnight);
+            const showEnd = new Date(orderDateAtMidnight);
+            showEnd.setHours(showEnd.getHours() + 24);
+            const showPhone = order.status !== 'Выполнен' && now >= showStart && now < showEnd;
             return showPhone ? (
               <div>📞 <a href={`tel:${order.clientPhone}`} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
             ) : (
