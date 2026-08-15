@@ -409,25 +409,25 @@ export default function GardenerDashboard() {
             </div>
             <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-amber-700">Премии</div>
-              <div className="text-2xl font-bold text-amber-800">{formatMoney(walletSummary.bonus)}</div>
+              <div className="text-xl font-bold text-amber-800">{formatMoney(walletSummary.bonus)}</div>
             </div>
             <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-rose-700">Штрафы</div>
-              <div className="text-2xl font-bold text-rose-800">{formatMoney(walletSummary.fine)}</div>
+              <div className="text-xl font-bold text-rose-800">{formatMoney(walletSummary.fine)}</div>
             </div>
             <div className="bg-rose-50 border border-rose-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-rose-700">Должен фирме</div>
-              <div className="text-2xl font-bold text-rose-800">{formatMoney(walletSummary.companyDebt)}</div>
+              <div className="text-xl font-bold text-rose-800">{formatMoney(walletSummary.companyDebt)}</div>
               <div className="text-xs text-slate-500 mt-1">Списания: {formatMoney(walletSummary.writeoff)} · Оплачено фирме: {formatMoney(walletSummary.paidToCompany)}</div>
             </div>
             <div className="bg-violet-50 border border-violet-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-violet-700">Будет начислено</div>
-              <div className="text-2xl font-bold text-violet-800">{formatMoney(walletSummary.pending)}</div>
+              <div className="text-xl font-bold text-violet-800">{formatMoney(walletSummary.pending)}</div>
               <div className="text-xs text-slate-500 mt-1">По незавершённым/новым заказам</div>
             </div>
             <div className="bg-sky-50 border border-sky-100 rounded-xl p-3">
               <div className="text-[11px] uppercase text-sky-700">К выплате</div>
-              <div className="text-2xl font-bold text-sky-800">{formatMoney(walletSummary.payout)}</div>
+              <div className="text-xl font-bold text-sky-800">{formatMoney(walletSummary.payout)}</div>
             </div>
           </div>
           <div className="mt-3 text-xs text-slate-500 leading-relaxed">

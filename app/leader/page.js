@@ -16,6 +16,24 @@ function formatMoney(value) {
   return currency.format(Number(value || 0));
 }
 
+const OPERATION_TYPE_LABELS = {
+  bonus: 'Премия',
+  fine: 'Штраф',
+  writeoff: 'Списание',
+};
+
+const PAYMENT_TARGET_LABELS = {
+  GARDENER: 'Выплачено садовнику',
+  COMPANY: 'Садовник оплатил фирме',
+};
+
+const getOperationTypeLabel = (type) => OPERATION_TYPE_LABELS[type] || type || 'Операция';
+const getPaymentTargetLabel = (paidTo, paid) => {
+  if (paidTo && PAYMENT_TARGET_LABELS[paidTo]) return PAYMENT_TARGET_LABELS[paidTo];
+  if (paid) return 'Выплачено садовнику';
+  return 'Не выплачено';
+};
+
 export default function LeaderDashboard() {
   const router = useRouter();
   const [range, setRange] = useState('month');
@@ -207,18 +225,23 @@ export default function LeaderDashboard() {
   const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); };
 
   const toggleOrderPaid = async (orderId, paidTo) => {
+    const nextValue = paidTo || null;
+    const previousOrder = ordersList.find((o) => o.id === orderId);
+    setOrdersList((prev) => prev.map((o) => o.id === orderId ? { ...o, paid: Boolean(nextValue), paidTo: nextValue } : o));
+
     try {
       const res = await fetch('/api/leader/order-paid', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, paidTo: paidTo || null })
+        body: JSON.stringify({ id: orderId, paidTo: nextValue })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
-      // обновим список и данные
-      if (ordersModalGardener) await openOrdersModal(ordersModalGardener);
       await fetchData();
     } catch (err) {
+      if (previousOrder) {
+        setOrdersList((prev) => prev.map((o) => o.id === orderId ? previousOrder : o));
+      }
       alert(err.message || 'Ошибка изменения статуса выплаты');
     }
   };
@@ -280,7 +303,7 @@ export default function LeaderDashboard() {
                 <div className="text-3xl font-bold text-emerald-700 mt-2">{formatMoney(summary.revenue)}</div>
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-                <div className="text-xs uppercase tracking-wide text-slate-500">Долг садовника фирме</div>
+                <div className="text-xs uppercase tracking-wide text-slate-500">Долг садовников фирме</div>
                 <div className="text-2xl font-bold text-rose-700 mt-2">{formatMoney(summary.companyShare)}</div>
                 <div className="text-[11px] text-slate-500 mt-1">Считается по долям фирмы, штрафам и списаниям по заказам.</div>
               </div>
@@ -297,7 +320,7 @@ export default function LeaderDashboard() {
             </div>
  
             <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3 text-xs text-slate-600">
-              Как считается кошелёк: «Заработано» = суммы выполненных заказов; «Премии» = начисленные бонусы; «Штрафы» = удержания; «Долг садовника фирме» = доля фирмы, штрафы и списания; «К выплате» = заработано + премии − штрафы − списания − долг садовника фирме.
+              Как считается кошелёк: «Заработано» = суммы выполненных заказов; «Премии» = начисленные бонусы; «Штрафы» = удержания; «Долг садовников фирме» = доля фирмы, штрафы и списания; «К выплате» = заработано + премии − штрафы − списания − долг садовников фирме.
             </div>
  
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
@@ -309,7 +332,7 @@ export default function LeaderDashboard() {
                       <th className="px-3 py-2 font-semibold">Садовник</th>
                       <th className="px-3 py-2 font-semibold">Заказы</th>
                       <th className="px-3 py-2 font-semibold">Заработано</th>
-                      <th className="px-3 py-2 font-semibold">Долг садовника фирме</th>
+                      <th className="px-3 py-2 font-semibold">Долг садовников фирме</th>
                       <th className="px-3 py-2 font-semibold">Будет начислено</th>
                       <th className="px-3 py-2 font-semibold">Премия ₽</th>
                       <th className="px-3 py-2 font-semibold">Штраф ₽</th>
@@ -429,7 +452,7 @@ export default function LeaderDashboard() {
                   {opsList.map(op => (
                     <li key={op.id} className="flex justify-between items-center border p-2 rounded">
                       <div>
-                        <div className="text-sm font-medium">{op.type} — {formatMoney(op.amount)}</div>
+                        <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)}</div>
                         {op.description && <div className="text-xs text-slate-500">{op.description}</div>}
                         <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
                       </div>
@@ -456,24 +479,27 @@ export default function LeaderDashboard() {
               ) : (
                 <ul className="space-y-2 max-h-72 overflow-auto">
                   {ordersList.map(o => (
-                    <li key={o.id} className="flex justify-between items-center border p-2 rounded">
-                      <div>
-                        <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
-                        <div className="text-xs text-slate-500">Сумма: {o.priceFact || o.priceContract} ₽</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm flex items-center gap-2">
-                          <span className="text-xs">Статус выплаты:</span>
-                          <select
-                            value={o.paidTo || (o.paid ? 'GARDENER' : '')}
-                            onChange={(e) => toggleOrderPaid(o.id, e.target.value === '' ? null : e.target.value)}
-                            className="border border-slate-200 rounded px-2 py-1 text-sm"
-                          >
-                            <option value="">Не выплачено</option>
-                            <option value="GARDENER">Выплачено садовнику</option>
-                            <option value="COMPANY">Садовник оплатил фирме</option>
-                          </select>
-                        </label>
+                    <li key={o.id} className="border p-3 rounded-lg">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
+                          <div className="text-xs text-slate-500 mt-1">Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</div>
+                          <div className="text-xs text-slate-500 mt-1">Текущий статус: {getPaymentTargetLabel(o.paidTo, o.paid)}</div>
+                        </div>
+                        <div className="flex items-center gap-2 sm:mt-0">
+                          <label className="text-sm flex flex-col gap-1">
+                            <span className="text-[11px] uppercase tracking-wide text-slate-500">Выплата</span>
+                            <select
+                              value={o.paidTo || (o.paid ? 'GARDENER' : '')}
+                              onChange={(e) => toggleOrderPaid(o.id, e.target.value === '' ? null : e.target.value)}
+                              className="border border-slate-200 rounded px-2 py-1.5 text-sm min-w-[210px]"
+                            >
+                              <option value="">Не выплачено</option>
+                              <option value="GARDENER">{PAYMENT_TARGET_LABELS.GARDENER}</option>
+                              <option value="COMPANY">{PAYMENT_TARGET_LABELS.COMPANY}</option>
+                            </select>
+                          </label>
+                        </div>
                       </div>
                     </li>
                   ))}
