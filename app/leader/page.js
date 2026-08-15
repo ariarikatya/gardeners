@@ -27,9 +27,20 @@ const PAYMENT_TARGET_LABELS = {
   COMPANY: 'Садовник оплатил фирме',
 };
 
+const normalizePaidTargets = (paidTo) => {
+  if (!paidTo) return [];
+  const raw = Array.isArray(paidTo) ? paidTo : String(paidTo).split(',');
+  return raw
+    .map((value) => String(value).trim())
+    .filter((value) => value === 'GARDENER' || value === 'COMPANY');
+};
+
 const getOperationTypeLabel = (type) => OPERATION_TYPE_LABELS[type] || type || 'Операция';
 const getPaymentTargetLabel = (paidTo, paid) => {
-  if (paidTo && PAYMENT_TARGET_LABELS[paidTo]) return PAYMENT_TARGET_LABELS[paidTo];
+  const targets = normalizePaidTargets(paidTo);
+  if (targets.length > 0) {
+    return targets.map((target) => PAYMENT_TARGET_LABELS[target]).join(' + ');
+  }
   if (paid) return 'Выплачено садовнику';
   return 'Не выплачено';
 };
@@ -225,15 +236,16 @@ export default function LeaderDashboard() {
   const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); };
 
   const toggleOrderPaid = async (orderId, paidTo) => {
-    const nextValue = paidTo || null;
+    const nextValue = Array.isArray(paidTo) ? paidTo : (paidTo ? [paidTo] : []);
     const previousOrder = ordersList.find((o) => o.id === orderId);
-    setOrdersList((prev) => prev.map((o) => o.id === orderId ? { ...o, paid: Boolean(nextValue), paidTo: nextValue } : o));
+    const nextSerialized = nextValue.length > 0 ? nextValue.join(',') : null;
+    setOrdersList((prev) => prev.map((o) => o.id === orderId ? { ...o, paid: nextValue.length > 0, paidTo: nextSerialized } : o));
 
     try {
       const res = await fetch('/api/leader/order-paid', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, paidTo: nextValue })
+        body: JSON.stringify({ id: orderId, paidTo: nextSerialized })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
@@ -478,31 +490,46 @@ export default function LeaderDashboard() {
                 <div className="text-center text-slate-500 py-4">Заказов нет</div>
               ) : (
                 <ul className="space-y-2 max-h-72 overflow-auto">
-                  {ordersList.map(o => (
-                    <li key={o.id} className="border p-3 rounded-lg">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
-                          <div className="text-xs text-slate-500 mt-1">Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</div>
-                          <div className="text-xs text-slate-500 mt-1">Текущий статус: {getPaymentTargetLabel(o.paidTo, o.paid)}</div>
-                        </div>
-                        <div className="flex items-center gap-2 sm:mt-0">
-                          <label className="text-sm flex flex-col gap-1">
+                  {ordersList.map(o => {
+                    const selectedTargets = normalizePaidTargets(o.paidTo);
+                    const toggleTarget = (target, checked) => {
+                      const nextTargets = checked
+                        ? Array.from(new Set([...selectedTargets, target]))
+                        : selectedTargets.filter((item) => item !== target);
+                      toggleOrderPaid(o.id, nextTargets);
+                    };
+
+                    return (
+                      <li key={o.id} className="border p-3 rounded-lg">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
+                            <div className="text-xs text-slate-500 mt-1">Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</div>
+                            <div className="text-xs text-slate-500 mt-1">Текущий статус: {getPaymentTargetLabel(o.paidTo, o.paid)}</div>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:mt-0">
                             <span className="text-[11px] uppercase tracking-wide text-slate-500">Выплата</span>
-                            <select
-                              value={o.paidTo || (o.paid ? 'GARDENER' : '')}
-                              onChange={(e) => toggleOrderPaid(o.id, e.target.value === '' ? null : e.target.value)}
-                              className="border border-slate-200 rounded px-2 py-1.5 text-sm min-w-[210px]"
-                            >
-                              <option value="">Не выплачено</option>
-                              <option value="GARDENER">{PAYMENT_TARGET_LABELS.GARDENER}</option>
-                              <option value="COMPANY">{PAYMENT_TARGET_LABELS.COMPANY}</option>
-                            </select>
-                          </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={selectedTargets.includes('GARDENER')}
+                                onChange={(e) => toggleTarget('GARDENER', e.target.checked)}
+                              />
+                              {PAYMENT_TARGET_LABELS.GARDENER}
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={selectedTargets.includes('COMPANY')}
+                                onChange={(e) => toggleTarget('COMPANY', e.target.checked)}
+                              />
+                              {PAYMENT_TARGET_LABELS.COMPANY}
+                            </label>
+                          </div>
                         </div>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
