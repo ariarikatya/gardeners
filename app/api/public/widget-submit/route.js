@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { forwardToAmo } from '@/lib/amo';
+import amoApi from '@/lib/amoApi.fixed';
 
 const prisma = new PrismaClient();
 
@@ -71,7 +72,28 @@ export async function POST(req) {
     noteParts.push('Заявка с виджета онлайн-записи сайта');
     noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-    await forwardToAmo({ name, phone, note: noteParts.join(' | ') });
+    await forwardToAmo({
+      clientName: name,
+      clientPhone: phone,
+      note: noteParts.join(' | '),
+      workDescription: comment || undefined,
+      address: address || undefined,
+      services: serviceName || undefined,
+      approxWhere: body.district || undefined,
+    });
+
+    // Также создаём сделку в amoCRM через API (если настроены токены)
+    try {
+      if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+        const leadNote = noteParts.join(' | ');
+        const amoId = await amoApi.createLead({ name: name, phone: phone, note: leadNote, serviceName: serviceName });
+        if (amoId) {
+          await prisma.webLead.update({ where: { id: lead.id }, data: { amoDealId: String(amoId) } });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to create amo lead (API):', e.message);
+    }
 
     return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
   } catch (e) {

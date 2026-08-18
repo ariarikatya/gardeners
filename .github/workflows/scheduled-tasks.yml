@@ -1,0 +1,38 @@
+name: Scheduled tasks - run fines/checks
+
+on:
+  schedule:
+    # run daily at 20:05 Moscow time (MSK = UTC+3). The workflow times are in UTC.
+    # 20:05 MSK = 17:05 UTC, but adjust the cron lines below to match your desired timezone.
+    - cron: '5 17 * * *' # 17:05 UTC -> 20:05 MSK
+    - cron: '5 15 * * *' # optional run at 18:05 MSK (15:05 UTC)
+  workflow_dispatch: {}
+
+jobs:
+  run-scheduled-tasks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npx prisma generate
+
+      - name: Run scheduled tasks
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional secrets for amo/vk if needed by the script
+          AMO_REFRESH_TOKEN: ${{ secrets.AMO_REFRESH_TOKEN }}
+          AMO_CLIENT_ID: ${{ secrets.AMO_CLIENT_ID }}
+          AMO_CLIENT_SECRET: ${{ secrets.AMO_CLIENT_SECRET }}
+          AMO_SUBDOMAIN: ${{ secrets.AMO_SUBDOMAIN }}
+          VK_GROUP_TOKEN: ${{ secrets.VK_GROUP_TOKEN }}
+        run: |
+          node ./scripts/run-scheduled-tasks.js

@@ -45,7 +45,6 @@ function compressImage(file, maxWidth = 1600, quality = 0.8) {
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
-  const [operations, setOperations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
   const [walletRange, setWalletRange] = useState('month');
@@ -62,11 +61,18 @@ export default function GardenerDashboard() {
   const [transferDate, setTransferDate] = useState('');
   const [refusalText, setRefusalText] = useState('');
   const [factAmount, setFactAmount] = useState('');
-  const [photoBeforeUrl, setPhotoBeforeUrl] = useState('');
-  const [photoAfterUrl, setPhotoAfterUrl] = useState('');
+  const [photoBeforeUrls, setPhotoBeforeUrls] = useState([]);
+  const [photoAfterUrls, setPhotoAfterUrls] = useState([]);
   const [photoActUrl, setPhotoActUrl] = useState('');
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [submitting, setSubmitting] = useState(false);
+
+  // --- траты садовника ---
+  const [operations, setOperations] = useState([]);
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseDesc, setExpenseDesc] = useState('');
+  const [expenseReceiptUrl, setExpenseReceiptUrl] = useState('');
+  const [submittingExpense, setSubmittingExpense] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -89,6 +95,44 @@ export default function GardenerDashboard() {
     }
   };
 
+  const uploadReceipt = async (file) => {
+    try {
+      const compressed = await compressImage(file);
+      const formData = new FormData();
+      formData.append('image', compressed, 'receipt.jpg');
+      const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (res.ok) return data.url;
+      throw new Error(data.error || 'Ошибка загрузки');
+    } catch (e) {
+      throw e;
+    }
+  };
+
+  const submitExpense = async (e) => {
+    e.preventDefault();
+    if (!expenseAmount || Number(expenseAmount) <= 0) return alert('Укажите сумму');
+    setSubmittingExpense(true);
+    try {
+      let receipt = expenseReceiptUrl;
+      if (!receipt) {
+        // ничего не загрузили — можно отправить без чека
+      }
+      const res = await fetch('/api/gardener/operations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'expense', amount: Number(expenseAmount), description: expenseDesc || '', receiptUrl: receipt || null }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Ошибка');
+      // сбросим форму и обновим список
+      setExpenseAmount(''); setExpenseDesc(''); setExpenseReceiptUrl('');
+      await fetchOrders();
+      alert('Трата отправлена на рассмотрение');
+    } catch (err) {
+      alert(err.message || 'Ошибка');
+    } finally {
+      setSubmittingExpense(false);
+    }
+  };
+
+
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
@@ -100,9 +144,18 @@ export default function GardenerDashboard() {
     setTransferDate('');
     setRefusalText('');
     setFactAmount('');
-    setPhotoBeforeUrl('');
-    setPhotoAfterUrl('');
-    setPhotoActUrl('');
+    // initialize photo arrays/act from order (handle stored JSON arrays)
+    try {
+      const before = order.photoBefore ? (String(order.photoBefore).trim().startsWith('[') ? JSON.parse(order.photoBefore) : [order.photoBefore]) : [];
+      const after = order.photoAfter ? (String(order.photoAfter).trim().startsWith('[') ? JSON.parse(order.photoAfter) : [order.photoAfter]) : [];
+      setPhotoBeforeUrls(before);
+      setPhotoAfterUrls(after);
+      setPhotoActUrl(order.photoAct || '');
+    } catch (e) {
+      setPhotoBeforeUrls([]);
+      setPhotoAfterUrls([]);
+      setPhotoActUrl(order.photoAct || '');
+    }
   };
 
   const closeAction = () => {
@@ -111,21 +164,26 @@ export default function GardenerDashboard() {
   };
 
   const handlePhotoSelect = async (e, which) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     setUploadingWhich(which);
     try {
-      const compressed = await compressImage(file);
-      const formData = new FormData();
-      formData.append('image', compressed, 'photo.jpg');
-      const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (res.ok) {
-        if (which === 'before') setPhotoBeforeUrl(data.url);
-        if (which === 'after') setPhotoAfterUrl(data.url);
-        if (which === 'act') setPhotoActUrl(data.url);
-      } else {
-        alert(data.error);
+      const uploaded = [];
+      for (const file of files) {
+        const compressed = await compressImage(file);
+        const formData = new FormData();
+        formData.append('image', compressed, 'photo.jpg');
+        const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (res.ok) uploaded.push(data.url);
+        else alert('Ошибка при загрузке одного из файлов: ' + (data.error || ''));
+      }
+
+      if (which === 'before') setPhotoBeforeUrls(prev => [...prev, ...uploaded]);
+      if (which === 'after') setPhotoAfterUrls(prev => [...prev, ...uploaded]);
+      if (which === 'act') {
+        // keep single act (most likely one act document) — if multiple uploaded, keep the last
+        if (uploaded.length) setPhotoActUrl(uploaded[uploaded.length - 1]);
       }
     } catch (err) {
       alert('Не удалось загрузить фото: ' + err.message);
@@ -139,8 +197,8 @@ export default function GardenerDashboard() {
     e.preventDefault();
     if (!actionOrder) return;
 
-    if (actionType === 'complete' && (!photoBeforeUrl || !photoAfterUrl || !photoActUrl)) {
-      alert('Прикрепите все три фото: до, после и акт/документ');
+    if (actionType === 'complete' && (photoBeforeUrls.length === 0 || photoAfterUrls.length === 0 || !photoActUrl)) {
+      alert('Прикрепите фото: минимум одно "до", одно "после" и акт/документ');
       return;
     }
 
@@ -151,8 +209,8 @@ export default function GardenerDashboard() {
     if (actionType === 'refuse') payload.refusalReason = refusalText;
     if (actionType === 'complete') {
       payload.priceFact = factAmount;
-      payload.photoBefore = photoBeforeUrl;
-      payload.photoAfter = photoAfterUrl;
+      payload.photoBefore = photoBeforeUrls;
+      payload.photoAfter = photoAfterUrls;
       payload.photoAct = photoActUrl;
     }
 
@@ -448,6 +506,80 @@ export default function GardenerDashboard() {
           </div>
         </div>
 
+        {/* Раздел траты */}
+        <div className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-bold text-slate-800">Траты</h2>
+            <div className="text-sm text-slate-500">Отправляйте чеки, лидер сможет утвердить или отклонить</div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <form onSubmit={submitExpense} className="space-y-3">
+                <div>
+                  <label className="block text-xs text-slate-500">Сумма, ₽</label>
+                  <input type="number" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} className="mt-1 w-full border rounded px-2 py-1" min="1" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500">На что потратил</label>
+                  <input type="text" value={expenseDesc} onChange={e => setExpenseDesc(e.target.value)} className="mt-1 w-full border rounded px-2 py-1" placeholder="Например: леска для триммера" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500">Чек / фото</label>
+                  <div className="flex items-center gap-2 mt-1">
+                    {expenseReceiptUrl ? (
+                      <div className="flex items-center gap-2">
+                        <img src={expenseReceiptUrl} alt="Чек" className="w-16 h-16 object-cover rounded border" />
+                        <button type="button" onClick={() => setExpenseReceiptUrl('')} className="text-xs text-rose-600">Удалить</button>
+                      </div>
+                    ) : (
+                      <label className="relative flex items-center gap-2 border border-dashed rounded p-2 text-sm text-slate-500 cursor-pointer">
+                        📎 Загрузить чек
+                        <input type="file" accept="image/*" className="absolute inset-0 opacity-0" onChange={async (e) => {
+                          const f = e.target.files && e.target.files[0];
+                          if (!f) return;
+                          try {
+                            setSubmittingExpense(true);
+                            const url = await uploadReceipt(f);
+                            setExpenseReceiptUrl(url);
+                          } catch (err) { alert(err.message || 'Ошибка загрузки'); }
+                          finally { setSubmittingExpense(false); e.target.value = ''; }
+                        }} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button type="submit" disabled={submittingExpense} className="px-4 py-2 bg-emerald-600 text-white rounded-lg">{submittingExpense ? 'Отправляю...' : 'Отправить на утверждение'}</button>
+                </div>
+              </form>
+            </div>
+
+            <div>
+              <div className="text-sm text-slate-600 mb-2">Ваши траты в период</div>
+              {operations.length === 0 ? (
+                <div className="text-sm text-slate-400">Трат нет</div>
+              ) : (
+                <ul className="space-y-2 max-h-40 overflow-auto">
+                  {operations.filter(o => o.type === 'expense').map(op => (
+                    <li key={op.id} className="border rounded p-2 flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">{op.description || 'Трата'} — {formatMoney(op.amount)}</div>
+                        <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
+                        {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-700">Открыть чек</a>}
+                      </div>
+                      <div className="text-xs">
+                        {op.approved ? <span className="text-emerald-700">Утверждён {op.approvedAmount ? `на ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-slate-500">В ожидании</span>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
           <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
@@ -554,30 +686,54 @@ export default function GardenerDashboard() {
 
               {actionType === 'complete' && (
                 <>
-                  {[
-                    { key: 'before', label: 'Фото «До»', url: photoBeforeUrl },
-                    { key: 'after', label: 'Фото «После»', url: photoAfterUrl },
-                    { key: 'act', label: 'Фото акта / документа', url: photoActUrl },
-                  ].map(({ key, label, url }) => (
-                    <div key={key}>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">{label}</label>
-                      {url ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «До»</label>
+                    <div className="flex gap-2 items-center mb-2">
+                      {photoBeforeUrls.map((u, idx) => (
+                        <div key={u} className="relative">
+                          <img src={u} alt={`До ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <button onClick={() => setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                        </div>
+                      ))}
+                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                        {uploadingWhich === 'before' ? 'Загружаю...' : '📷 Добавить фото До'}
+                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'before')} disabled={uploadingWhich === 'before'} />
+                      </label>
+                    </div>
+
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «После»</label>
+                    <div className="flex gap-2 items-center mb-2">
+                      {photoAfterUrls.map((u, idx) => (
+                        <div key={u} className="relative">
+                          <img src={u} alt={`После ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <button onClick={() => setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                        </div>
+                      ))}
+                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                        {uploadingWhich === 'after' ? 'Загружаю...' : '📷 Добавить фото После'}
+                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'after')} disabled={uploadingWhich === 'after'} />
+                      </label>
+                    </div>
+
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
+                    <div className="flex gap-2 items-center mb-2">
+                      {photoActUrl ? (
                         <div className="flex items-center gap-2">
-                          <img src={url} alt={label} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
+                          <img src={photoActUrl} alt={`Акт`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
                           <span className="text-xs text-emerald-700 font-medium">Загружено ✓</span>
                           <label className="text-xs text-slate-400 underline cursor-pointer ml-auto">
                             Заменить
-                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handlePhotoSelect(e, key)} />
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handlePhotoSelect(e, 'act')} />
                           </label>
                         </div>
                       ) : (
                         <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
-                          {uploadingWhich === key ? 'Загружаю...' : '📷 Выбрать фото'}
-                          <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" capture="environment" onChange={e => handlePhotoSelect(e, key)} disabled={uploadingWhich === key} />
+                          {uploadingWhich === 'act' ? 'Загружаю...' : '📷 Выбрать фото'}
+                          <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" capture="environment" onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
                         </label>
                       )}
                     </div>
-                  ))}
+                  </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-500">Фактическая сумма заказа, ₽</label>
