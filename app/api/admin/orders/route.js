@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
 import { forwardToAmo } from '@/lib/amo';
+import amoApi from '@/lib/amoApi.fixed';
 
 const prisma = new PrismaClient();
 
@@ -27,7 +28,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead } = body;
+  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead, serviceIds, isCash } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -51,6 +52,8 @@ export async function POST(req) {
         comment,
         gardenerId,
         serviceId: serviceId || null,
+        serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
+        isCash: typeof isCash === 'boolean' ? isCash : true,
       },
     });
 
@@ -64,15 +67,47 @@ export async function POST(req) {
         const service = await prisma.service.findUnique({ where: { id: serviceId } });
         serviceName = service ? service.name : '';
       }
+
+      // Попробуем получить имя садовника, если задан gardenerId
+      let gardenerName = '';
+      if (gardenerId) {
+        const g = await prisma.gardener.findUnique({ where: { id: gardenerId } });
+        gardenerName = g ? (g.name || '') : '';
+      }
+
       const noteParts = [];
       if (description) noteParts.push(description);
       if (address) noteParts.push('Адрес: ' + address);
       if (serviceName) noteParts.push('Услуга: ' + serviceName);
+      if (gardenerName) noteParts.push('Исполнитель: ' + gardenerName);
       noteParts.push('Дата визита: ' + orderDate.toISOString().split('T')[0]);
       noteParts.push('Заказ заведён диспетчером напрямую');
       noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-      await forwardToAmo({ name: clientName, phone: clientPhone, note: noteParts.join(' | ') });
+      await forwardToAmo({
+        clientName: clientName,
+        clientPhone: clientPhone,
+        note: noteParts.join(' | '),
+        workDescription: description || undefined,
+        address: address || undefined,
+        services: serviceName || undefined,
+        executor: gardenerName || undefined,
+        approxWhere: district || undefined,
+      });
+
+      // Создадим сделку через API и сохраним amoDealId в заказе
+      try {
+        if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+          const amoId = await amoApi.createLead({ name: clientName, phone: clientPhone, note: noteParts.join(' | '), serviceName });
+          if (amoId) {
+            await prisma.order.update({ where: { id: order.id }, data: { amoDealId: String(amoId) } });
+            // refresh local order variable with amoDealId
+            order.amoDealId = String(amoId);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to create amo lead (API) for admin-created order:', e.message);
+      }
     }
 
     return NextResponse.json({ order });
@@ -103,10 +138,50 @@ export async function PUT(req) {
     }
   }
 
+  // Если админ переназначил садовника после отказа — очистим причину и вернём статус
+  if (updateData.gardenerId && existing && existing.gardenerId !== updateData.gardenerId && existing.status === 'Отказ') {
+    updateData.status = 'Новый заказ';
+    updateData.refusalReason = null;
+  }
+
   if (updateData.serviceId === '') updateData.serviceId = null;
   // Allow updating/clearing district
   if (updateData.district === '') updateData.district = null;
   delete updateData.fromLead;
+
+  // Если меняется дата и у существующего заказа была связанная amo-сделка,
+  // пометим старую сделку как "перенесена/отказ" и создадим новую сделку для новой даты.
+  if (updateData.date && existing && existing.amoDealId) {
+    try {
+      // определяем serviceName (берём новый, если он передан, иначе старый)
+      const svcId = updateData.serviceId !== undefined ? updateData.serviceId : existing.serviceId;
+      const svc = svcId ? await prisma.service.findUnique({ where: { id: svcId } }) : null;
+      const serviceName = svc ? svc.name : '';
+
+      // добавим заметку в старую сделку и переведём её в отказные
+      await amoApi.addNoteToLead(existing.amoDealId, `Заказ перенесён диспетчером на ${updateData.date.toISOString().split('T')[0]}`);
+      await amoApi.updateLeadStage(existing.amoDealId, serviceName, 'refusal');
+
+      // создадим новую сделку через API и запишем amoDealId в обновляемые данные
+      if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+        const clientName = updateData.clientName !== undefined ? updateData.clientName : existing.clientName;
+        const clientPhone = updateData.clientPhone !== undefined ? updateData.clientPhone : existing.clientPhone;
+        const newAmoId = await amoApi.createLead({ name: clientName, phone: clientPhone, note: `Перенесён заказ: ${updateData.date.toISOString().split('T')[0]}`, serviceName });
+        if (newAmoId) updateData.amoDealId = String(newAmoId);
+      }
+    } catch (e) {
+      console.error('Failed to handle amo transfer for date change:', e.message);
+    }
+  }
+
+  // serviceIds: if provided as array, store as JSON string
+  if (updateData.serviceIds !== undefined) {
+    if (Array.isArray(updateData.serviceIds)) updateData.serviceIds = JSON.stringify(updateData.serviceIds);
+    else if (typeof updateData.serviceIds === 'string' && updateData.serviceIds.trim() === '') updateData.serviceIds = null;
+  }
+
+  // isCash handling: ensure boolean
+  if (updateData.isCash !== undefined) updateData.isCash = Boolean(updateData.isCash);
 
   ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
     if (updateData[key] !== undefined) updateData[key] = parseFloat(updateData[key]) || 0;
@@ -117,6 +192,25 @@ export async function PUT(req) {
       where: { id },
       data: updateData,
     });
+
+    // Если статус изменился — обновим сделку в amoCRM (если есть amoDealId)
+    try {
+      if (order.amoDealId && updateData.status && existing && existing.status !== updateData.status && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+        if (updateData.status === 'Отказ') {
+          await amoApi.updateLeadStage(order.amoDealId, (order.serviceId ? (await prisma.service.findUnique({ where: { id: order.serviceId } })).name : ''), 'refusal');
+          // Добавим примечание с причиной отказа
+          const reason = updateData.refusalReason || order.refusalReason || '';
+          if (reason) await amoApi.addNoteToLead(order.amoDealId, 'Отказ: ' + reason);
+        } else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') {
+          await amoApi.updateLeadStage(order.amoDealId, (order.serviceId ? (await prisma.service.findUnique({ where: { id: order.serviceId } })).name : ''), 'complete');
+        } else if (updateData.status === 'Новый заказ') {
+          await amoApi.updateLeadStage(order.amoDealId, (order.serviceId ? (await prisma.service.findUnique({ where: { id: order.serviceId } })).name : ''), 'reset');
+        }
+      }
+    } catch (e) {
+      console.error('Failed updating amo lead stage on admin PUT:', e.message);
+    }
+
     return NextResponse.json({ order });
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось обновить заказ' }, { status: 400 });

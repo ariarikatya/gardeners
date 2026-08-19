@@ -26,6 +26,7 @@ model Gardener {
   id              String      @id @default(uuid())
   name            String
   phone           String      @unique
+  vkId            String?     // VK user id / peer id for notifications
   bonusPercent    Float       @default(0)
   finePercent     Float       @default(0)
   writeoffPercent Float       @default(0)
@@ -64,11 +65,23 @@ model Order {
   refusalReason         String? // Причина отказа, вводит садовник
   photoBefore           String? // Ссылка на фото "До" (ImgBB)
   photoAfter            String? // Ссылка на фото "После" (ImgBB)
-  photoAct              String? // Ссылка на фото акта/документа (ImgBB)
+  photoAct              String? // Ссылка на фото акта/документа (ImgBB) — если нужно несколько фото, поле хранит JSON array as string
   gardenerId            String
   gardener              Gardener  @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   serviceId             String?
   service               Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  // ID сделки в amoCRM (если создана/связана)
+  amoDealId             String?
+
+  // Дополнительные поля
+  serviceIds            String?   // JSON-stringified array of service ids (for multi-service orders)
+  isCash                Boolean   @default(true) // true = нал, false = безнал
+  cardFilledAt          DateTime? // метка, что карточка заказа заполнена садовником
+  clientCalledAt        DateTime? // метка, что садовник позвонил клиенту
+
+  // Связанные операции (штрафы, траты, премии) — добавлено для идемпотентности
+  operations            Operation[]
 
   @@index([date, gardenerId]) // Один садовник может иметь несколько заказов в один день
 }
@@ -83,13 +96,24 @@ model DayOff {
 }
 
 model Operation {
-  id          String   @id @default(uuid())
-  gardenerId  String
-  gardener    Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
-  type        String // "bonus" | "fine" | "writeoff"
-  amount      Float
-  description String?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(uuid())
+  gardenerId    String
+  gardener      Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+
+  // Связь с заказом (опционально) — для идемпотентности штрафов/трат
+  orderId       String? 
+  order         Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  type          String   // "bonus" | "fine" | "writeoff" | "expense"
+  amount        Float
+  description   String?
+  receiptUrl    String?
+  approved      Boolean  @default(false)
+  approvedAmount Float?
+  createdAt     DateTime @default(now())
+
+  @@index([gardenerId])
+  @@index([orderId])
 }
 
 model WebLead {
@@ -104,5 +128,9 @@ model WebLead {
   status         String    @default("Новая") // "Новая" | "Обработана"
   assignedTo     String? // Имя садовника, которому назначили заказ
   createdOrderId String? // ID реального заказа, созданного по этой заявке — чтобы "Переназначить" редактировал его, а не плодил дубли
+
+  // ID сделки/лида в amoCRM (если заявка была передана в amo через API)
+  amoDealId       String?
+
   createdAt      DateTime  @default(now())
 }

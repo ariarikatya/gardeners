@@ -390,6 +390,7 @@ export default function LeaderDashboard() {
                       <th className="px-3 py-2 font-semibold">Премия ₽</th>
                       <th className="px-3 py-2 font-semibold">Штраф ₽</th>
                       <th className="px-3 py-2 font-semibold">Списание ₽</th>
+                      <th className="px-3 py-2 font-semibold">% фирмы</th>
                       <th className="px-3 py-2 font-semibold">Действие</th>
                     </tr>
                   </thead>
@@ -434,6 +435,40 @@ export default function LeaderDashboard() {
                             className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
                             placeholder="Добавить"
                           />
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.writeoff)}</div>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={g.writeoffDraft ?? ''}
+                            onChange={(e) => updateGardenerField(g.id, 'writeoffDraft', e.target.value)}
+                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
+                            placeholder="Добавить"
+                          />
+                        </td>
++                        <td className="px-3 py-3">
++                          <div className="text-[10px] uppercase text-slate-400 mb-1">Доля фирмы %</div>
++                          <input
++                            type="number"
++                            min="0"
++                            max="100"
++                            step="1"
++                            value={g.bonusPercent ?? g.bonusPercent === 0 ? g.bonusPercent : ''}
++                            onChange={(e) => updateGardenerField(g.id, 'bonusPercent', Number(e.target.value))}
++                            className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
++                            placeholder="%"
++                          />
++                          <button onClick={async () => {
++                            try {
++                              const res = await fetch('/api/leader', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: g.id, bonusPercent: g.bonusPercent, finePercent: g.finePercent, writeoffPercent: g.writeoffPercent }) });
++                              if (!res.ok) throw new Error((await res.json()).error || 'Ошибка');
++                              await fetchData();
++                              alert('Процент сохранён');
++                            } catch (err) { alert(err.message || 'Ошибка'); }
++                          }} className="text-xs bg-emerald-600 text-white px-2 py-1 rounded">Сохранить %</button>
++                        </td>
                           <input
                             type="text"
                             value={g.fineNote ?? ''}
@@ -504,12 +539,48 @@ export default function LeaderDashboard() {
                 <ul className="space-y-2 max-h-64 overflow-auto">
                   {opsList.map(op => (
                     <li key={op.id} className="flex justify-between items-center border p-2 rounded">
-                      <div>
-                        <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)}</div>
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : null}</div>
                         {op.description && <div className="text-xs text-slate-500">{op.description}</div>}
                         <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
                       </div>
-                      <button onClick={() => deleteOperation(op.id)} className="text-rose-600 text-xs">Удалить</button>
+
+                      <div className="flex items-center gap-2">
+                        <input type="number" defaultValue={op.approvedAmount ?? op.amount} min="0" className="w-24 border rounded px-2 py-1 text-sm" id={`approved-${op.id}`} />
+                        <button
+                          onClick={async () => {
+                            const el = document.getElementById(`approved-${op.id}`);
+                            const val = el ? Number(el.value || 0) : Number(op.amount || 0);
+                            try {
+                              const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: true, approvedAmount: val }) });
+                              const json = await res.json();
+                              if (!res.ok) throw new Error(json.error || 'Ошибка');
+                              // обновим список
+                              if (opsModalGardener) await openOpsModal(opsModalGardener);
+                              await fetchData();
+                              // если бот вк настроен, можно показать уведомление в UI
+                              if (json.operation && json.operation.approved) alert('Трата утверждена и садовник должен получить уведомление во ВКонтакте (если указан vkId)');
+                            } catch (err) { alert(err.message || 'Ошибка'); }
+                          }}
+                          className="bg-emerald-600 text-white px-3 py-1 rounded text-sm"
+                        >Утвердить</button>
+
+                        <button
+                          onClick={async () => {
+                            // снять утверждение
+                            try {
+                              const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: false, approvedAmount: null }) });
+                              const json = await res.json();
+                              if (!res.ok) throw new Error(json.error || 'Ошибка');
+                              if (opsModalGardener) await openOpsModal(opsModalGardener);
+                              await fetchData();
+                            } catch (err) { alert(err.message || 'Ошибка'); }
+                          }}
+                          className="bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm"
+                        >Снять</button>
+
+                        <button onClick={() => deleteOperation(op.id)} className="text-rose-600 text-xs">Удалить</button>
+                      </div>
                     </li>
                   ))}
                 </ul>

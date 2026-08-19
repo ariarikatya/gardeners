@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-  status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: ''
+  status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: '', serviceIds: [], isCash: true
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -75,10 +75,20 @@ export default function AdminDashboard() {
   const [formData, setFormData] = useState(emptyOrderForm);
   const [convertingLeadId, setConvertingLeadId] = useState(null);
   const [exportPeriod, setExportPeriod] = useState('all');
+  const [exportCustomStart, setExportCustomStart] = useState('');
+  const [exportCustomEnd, setExportCustomEnd] = useState('');
+  const [showPastDates, setShowPastDates] = useState(false);
+  const [calendarRange, setCalendarRange] = useState('30'); // '30' | 'monthEnd' | 'yearEnd'
+  const [tableScale, setTableScale] = useState(1);
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
   const [editingGardener, setEditingGardener] = useState(null);
+
+  // Модал для массовой привязки VK
+  const [showVkBulkModal, setShowVkBulkModal] = useState(false);
+  const [vkBulkText, setVkBulkText] = useState('');
+  const [vkBulkResult, setVkBulkResult] = useState(null);
 
   // Добавление услуги в каталог
   const [newServiceName, setNewServiceName] = useState('');
@@ -97,12 +107,31 @@ export default function AdminDashboard() {
   const [longPressInfo, setLongPressInfo] = useState(null);
   const [longPressTimer, setLongPressTimer] = useState(null);
 
-  // Генерация дат на 30 дней вперед (для сетки календаря)
+  // Генерация дат для сетки календаря по выбранному диапазону
   const dates = [];
-  for (let i = 0; i < 30; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    dates.push(d);
+  const startOffset = showPastDates ? -30 : 0; // allow viewing past dates when toggled
+  if (calendarRange === '30') {
+    for (let i = startOffset; i < 30; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      dates.push(d);
+    }
+  } else if (calendarRange === 'monthEnd') {
+    const now = new Date();
+    const start = showPastDates ? new Date(now.getFullYear(), now.getMonth(), 1) : now;
+    let cursor = new Date(start);
+    while (cursor.getMonth() === start.getMonth()) {
+      dates.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  } else if (calendarRange === 'yearEnd') {
+    const now = new Date();
+    const end = new Date(now.getFullYear(), 11, 31);
+    let cursor = showPastDates ? new Date(now.getFullYear(), 0, 1) : new Date();
+    while (cursor <= end) {
+      dates.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
   }
 
   // Более длинный горизонт для поиска окна (данные уже загружены целиком, доп. запросов не нужно)
@@ -347,7 +376,7 @@ export default function AdminDashboard() {
   };
 
   const openEditGardener = (g) => {
-    setEditingGardener({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services || []).map(s => s.id) });
+    setEditingGardener({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services || []).map(s => s.id), vkId: g.vkId || '' });
   };
 
   const toggleEditGardenerService = (serviceId) => {
@@ -383,6 +412,28 @@ export default function AdminDashboard() {
       body: JSON.stringify({ id })
     });
     if (res.ok) fetchData();
+  };
+
+  // Массовая привязка vkId по списку phone,vkId (н-р: 79991234567,12345) или json entries
+  const handleVkBulkBind = async () => {
+    if (!vkBulkText || !vkBulkText.trim()) return alert('Вставьте список phone,vkId в поле');
+    setVkBulkResult(null);
+    try {
+      const res = await fetch('/api/admin/gardeners/bulk-bind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: vkBulkText })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Ошибка');
+        return;
+      }
+      setVkBulkResult(data.results);
+      fetchData();
+    } catch (e) {
+      alert('Ошибка: ' + e.message);
+    }
   };
 
   const handleAddService = async (e) => {
@@ -475,6 +526,14 @@ export default function AdminDashboard() {
     visibleGardeners = visibleGardeners.filter(g => (g.services || []).some(s => s.id === filterServiceId));
   }
 
+  // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
+  const districtOptions = (() => {
+    const counts = {};
+    orders.forEach(o => { if (o.district) counts[o.district] = (counts[o.district] || 0) + 1; });
+    const list = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    return list;
+  })();
+
   const visibleDates = dates.filter(d => selectedWeekdays.includes(d.getDay()));
 
   // Поиск ближайшего подходящего окна: группируем по дате, чтобы при большом
@@ -514,6 +573,9 @@ export default function AdminDashboard() {
 
   const getExportUrl = (period) => {
     if (period === 'all') return '/api/admin/export';
+    if (period === 'custom' && exportCustomStart && exportCustomEnd) {
+      return `/api/admin/export?start=${exportCustomStart}&end=${exportCustomEnd}`;
+    }
     const now = new Date();
     let start;
     if (period === 'year') {
@@ -542,7 +604,14 @@ export default function AdminDashboard() {
             <option value="all">За всё время</option>
             <option value="year">Этот год</option>
             <option value="month">Этот месяц</option>
+            <option value="custom">Свой диапазон</option>
           </select>
+          {exportPeriod === 'custom' && (
+            <div className="flex items-center gap-2 ml-2">
+              <input type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="text-xs rounded-lg px-2 py-1 border" />
+              <input type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="text-xs rounded-lg px-2 py-1 border" />
+            </div>
+          )}
           <a
             href={getExportUrl(exportPeriod)}
             className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap"
@@ -556,6 +625,24 @@ export default function AdminDashboard() {
           >
             {syncing ? '...' : <>🔄 <span className="hidden sm:inline">Google </span>Таблицы</>}
           </button>
+
+          {/* Быстрые настройки отображения календаря */}
+          <div className="flex items-center gap-2">
+            <select value={calendarRange} onChange={e => setCalendarRange(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600 bg-emerald-50">
+              <option value="30">30 дней</option>
+              <option value="monthEnd">До конца месяца</option>
+              <option value="yearEnd">До конца года</option>
+            </select>
+            <button onClick={() => setShowPastDates(s => !s)} className={`text-xs rounded-lg px-2 py-1 border ${showPastDates ? 'bg-emerald-100 border-emerald-300' : 'bg-white border-slate-200'}`}>
+              {showPastDates ? 'Показывать прошлое' : 'Показать прошлые'}
+            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-white border rounded px-2">-</button>
+              <div className="text-xs px-2">Масштаб {tableScale}</div>
+              <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-white border rounded px-2">+</button>
+            </div>
+          </div>
+
           <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
             Выйти
           </button>
@@ -792,13 +879,13 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto" style={{ transform: `scale(${tableScale})`, transformOrigin: '0 0' }}>
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-slate-100 border-b border-slate-200">
-                      <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200">Дата</th>
+                      <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-10 bg-slate-100">Дата</th>
                       {visibleGardeners.map(g => (
-                        <th key={g.id} className="p-3 text-sm font-semibold text-slate-600 border-r border-slate-200 min-w-[180px]">
+                        <th key={g.id} className="p-3 text-sm font-semibold text-slate-600 border-r border-slate-200 min-w-[180px] sticky top-0 z-10 bg-slate-100">
                           {g.name}
                         </th>
                       ))}
@@ -814,7 +901,7 @@ export default function AdminDashboard() {
                         <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
                           <td className={`p-3 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
                             <span className="inline-flex items-center gap-2">
-                              <span>{dateStr}</span>
+                              <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</span>
                               <span>({dayLabel})</span>
                               {holiday && <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Выходной</span>}
                             </span>
@@ -891,7 +978,12 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Список */}
               <div className="col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                <h3 className="text-lg font-bold text-slate-700 mb-4">Наши садовники ({gardeners.length})</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-slate-700">Наши садовники ({gardeners.length})</h3>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setShowVkBulkModal(true)} className="text-xs bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-lg">Массовая привязка VK</button>
+                  </div>
+                </div>
                 <div className="divide-y divide-slate-100">
                   {gardeners.map(g => (
                     <div key={g.id} className="py-3 flex justify-between items-center">
@@ -917,8 +1009,14 @@ export default function AdminDashboard() {
                               </label>
                             ))}
                           </div>
-                          <button type="submit" className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm">Сохранить</button>
-                          <button type="button" onClick={() => setEditingGardener(null)} className="text-slate-500 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm">Отмена</button>
+                          <div className="mt-2">
+                            <label className="block text-xs text-slate-500">VK id</label>
+                            <input type="text" value={editingGardener.vkId ?? ''} onChange={e => setEditingGardener({...editingGardener, vkId: e.target.value})} className="mt-1 px-2 py-1 rounded-lg border text-sm w-48" placeholder="peer id или user id" />
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button type="submit" className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm">Сохранить</button>
+                            <button type="button" onClick={() => setEditingGardener(null)} className="text-slate-500 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm">Отмена</button>
+                          </div>
                         </form>
                       ) : (
                         <>
@@ -928,13 +1026,29 @@ export default function AdminDashboard() {
                             {g.services && g.services.length > 0 && (
                               <div className="text-xs text-emerald-700 mt-1">{g.services.map(s => s.name).join(', ')}</div>
                             )}
+                            {g.vkId && (
+                              <div className="text-xs text-slate-400 mt-1">VK: {g.vkId}</div>
+                            )}
                           </div>
-                          <div className="flex gap-1">
+                          <div className="flex gap-1 items-center">
                             <button
                               onClick={() => openEditGardener(g)}
                               className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm transition-all"
                             >
                               Редактировать
+                            </button>
+                            <button
+                              onClick={() => {
+                                const vk = prompt('Введите vkId (peer id или user id) для садовника ' + g.name + ':', g.vkId || '');
+                                if (vk !== null) {
+                                  fetch('/api/admin/gardeners', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services||[]).map(s=>s.id), vkId: vk.trim() || null }) }).then(res => {
+                                    if (res.ok) fetchData(); else res.json().then(d=>alert(d.error||'Ошибка'));
+                                  });
+                                }
+                              }}
+                              className="text-sky-600 hover:bg-sky-50 px-3 py-1.5 rounded-lg text-sm transition-all"
+                            >
+                              VK
                             </button>
                             <button
                               onClick={() => handleDeleteGardener(g.id)}
@@ -1129,18 +1243,32 @@ export default function AdminDashboard() {
               <div className="mb-4">
                 <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
                 <div className="flex gap-2">
-                  {selectedOrder.photoBefore && (
-                    <a href={selectedOrder.photoBefore} target="_blank" rel="noopener noreferrer" className="block">
-                      <img src={selectedOrder.photoBefore} alt="До" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                      <span className="text-[10px] text-slate-400">До</span>
-                    </a>
-                  )}
-                  {selectedOrder.photoAfter && (
-                    <a href={selectedOrder.photoAfter} target="_blank" rel="noopener noreferrer" className="block">
-                      <img src={selectedOrder.photoAfter} alt="После" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                      <span className="text-[10px] text-slate-400">После</span>
-                    </a>
-                  )}
+                  {(() => {
+                    const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
+                    try {
+                      const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
+                      return arr.slice(0,6).map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
+                          <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                          <span className="text-[10px] text-slate-400">До</span>
+                        </a>
+                      ));
+                    } catch (e) { return null; }
+                  })()}
+
+                  {(() => {
+                    const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
+                    try {
+                      const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
+                      return arr.slice(0,6).map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
+                          <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                          <span className="text-[10px] text-slate-400">После</span>
+                        </a>
+                      ));
+                    } catch (e) { return null; }
+                  })()}
+
                   {selectedOrder.photoAct && (
                     <a href={selectedOrder.photoAct} target="_blank" rel="noopener noreferrer" className="block">
                       <img src={selectedOrder.photoAct} alt="Акт" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
@@ -1181,21 +1309,24 @@ export default function AdminDashboard() {
                   <label className="block text-xs font-semibold text-slate-500">Район</label>
                   <select required value={formData.district} onChange={e => setFormData({...formData, district: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
                     <option value="" disabled>Выберите район</option>
-                    <option>Шумейка</option>
-                    <option>Генеральское</option>
-                    <option>Малая Тополевка</option>
-                    <option>Усть курдюм</option>
-                    <option>Зоналка</option>
-                    <option>Юбилейный</option>
-                    <option>Кумыска</option>
-                    <option>Центр</option>
-                    <option>Поливановка</option>
-                    <option>Ленинский район</option>
-                    <option>Трещиха</option>
-                    <option>Маркс</option>
-                    <option>Заводской район</option>
-                    <option>Дальняк</option>
-                    <option>Другое</option>
+                    {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                    <optgroup label="Другие">
+                      <option>Шумейка</option>
+                      <option>Генеральское</option>
+                      <option>Малая Тополевка</option>
+                      <option>Усть курдюм</option>
+                      <option>Зоналка</option>
+                      <option>Юбилейный</option>
+                      <option>Кумыска</option>
+                      <option>Центр</option>
+                      <option>Поливановка</option>
+                      <option>Ленинский район</option>
+                      <option>Трещиха</option>
+                      <option>Маркс</option>
+                      <option>Заводской район</option>
+                      <option>Дальняк</option>
+                      <option>Другое</option>
+                    </optgroup>
                   </select>
                 </div>
                 <div>
@@ -1205,12 +1336,20 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Услуга</label>
-                <select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
-                  <option value="">Не указана</option>
-                  {services.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                <div className="flex flex-col gap-2">
+                  <select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                    <option value="">Не указана</option>
+                    {services.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <label className="text-xs text-slate-500">Или выберите несколько услуг (мультисписок)</label>
+                  <select multiple value={formData.serviceIds || []} onChange={e => setFormData({...formData, serviceIds: Array.from(e.target.selectedOptions).map(o => o.value)})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2 h-28">
+                    {services.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Описание работ (Что делать)</label>
@@ -1235,6 +1374,9 @@ export default function AdminDashboard() {
                   <label className="block text-xs font-semibold text-slate-500">Доля фирмы</label>
                   <input type="number" value={formData.companyShare} onChange={e => setFormData({...formData, companyShare: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
                 </div>
+              </div>
+              <div className="mt-2">
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formData.isCash ?? true} onChange={e => setFormData({...formData, isCash: e.target.checked})} /> Нал / Безнал (чек-бокс: если безнал — сумма не учитывается в "к сдаче")</label>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Статус заказа</label>
@@ -1272,5 +1414,33 @@ export default function AdminDashboard() {
         </div>
       )}
     </div>
+
+      {/* Модал массовой привязки VK */}
+      {showVkBulkModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-xl">
+            <h3 className="text-xl font-bold text-slate-800 mb-3">Массовая привязка VK</h3>
+            <p className="text-sm text-slate-600 mb-3">Вставьте строки в формате: <code>79991234567,12345</code> (номер, vkId) по одной на строку. Можно также отправлять JSON с полем entries.</p>
+            <textarea value={vkBulkText} onChange={e => setVkBulkText(e.target.value)} className="w-full h-48 border rounded p-2 mb-3" placeholder="79991234567,12345\n79999876543,54321"></textarea>
+            <div className="flex gap-2 mb-3">
+              <button onClick={handleVkBulkBind} className="px-4 py-2 bg-emerald-600 text-white rounded-lg">Применить</button>
+              <button onClick={() => { setShowVkBulkModal(false); setVkBulkText(''); setVkBulkResult(null); }} className="px-4 py-2 border rounded-lg">Закрыть</button>
+            </div>
+            {vkBulkResult && (
+              <div className="mt-3 text-sm">
+                <div className="font-semibold mb-2">Результаты:</div>
+                <div className="grid gap-1 text-xs">
+                  {vkBulkResult.map((r, i) => (
+                    <div key={i} className={`p-2 rounded ${r.ok ? 'bg-emerald-50 border border-emerald-200' : 'bg-rose-50 border border-rose-200'}`}>
+                      {r.ok ? `OK: ${r.id}` : `Ошибка: ${r.reason} ${r.item ? JSON.stringify(r.item) : ''}`}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
   );
 }

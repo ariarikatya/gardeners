@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
+import amoApi from '@/lib/amoApi.fixed';
 
 const prisma = new PrismaClient();
 
@@ -29,7 +30,7 @@ export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct } = await req.json();
+  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt } = await req.json();
 
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order || order.gardenerId !== payload.gardenerId) {
@@ -53,14 +54,54 @@ export async function PUT(req) {
     if (!amount || amount <= 0) {
       return NextResponse.json({ error: 'Укажите фактическую сумму заказа' }, { status: 400 });
     }
-    if (!photoBefore || !photoAfter || !photoAct) {
-      return NextResponse.json({ error: 'Прикрепите все три фото: до, после и акт/документ' }, { status: 400 });
+
+    // allow multiple photos: accept string or array; store arrays as JSON strings
+    const normalizePhotos = (p) => {
+      if (!p) return null;
+      if (Array.isArray(p)) return JSON.stringify(p);
+      if (typeof p === 'string' && p.trim().startsWith('[')) return p; // already json
+      return String(p);
+    };
+
+    const beforeVal = normalizePhotos(photoBefore);
+    const afterVal = normalizePhotos(photoAfter);
+    const actVal = normalizePhotos(photoAct);
+
+    if (!beforeVal || !afterVal || !actVal) {
+      return NextResponse.json({ error: 'Прикрепите фото: до, после и акт/документ' }, { status: 400 });
     }
-    data = { status: 'Выполнен', priceFact: amount, photoBefore, photoAfter, photoAct };
+
+    data = { status: 'Выполнен', priceFact: amount, photoBefore: beforeVal, photoAfter: afterVal, photoAct: actVal };
+  } else if (action === 'mark_card') {
+    // gardener marked that he filled card
+    data = { cardFilledAt: cardFilledAt ? new Date(cardFilledAt) : new Date() };
+  } else if (action === 'mark_call') {
+    data = { clientCalledAt: clientCalledAt ? new Date(clientCalledAt) : new Date() };
   } else {
     return NextResponse.json({ error: 'Неизвестное действие' }, { status: 400 });
   }
 
   const updated = await prisma.order.update({ where: { id }, data });
+
+  // Обновляем сделку в amoCRM в соответствии со сменой статуса
+  try {
+    if (updated.amoDealId && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+      const svc = updated.serviceId ? (await prisma.service.findUnique({ where: { id: updated.serviceId } })).name : '';
+      if (data.status === 'Отказ') {
+        await amoApi.updateLeadStage(updated.amoDealId, svc, 'refusal');
+        if (updated.refusalReason) await amoApi.addNoteToLead(updated.amoDealId, 'Отказ: ' + updated.refusalReason);
+      } else if (data.status === 'Выполнен' || data.status === 'Выполнено') {
+        await amoApi.updateLeadStage(updated.amoDealId, svc, 'complete');
+      } else if (data.status === 'Перенос') {
+        // При запросе переноса можно добавить заметку
+        if (data.transferRequestedDate) await amoApi.addNoteToLead(updated.amoDealId, 'Запрошен перенос на: ' + new Date(data.transferRequestedDate).toISOString().split('T')[0]);
+      } else if (data.status === 'Новый заказ') {
+        await amoApi.updateLeadStage(updated.amoDealId, svc, 'reset');
+      }
+    }
+  } catch (e) {
+    console.error('Failed updating amo lead on gardener action:', e.message);
+  }
+
   return NextResponse.json({ order: updated });
 }
