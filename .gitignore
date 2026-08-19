@@ -1,3 +1,1 @@
-node_modules
-.next
-.env
+Nothing should be ignored based on the provided file changes. The only modified file is `lib/amoApi.fixed.js`, which is a source code file and should not be added to .gitignore. Since there are no build artifacts, dependencies, or temporary files in the changes, no additional ignore rules are needed.
