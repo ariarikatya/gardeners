@@ -7,10 +7,11 @@ export async function middleware(request) {
 
   const isAdminPage = pathname.startsWith('/admin');
   const isGardenerPage = pathname.startsWith('/gardener');
+  const isLeaderPage = pathname.startsWith('/leader');
 
   // API-роуты сами проверяют роль внутри каждого обработчика —
   // здесь защищаем только сами страницы, чтобы чужой раздел не открывался в браузере.
-  if (!isAdminPage && !isGardenerPage) {
+  if (!isAdminPage && !isGardenerPage && !isLeaderPage) {
     return NextResponse.next();
   }
 
@@ -33,9 +34,13 @@ export async function middleware(request) {
     return NextResponse.redirect(new URL('/admin', request.url));
   }
 
+  if (isLeaderPage && payload.role !== 'LEADER') {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/gardener/:path*'],
+  matcher: ['/admin/:path*', '/gardener/:path*', '/leader/:path*'],
 };

@@ -25,6 +25,8 @@ export default function LoginPage() {
 
       if (data.role === 'ADMIN') {
         router.push('/admin');
+      } else if (data.role === 'LEADER') {
+        router.push('/leader');
       } else {
         router.push('/gardener');
       }

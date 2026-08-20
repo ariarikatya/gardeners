@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { forwardToAmo } from '@/lib/amo';
+import amoApi from '@/lib/amoApi';
 
 const prisma = new PrismaClient();
 
@@ -25,15 +26,40 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Укажите телефон' }, { status: 400, headers: CORS_HEADERS });
     }
 
+    // Обязательное поле район (заполняется в виджете/админке)
+    if (!body.district) {
+      return NextResponse.json({ error: 'Укажите район' }, { status: 400, headers: CORS_HEADERS });
+    }
+
+    const phoneClean = String(phone).trim();
+    const prefDate = preferredDate ? new Date(preferredDate) : null;
+
+    // Предотвращаем дубли: если за последние 60 минут уже была заявка с таким телефоном
+    // или если уже есть заявка с тем же телефоном и желаемой датой — считаем дублированной
+    let existingLead = null;
+    if (prefDate) {
+      existingLead = await prisma.webLead.findFirst({ where: { phone: phoneClean, preferredDate: prefDate } });
+    }
+    if (!existingLead) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      existingLead = await prisma.webLead.findFirst({ where: { phone: phoneClean, createdAt: { gte: oneHourAgo } } });
+    }
+
+    if (existingLead) {
+      // Если заявка уже есть — возвращаем её id и не шлём повторно в amo
+      return NextResponse.json({ success: true, id: existingLead.id, duplicate: true }, { headers: CORS_HEADERS });
+    }
+
     // Заявка сразу попадает во вкладку «Заявки с сайта» у диспетчера...
     const lead = await prisma.webLead.create({
       data: {
         name: name ? String(name).trim() : 'Не указано',
-        phone: String(phone).trim(),
+        phone: phoneClean,
         address: address || null,
+        district: body.district,
         comment: comment || null,
         serviceId: serviceId || null,
-        preferredDate: preferredDate ? new Date(preferredDate) : null,
+        preferredDate: prefDate,
       },
     });
 
@@ -46,7 +72,28 @@ export async function POST(req) {
     noteParts.push('Заявка с виджета онлайн-записи сайта');
     noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-    await forwardToAmo({ name, phone, note: noteParts.join(' | ') });
+    await forwardToAmo({
+      clientName: name,
+      clientPhone: phone,
+      note: noteParts.join(' | '),
+      workDescription: comment || undefined,
+      address: address || undefined,
+      services: serviceName || undefined,
+      approxWhere: body.district || undefined,
+    });
+
+    // Также создаём сделку в amoCRM через API (если настроены токены)
+    try {
+      if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+        const leadNote = noteParts.join(' | ');
+        const amoId = await amoApi.createLead({ name: name, phone: phone, note: leadNote, serviceName: serviceName });
+        if (amoId) {
+          await prisma.webLead.update({ where: { id: lead.id }, data: { amoDealId: String(amoId) } });
+        }
+      }
+    } catch (e) {
+      console.error('Failed to create amo lead (API):', e.message);
+    }
 
     return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
   } catch (e) {

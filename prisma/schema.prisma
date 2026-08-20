@@ -10,6 +10,7 @@ generator client {
 enum Role {
   ADMIN
   GARDENER
+  LEADER
 }
 
 model User {
@@ -22,14 +23,18 @@ model User {
 }
 
 model Gardener {
-  id       String    @id @default(uuid())
-  name     String
-  phone    String    @unique
-  user     User?
-  orders   Order[]
-  dayOffs  DayOff[]
-  services Service[] @relation("GardenerServices")
-  expenses Expense[]
+  id              String      @id @default(uuid())
+  name            String
+  phone           String      @unique
+  vkId            String?     // VK user id / peer id for notifications
+  bonusPercent    Float       @default(0)
+  finePercent     Float       @default(0)
+  writeoffPercent Float       @default(0)
+  user            User?
+  orders          Order[]
+  dayOffs         DayOff[]
+  services        Service[]   @relation("GardenerServices")
+  Operation       Operation[]
 }
 
 model Service {
@@ -37,63 +42,48 @@ model Service {
   name      String     @unique
   gardeners Gardener[] @relation("GardenerServices")
   orders    Order[]
-  orderLinks OrderService[]
 }
 
 model Order {
-  id             String   @id @default(uuid())
-  date           DateTime // Только дата (без учета времени, YYYY-MM-DD)
-  dayOfWeek      String
-  clientName     String
-  address        String
-  district       String?
-  clientPhone    String
-  description    String
-  priceContract  Float    @default(0) // Оговоренная сумма
-  priceFact      Float    @default(0) // Сумма по факту
-  employeeSalary Float    @default(0) // З/п сотрудника
-  companyShare   Float    @default(0) // Доля фирмы
-  paymentType    String   @default("Нал") // "Нал" | "Безнал"
-  paid           Boolean  @default(false) // Отмечено руководителем как выплаченное
-  contactStatus  String   @default("Не связывался") // Статус звонка клиенту
-  contactPenalty Float    @default(0) // Автоматический штраф за результат звонка
-  status         String   @default("Новый заказ") // "Новый заказ" | "Перенос" | "Отказ" | "Выполнен" | "Отменен"
-  comment        String?
+  id                    String    @id @default(uuid())
+  date                  DateTime // Только дата (без учета времени, YYYY-MM-DD)
+  dayOfWeek             String
+  clientName            String
+  address               String
+  district              String?
+  clientPhone           String
+  description           String
+  priceContract         Float     @default(0) // Оговоренная сумма
+  priceFact             Float     @default(0) // Сумма по факту
+  employeeSalary        Float     @default(0) // З/п сотрудника
+  companyShare          Float     @default(0) // Доля фирмы
+  status                String    @default("Новый заказ") // "Новый заказ" | "Перенос" | "Отказ" | "Выполнен" | "Отменен"
+  paid                  Boolean   @default(false) // Отметка, что по заказу выплачено всё
+  paidTo                String?    // 'GARDENER' | 'COMPANY' — кто получил выплату
+  comment               String?
   transferRequestedDate DateTime? // Желаемая дата клиента при запросе переноса от садовника
-  refusalReason  String?  // Причина отказа, вводит садовник
-  photoBefore    String?  // Ссылка на фото "До" (ImgBB)
-  photoAfter     String?  // Ссылка на фото "После" (ImgBB)
-  photoAct       String?  // Ссылка на фото акта/документа (ImgBB)
-  extraPhotos    String[] @default([]) // Дополнительные фото по заказу
-  gardenerId     String
-  gardener       Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
-  serviceId      String?
-  service        Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  services       OrderService[]
+  refusalReason         String? // Причина отказа, вводит садовник
+  photoBefore           String? // Ссылка на фото "До" (ImgBB)
+  photoAfter            String? // Ссылка на фото "После" (ImgBB)
+  photoAct              String? // Ссылка на фото акта/документа (ImgBB) — если нужно несколько фото, поле хранит JSON array as string
+  gardenerId            String
+  gardener              Gardener  @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+  serviceId             String?
+  service               Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  // ID сделки в amoCRM (если создана/связана)
+  amoDealId             String?
+
+  // Дополнительные поля
+  serviceIds            String?   // JSON-stringified array of service ids (for multi-service orders)
+  isCash                Boolean   @default(true) // true = нал, false = безнал
+  cardFilledAt          DateTime? // метка, что карточка заказа заполнена садовником
+  clientCalledAt        DateTime? // метка, что садовник позвонил клиенту
+
+  // Связанные операции (штрафы, траты, премии) — добавлено для идемпотентности
+  operations            Operation[]
 
   @@index([date, gardenerId]) // Один садовник может иметь несколько заказов в один день
-}
-
-model OrderService {
-  orderId   String
-  serviceId String
-  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-
-  @@id([orderId, serviceId])
-}
-
-model Expense {
-  id         String   @id @default(uuid())
-  date       DateTime
-  amount     Float
-  description String
-  receiptUrl String?
-  gardenerId String
-  gardener   Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-
-  @@index([gardenerId, date])
 }
 
 model DayOff {
@@ -105,16 +95,42 @@ model DayOff {
   @@unique([date, gardenerId]) // Выходной либо есть, либо нет — на один день одна отметка
 }
 
+model Operation {
+  id            String   @id @default(uuid())
+  gardenerId    String
+  gardener      Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+
+  // Связь с заказом (опционально) — для идемпотентности штрафов/трат
+  orderId       String? 
+  order         Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  type          String   // "bonus" | "fine" | "writeoff" | "expense"
+  amount        Float
+  description   String?
+  receiptUrl    String?
+  approved      Boolean  @default(false)
+  approvedAmount Float?
+  createdAt     DateTime @default(now())
+
+  @@index([gardenerId])
+  @@index([orderId])
+}
+
 model WebLead {
   id             String    @id @default(uuid())
   name           String
   phone          String
   address        String?
+  district       String?
   comment        String?
   serviceId      String?
   preferredDate  DateTime? // Дата, которую выбрал клиент в виджете
   status         String    @default("Новая") // "Новая" | "Обработана"
-  assignedTo     String?   // Имя садовника, которому назначили заказ
-  createdOrderId String?   // ID реального заказа, созданного по этой заявке — чтобы "Переназначить" редактировал его, а не плодил дубли
+  assignedTo     String? // Имя садовника, которому назначили заказ
+  createdOrderId String? // ID реального заказа, созданного по этой заявке — чтобы "Переназначить" редактировал его, а не плодил дубли
+
+  // ID сделки/лида в amoCRM (если заявка была передана в amo через API)
+  amoDealId       String?
+
   createdAt      DateTime  @default(now())
 }

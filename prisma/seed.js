@@ -13,6 +13,17 @@ async function main() {
     },
   });
 
+  // Руководитель — отдельный кабинет
+  await prisma.user.upsert({
+    where: { phone: '79999999998' },
+    update: {},
+    create: {
+      phone: '79999999998',
+      name: 'Руководитель',
+      role: 'LEADER',
+    },
+  });
+
   // Тестовый садовник — создаём и Gardener, и связанного User для входа
   const existingGardener = await prisma.gardener.findUnique({
     where: { phone: '79000000000' },
