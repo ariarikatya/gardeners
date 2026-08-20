@@ -44,6 +44,10 @@ function compressImage(file, maxWidth = 1600, quality = 0.8) {
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [activeSection, setActiveSection] = useState('orders');
+  const [expenseForm, setExpenseForm] = useState({ date: new Date().toISOString().split('T')[0], amount: '', description: '' });
+  const [expenseReceiptUrl, setExpenseReceiptUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -61,8 +65,10 @@ export default function GardenerDashboard() {
   const [photoBeforeUrl, setPhotoBeforeUrl] = useState('');
   const [photoAfterUrl, setPhotoAfterUrl] = useState('');
   const [photoActUrl, setPhotoActUrl] = useState('');
+  const [extraPhotoUrls, setExtraPhotoUrls] = useState([]);
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [submitting, setSubmitting] = useState(false);
+  const [contactStatus, setContactStatus] = useState('');
 
   useEffect(() => {
     fetchOrders();
@@ -70,9 +76,11 @@ export default function GardenerDashboard() {
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch('/api/gardener/orders');
-      const data = await res.json();
+      const [ordersRes, expensesRes] = await Promise.all([fetch('/api/gardener/orders'), fetch('/api/gardener/expenses')]);
+      const data = await ordersRes.json();
+      const expensesData = await expensesRes.json();
       setOrders(data.orders || []);
+      setExpenses(expensesData.expenses || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -94,6 +102,8 @@ export default function GardenerDashboard() {
     setPhotoBeforeUrl('');
     setPhotoAfterUrl('');
     setPhotoActUrl('');
+    setExtraPhotoUrls([]);
+    setContactStatus(order.contactStatus || '');
   };
 
   const closeAction = () => {
@@ -101,23 +111,41 @@ export default function GardenerDashboard() {
     setActionType(null);
   };
 
+  const saveContactStatus = async (order, status) => {
+    setContactStatus(status);
+    const res = await fetch('/api/gardener/orders', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: order.id, action: 'contact', contactStatus: status })
+    });
+    if (res.ok) fetchOrders();
+    else alert((await res.json()).error);
+  };
+
+  const markPhoneClicked = (order) => {
+    saveContactStatus(order, 'Позвонил');
+  };
+
   const handlePhotoSelect = async (e, which) => {
-    const file = e.target.files[0];
+    const files = Array.from(e.target.files || []);
+    const file = files[0];
     if (!file) return;
     setUploadingWhich(which);
     try {
-      const compressed = await compressImage(file);
-      const formData = new FormData();
-      formData.append('image', compressed, 'photo.jpg');
-      const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (res.ok) {
-        if (which === 'before') setPhotoBeforeUrl(data.url);
-        if (which === 'after') setPhotoAfterUrl(data.url);
-        if (which === 'act') setPhotoActUrl(data.url);
-      } else {
-        alert(data.error);
+      const urls = [];
+      for (const selectedFile of which === 'extra' ? files : [file]) {
+        const compressed = await compressImage(selectedFile);
+        const formData = new FormData();
+        formData.append('image', compressed, 'photo.jpg');
+        const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Ошибка загрузки');
+        urls.push(data.url);
       }
+      if (which === 'before') setPhotoBeforeUrl(urls[0]);
+      if (which === 'after') setPhotoAfterUrl(urls[0]);
+      if (which === 'act') setPhotoActUrl(urls[0]);
+      if (which === 'extra') setExtraPhotoUrls(prev => [...prev, ...urls]);
     } catch (err) {
       alert('Не удалось загрузить фото: ' + err.message);
     } finally {
@@ -145,6 +173,7 @@ export default function GardenerDashboard() {
       payload.photoBefore = photoBeforeUrl;
       payload.photoAfter = photoAfterUrl;
       payload.photoAct = photoActUrl;
+      payload.extraPhotos = extraPhotoUrls;
     }
 
     try {
@@ -165,6 +194,31 @@ export default function GardenerDashboard() {
     }
   };
 
+  const addExpense = async (e) => {
+    e.preventDefault();
+    const res = await fetch('/api/gardener/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...expenseForm, receiptUrl: expenseReceiptUrl }) });
+    if (res.ok) { setExpenseForm({ date: new Date().toISOString().split('T')[0], amount: '', description: '' }); setExpenseReceiptUrl(''); fetchOrders(); }
+    else alert((await res.json()).error);
+  };
+
+  const uploadExpenseReceipt = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImage(file);
+      const formData = new FormData();
+      formData.append('image', compressed, 'receipt.jpg');
+      const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Не удалось загрузить чек');
+      setExpenseReceiptUrl(data.url);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   const formatDate = (dateStr) => new Date(dateStr).toLocaleDateString('ru-RU', {
     day: 'numeric', month: 'long', weekday: 'long'
   });
@@ -181,10 +235,28 @@ export default function GardenerDashboard() {
         {order.service && (
           <div className="text-xs font-medium text-emerald-700 mb-2">🌿 {order.service.name}</div>
         )}
+        {order.paymentType === 'Безнал' && (
+          <div className="text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1 mb-2">Безнал · оплачено фирме</div>
+        )}
 
         <div className="space-y-2 text-sm text-slate-600">
           <div>📍 <span className="font-medium text-slate-800">{order.address}</span></div>
-          <div>📞 <a href={`tel:${order.clientPhone}`} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+          {order.district && <div>🗺️ Район: <span className="font-medium text-slate-800">{order.district}</span></div>}
+          <div>📞 <a href={`tel:${order.clientPhone}`} onClick={() => markPhoneClicked(order)} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+          {order.status === 'Новый заказ' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500">Связь с клиентом:</span>
+              <select value={order.contactStatus || 'Не связывался'} onChange={e => saveContactStatus(order, e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1 text-xs">
+                <option>Не связывался</option>
+                <option>Позвонил</option>
+                <option>Связался</option>
+                <option>Не ответил</option>
+                <option>Перезвонить позже</option>
+                <option>Неверный номер</option>
+              </select>
+            </div>
+          )}
+          {order.contactPenalty > 0 && <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">Штраф: с клиентом не связались до 18:00 накануне заказа: {order.contactPenalty} ₽</div>}
           <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-slate-700 mt-2">
             <div className="text-xs font-semibold text-slate-400 mb-0.5">Что делать:</div>
             {order.description}
@@ -248,6 +320,12 @@ export default function GardenerDashboard() {
 
   const goToPrevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
   const goToNextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
+  const orderShare = order => (order.priceFact || order.priceContract || 0) * ((order.companyShare || 0) / 100);
+  const cashToCompany = orders.filter(o => o.status === 'Выполнен' && !o.paid && o.paymentType !== 'Безнал').reduce((sum, o) => sum + orderShare(o), 0);
+  const cashlessToCompany = orders.filter(o => o.status === 'Выполнен' && !o.paid && o.paymentType === 'Безнал').reduce((sum, o) => sum + orderShare(o), 0);
+  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalPenalties = orders.reduce((sum, order) => sum + (order.contactPenalty || 0), 0);
+  const walletBalance = cashToCompany - cashlessToCompany - totalExpenses + totalPenalties;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
@@ -280,7 +358,40 @@ export default function GardenerDashboard() {
           </div>
         </div>
 
-        {loading ? (
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setActiveSection('orders')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'orders' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Заказы</button>
+          <button onClick={() => setActiveSection('expenses')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'expenses' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Траты</button>
+          <button onClick={() => setActiveSection('wallet')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'wallet' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Кошелек</button>
+        </div>
+
+        {activeSection === 'wallet' ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+            <h3 className="font-semibold text-slate-800">К сдаче фирме</h3>
+            <div className="text-3xl font-bold text-emerald-800">{walletBalance} ₽</div>
+            <div className="text-sm text-slate-500">Нал: +{cashToCompany} ₽ · Безнал: -{cashlessToCompany} ₽ · Траты: -{totalExpenses} ₽ · Штрафы: +{totalPenalties} ₽</div>
+          </div>
+        ) : activeSection === 'expenses' ? (
+          <div className="space-y-4">
+            <form onSubmit={addExpense} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+              <h3 className="font-semibold text-slate-800">Добавить трату</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <input type="date" required value={expenseForm.date} onChange={e => setExpenseForm({ ...expenseForm, date: e.target.value })} className="border rounded-lg p-2 text-sm" />
+                <input type="number" required min="1" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: e.target.value })} placeholder="Сумма, ₽" className="border rounded-lg p-2 text-sm" />
+              </div>
+              <textarea required value={expenseForm.description} onChange={e => setExpenseForm({ ...expenseForm, description: e.target.value })} placeholder="На что потрачено" className="w-full border rounded-lg p-2 text-sm" />
+              <label className="flex items-center gap-2 border border-dashed rounded-lg p-2 text-sm text-slate-500 cursor-pointer">
+                {expenseReceiptUrl ? 'Чек загружен ✓' : '📷 Сфотографировать чек'}
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={uploadExpenseReceipt} />
+              </label>
+              <button className="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm font-medium">Сохранить трату</button>
+            </form>
+            <div className="bg-white rounded-xl border border-slate-200 divide-y">
+              {expenses.map(expense => <div key={expense.id} className="p-3 flex justify-between gap-3"><div><div className="font-medium">{expense.description}</div><div className="text-xs text-slate-500">{new Date(expense.date).toLocaleDateString('ru-RU')}</div></div><b className="text-rose-700">-{expense.amount} ₽</b></div>)}
+              {expenses.length === 0 && <p className="p-4 text-sm text-slate-400">Трат пока нет.</p>}
+            </div>
+          </div>
+        ) : (
+        loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
         ) : orders.length === 0 ? (
           <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
@@ -337,7 +448,7 @@ export default function GardenerDashboard() {
               )
             )}
           </div>
-        )}
+        ))}
       </main>
 
       {/* Модалка действия: перенос / отказ / выполнено */}
@@ -403,6 +514,10 @@ export default function GardenerDashboard() {
                       )}
                     </div>
                   ))}
+                  <label className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                    📷 Дополнительные фото ({extraPhotoUrls.length})
+                    <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={e => handlePhotoSelect(e, 'extra')} />
+                  </label>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-500">Фактическая сумма заказа, ₽</label>

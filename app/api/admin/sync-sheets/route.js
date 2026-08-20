@@ -57,7 +57,7 @@ export async function POST(req) {
 
     const header = [
       'Дата', 'День недели', 'Садовник', 'Услуга', 'ФИО клиента', 'Адрес', 'Телефон',
-      'Что делать', 'Сумма по договору', 'Сумма по факту', 'ЗП сотрудника', 'Доля фирмы', 'Статус', 'Комментарий',
+      'Что делать', 'Сумма по договору', 'Сумма по факту', 'ЗП сотрудника', 'Доля фирмы, %', 'Оплата', 'Статус', 'Комментарий',
     ];
     const rows = orders.map((o) => [
       o.date.toISOString().split('T')[0],
@@ -72,13 +72,14 @@ export async function POST(req) {
       o.priceFact,
       o.employeeSalary,
       o.companyShare,
+      o.paymentType,
       o.status,
       o.comment || '',
     ]);
 
     await sheets.spreadsheets.values.clear({
       spreadsheetId: sheetId,
-      range: `${SHEET_TITLE}!A:N`,
+      range: `${SHEET_TITLE}!A:O`,
     });
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,

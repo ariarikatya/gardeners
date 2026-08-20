@@ -39,13 +39,16 @@ export async function GET(req) {
     'Услуга': o.service ? o.service.name : '',
     'ФИО клиента': o.clientName,
     'Адрес': o.address,
+    'Примерно где (район)': o.district || '',
     'Телефон': o.clientPhone,
     'Что делать': o.description,
     'Сумма по договору': o.priceContract,
     'Сумма по факту': o.priceFact,
+    'Оплата': o.paymentType,
     'ЗП сотрудника': o.employeeSalary,
-    'Доля фирмы': o.companyShare,
+    'Доля фирмы, %': o.companyShare,
     'Статус': o.status,
+    'Расчёт отмечен': o.paid ? 'Да' : 'Нет',
     'Комментарий': o.comment || '',
   }));
 
@@ -53,7 +56,7 @@ export async function GET(req) {
   worksheet['!cols'] = [
     { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 22 },
     { wch: 28 }, { wch: 16 }, { wch: 35 }, { wch: 14 }, { wch: 14 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 },
   ];
 
   const workbook = XLSX.utils.book_new();

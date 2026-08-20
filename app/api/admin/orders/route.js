@@ -18,7 +18,7 @@ export async function GET(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const orders = await prisma.order.findMany({
-    include: { gardener: true, service: true },
+    include: { gardener: true, service: true, services: { include: { service: true } } },
   });
   return NextResponse.json({ orders });
 }
@@ -27,7 +27,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, serviceId, clientName, address, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead } = body;
+  const { date, gardenerId, serviceId, serviceIds, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, paymentType, paid, comment, status, fromLead } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -40,6 +40,7 @@ export async function POST(req) {
         dayOfWeek,
         clientName,
         address,
+        district: district || null,
         clientPhone,
         description,
         priceContract: parseFloat(priceContract) || 0,
@@ -49,7 +50,10 @@ export async function POST(req) {
         status: status || 'Новый заказ',
         comment,
         gardenerId,
-        serviceId: serviceId || null,
+        serviceId: serviceId || serviceIds?.[0] || null,
+        paymentType: paymentType === 'Безнал' ? 'Безнал' : 'Нал',
+        paid: Boolean(paid),
+        services: serviceIds?.length ? { create: serviceIds.map((id) => ({ serviceId: id })) } : undefined,
       },
     });
 
@@ -86,6 +90,45 @@ export async function PUT(req) {
   const body = await req.json();
   const { id, ...updateData } = body;
 
+  const existing = await prisma.order.findUnique({ where: { id }, include: { services: true } });
+  if (!existing) return NextResponse.json({ error: 'Заказ не найден' }, { status: 404 });
+
+  const requestedDate = updateData.date ? new Date(updateData.date) : existing.date;
+  const dateChanged = requestedDate.toISOString().split('T')[0] !== existing.date.toISOString().split('T')[0];
+  const gardenerChanged = updateData.gardenerId && updateData.gardenerId !== existing.gardenerId;
+
+  // Перенос или передача отказного заказа создаёт новую запись для нового
+  // исполнителя, а исходная остаётся только в истории и не показывается в графике.
+  if ((dateChanged || gardenerChanged) && (existing.status === 'Перенос' || existing.status === 'Отказ')) {
+    const nextStatus = updateData.status || 'Новый заказ';
+    const nextOrder = await prisma.$transaction(async (tx) => {
+      await tx.order.update({ where: { id }, data: { status: 'Отменен', comment: `${existing.comment || ''} Перенесён/передан в заказ ${id}.`.trim() } });
+      return tx.order.create({
+        data: {
+          date: requestedDate,
+          dayOfWeek: ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'][requestedDate.getDay()],
+          clientName: updateData.clientName ?? existing.clientName,
+          address: updateData.address ?? existing.address,
+          district: updateData.district ?? existing.district,
+          clientPhone: updateData.clientPhone ?? existing.clientPhone,
+          description: updateData.description ?? existing.description,
+          priceContract: parseFloat(updateData.priceContract ?? existing.priceContract) || 0,
+          priceFact: parseFloat(updateData.priceFact ?? existing.priceFact) || 0,
+          employeeSalary: parseFloat(updateData.employeeSalary ?? existing.employeeSalary) || 0,
+          companyShare: parseFloat(updateData.companyShare ?? existing.companyShare) || 0,
+          paymentType: updateData.paymentType === 'Безнал' ? 'Безнал' : (updateData.paymentType || existing.paymentType),
+          paid: Boolean(updateData.paid ?? false),
+          status: nextStatus,
+          comment: updateData.comment ?? existing.comment,
+          gardenerId: updateData.gardenerId || existing.gardenerId,
+          serviceId: updateData.serviceId === '' ? null : (updateData.serviceId ?? existing.serviceId),
+          services: updateData.serviceIds?.length ? { create: updateData.serviceIds.map((serviceId) => ({ serviceId })) } : undefined,
+        },
+      });
+    });
+    return NextResponse.json({ order: nextOrder, transferred: true });
+  }
+
   if (updateData.date) {
     updateData.date = new Date(updateData.date);
     const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -93,6 +136,10 @@ export async function PUT(req) {
   }
 
   if (updateData.serviceId === '') updateData.serviceId = null;
+  const serviceIds = updateData.serviceIds;
+  if (updateData.paymentType !== undefined) updateData.paymentType = updateData.paymentType === 'Безнал' ? 'Безнал' : 'Нал';
+  if (updateData.paid !== undefined) updateData.paid = Boolean(updateData.paid);
+  delete updateData.serviceIds;
   delete updateData.fromLead;
 
   ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
@@ -100,10 +147,16 @@ export async function PUT(req) {
   });
 
   try {
-    const order = await prisma.order.update({
-      where: { id },
-      data: updateData,
-    });
+      const order = await prisma.$transaction(async (tx) => {
+        const updated = await tx.order.update({ where: { id }, data: updateData });
+        if (Array.isArray(serviceIds)) {
+          await tx.orderService.deleteMany({ where: { orderId: id } });
+          if (serviceIds.length) {
+            await tx.orderService.createMany({ data: serviceIds.map((serviceId) => ({ orderId: id, serviceId })) });
+          }
+        }
+        return updated;
+      });
     return NextResponse.json({ order });
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось обновить заказ' }, { status: 400 });

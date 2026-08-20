@@ -3,9 +3,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 const emptyOrderForm = {
-  clientName: '', clientPhone: '', address: '', description: '',
+  clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-  status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: ''
+  status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: '', serviceIds: [], paymentType: 'Нал', paid: false
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -18,6 +18,7 @@ export default function AdminDashboard() {
   const [orders, setOrders] = useState([]);
   const [dayOffs, setDayOffs] = useState([]);
   const [services, setServices] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [webLeads, setWebLeads] = useState([]);
   const [showAllLeads, setShowAllLeads] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -41,7 +42,10 @@ export default function AdminDashboard() {
   const [filterGardenerId, setFilterGardenerId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterServiceId, setFilterServiceId] = useState('all');
+  const [filterDistrict, setFilterDistrict] = useState('all');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
+  const [calendarOffset, setCalendarOffset] = useState(-30);
+  const [tableScale, setTableScale] = useState(1);
 
   // Поиск ближайшего окна под запрос клиента
   const [showQuickSearch, setShowQuickSearch] = useState(false);
@@ -49,9 +53,11 @@ export default function AdminDashboard() {
   const [searchGardenerId, setSearchGardenerId] = useState('all');
   const [searchServiceId, setSearchServiceId] = useState('all');
 
-  // Генерация дат на 30 дней вперед (для сетки календаря)
+  const districts = [...new Set(orders.map(order => order.district).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+
+  // Показываем исторические даты и ближайшие даты одним листаемым диапазоном.
   const dates = [];
-  for (let i = 0; i < 30; i++) {
+  for (let i = calendarOffset; i < calendarOffset + 30; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
     dates.push(d);
@@ -72,23 +78,26 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resG, resO, resD, resS, resW] = await Promise.all([
+      const [resG, resO, resD, resS, resW, resE] = await Promise.all([
         fetch('/api/admin/gardeners'),
         fetch('/api/admin/orders'),
         fetch('/api/admin/dayoff'),
         fetch('/api/admin/services'),
-        fetch('/api/admin/webleads')
+        fetch('/api/admin/webleads'),
+        fetch('/api/admin/expenses')
       ]);
       const dataG = await resG.json();
       const dataO = await resO.json();
       const dataD = await resD.json();
       const dataS = await resS.json();
       const dataW = await resW.json();
+      const dataE = await resE.json();
       setGardeners(dataG.gardeners || []);
       setOrders(dataO.orders || []);
       setDayOffs(dataD.dayOffs || []);
       setServices(dataS.services || []);
       setWebLeads(dataW.webLeads || []);
+      setExpenses(dataE.expenses || []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -139,6 +148,7 @@ export default function AdminDashboard() {
           clientName: existingOrder.clientName,
           clientPhone: existingOrder.clientPhone,
           address: existingOrder.address,
+          district: existingOrder.district || '',
           description: existingOrder.description,
           priceContract: existingOrder.priceContract,
           priceFact: existingOrder.priceFact,
@@ -149,6 +159,9 @@ export default function AdminDashboard() {
           date: existingOrder.date.split('T')[0],
           gardenerId: existingOrder.gardenerId,
           serviceId: existingOrder.serviceId || ''
+          ,serviceIds: (existingOrder.services || []).map(s => s.serviceId || s.id)
+          ,paymentType: existingOrder.paymentType || 'Нал'
+          ,paid: existingOrder.paid || false
         });
         setShowOrderModal(true);
         return;
@@ -196,6 +209,7 @@ export default function AdminDashboard() {
       clientName: order.clientName,
       clientPhone: order.clientPhone,
       address: order.address,
+      district: order.district || '',
       description: order.description,
       priceContract: order.priceContract,
       priceFact: order.priceFact,
@@ -206,6 +220,9 @@ export default function AdminDashboard() {
       date: order.date.split('T')[0],
       gardenerId: order.gardenerId,
       serviceId: order.serviceId || ''
+      ,serviceIds: (order.services || []).map(s => s.serviceId || s.id)
+      ,paymentType: order.paymentType || 'Нал'
+      ,paid: order.paid || false
     });
     setShowOrderModal(true);
   };
@@ -474,9 +491,9 @@ export default function AdminDashboard() {
           </select>
           <a
             href={getExportUrl(exportPeriod)}
-            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap"
+            className="bg-white text-emerald-900 hover:bg-emerald-50 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg font-semibold whitespace-nowrap"
           >
-            📊 <span className="hidden sm:inline">Экспорт в </span>Excel
+            📊 Скачать Excel ({exportPeriod === 'all' ? 'всё время' : exportPeriod === 'year' ? 'год' : 'месяц'})
           </a>
           <button
             onClick={handleSyncSheets}
@@ -521,6 +538,12 @@ export default function AdminDashboard() {
               {webLeads.filter(l => l.status === 'Новая').length}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('expenses')}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'expenses' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          💸 Траты
         </button>
       </div>
 
@@ -661,6 +684,13 @@ export default function AdminDashboard() {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Район</label>
+                  <select value={filterDistrict} onChange={e => setFilterDistrict(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                    <option value="all">Все районы</option>
+                    {districts.map(district => <option key={district} value={district}>{district}</option>)}
+                  </select>
+                </div>
+                <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Дни недели</label>
                   <div className="flex gap-1">
                     {WEEKDAY_LABELS.map((label, idx) => (
@@ -692,8 +722,15 @@ export default function AdminDashboard() {
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <thead>
+                <div className="flex items-center gap-2 p-2 border-b border-slate-200 text-sm">
+                  <button onClick={() => setCalendarOffset(v => v - 30)} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">← Старше</button>
+                  <button onClick={() => setCalendarOffset(-30)} className="px-3 py-1.5 rounded-lg bg-emerald-100 text-emerald-800">Сегодня</button>
+                  <button onClick={() => setCalendarOffset(v => v + 30)} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">Новее →</button>
+                  <span className="ml-auto text-xs text-slate-500">Масштаб:</span>
+                  {[0.6, 0.75, 1].map(scale => <button key={scale} onClick={() => setTableScale(scale)} className={`px-2 py-1 rounded ${tableScale === scale ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100'}`}>{Math.round(scale * 100)}%</button>)}
+                </div>
+                <table style={{ fontSize: `${tableScale}em` }} className="w-full border-collapse">
+                  <thead className="sticky top-0 z-10">
                     <tr className="bg-slate-100 border-b border-slate-200">
                       <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200">Дата</th>
                       {visibleGardeners.map(g => (
@@ -710,11 +747,11 @@ export default function AdminDashboard() {
 
                       return (
                         <tr key={dateStr} className="border-b border-slate-200 hover:bg-slate-50">
-                          <td className="p-3 font-medium text-slate-700 border-r border-slate-200 bg-slate-50 align-top">
-                            {dateStr} ({dayLabel})
+                          <td className="p-3 font-medium text-slate-700 border-r border-slate-200 bg-slate-50 align-top whitespace-nowrap">
+                            {date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} ({dayLabel})
                           </td>
                           {visibleGardeners.map(g => {
-                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr));
+                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && (filterDistrict === 'all' || o.district === filterDistrict));
                             const dayOrders = filterStatus === 'all'
                               ? dayOrdersAll
                               : dayOrdersAll.filter(o => o.status === filterStatus);
@@ -736,7 +773,7 @@ export default function AdminDashboard() {
                                       <div
                                         key={order.id}
                                         onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
-                                        className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
+                                        className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${order.paymentType === 'Безнал' ? 'ring-2 ring-sky-300 ' : ''}${
                                           order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
                                           order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
                                           order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
@@ -745,7 +782,11 @@ export default function AdminDashboard() {
                                         }`}
                                       >
                                         {order.clientName}
+                                        {order.paymentType === 'Безнал' && <div className="text-[10px] opacity-90">◈ безнал</div>}
                                         <div className="text-xs opacity-90">{order.address}</div>
+                                        {order.district && <div className="text-[10px] opacity-90">Примерно где: {order.district}</div>}
+                                        {order.contactStatus && order.contactStatus !== 'Не связывался' && <div className="text-[10px] opacity-90">Клиент: {order.contactStatus}</div>}
+                                        {order.contactPenalty > 0 && <div className="text-[10px] opacity-90">Штраф: {order.contactPenalty} ₽</div>}
                                         {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
                                         {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
                                       </div>
@@ -781,9 +822,9 @@ export default function AdminDashboard() {
           )}
 
           {activeTab === 'gardeners' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* Список */}
-              <div className="col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <div className="col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-3">
                 <h3 className="text-lg font-bold text-slate-700 mb-4">Наши садовники ({gardeners.length})</h3>
                 <div className="divide-y divide-slate-100">
                   {gardeners.map(g => (
@@ -844,7 +885,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Добавление нового */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 h-fit">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 h-fit">
                 <h3 className="text-lg font-bold text-slate-700 mb-4">Добавить нового</h3>
                 <form onSubmit={handleAddGardener} className="space-y-4">
                   <div>
@@ -998,6 +1039,25 @@ export default function AdminDashboard() {
               })()}
             </div>
           )}
+
+          {activeTab === 'expenses' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+              <h3 className="text-lg font-bold text-slate-700 mb-4">Траты садовников</h3>
+              {expenses.length === 0 ? <p className="text-sm text-slate-400">Трат пока нет.</p> : (
+                <div className="divide-y divide-slate-100">
+                  {expenses.map(expense => (
+                    <div key={expense.id} className="py-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium text-slate-800">{expense.gardener?.name}: {expense.description}</div>
+                        <div className="text-xs text-slate-500">{new Date(expense.date).toLocaleDateString('ru-RU')}</div>
+                      </div>
+                      <div className="font-semibold text-rose-700 whitespace-nowrap">-{expense.amount} ₽</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </main>
       )}
 
@@ -1074,13 +1134,21 @@ export default function AdminDashboard() {
                 <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-500">Услуга</label>
-                <select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
-                  <option value="">Не указана</option>
-                  {services.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                <label className="block text-xs font-semibold text-slate-500">Примерно где (район)</label>
+                <input list="district-options" type="text" value={formData.district} onChange={e => setFormData({...formData, district: e.target.value})} placeholder="Например: Волжский район" className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                <datalist id="district-options">{districts.map(district => <option key={district} value={district} />)}</datalist>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500">Услуги</label>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {services.map(s => {
+                    const selected = (formData.serviceIds || []).includes(s.id);
+                    return <label key={s.id} className={`text-xs px-2 py-1.5 rounded-lg border cursor-pointer ${selected ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                      <input type="checkbox" className="mr-1" checked={selected} onChange={() => setFormData(prev => ({ ...prev, serviceIds: selected ? prev.serviceIds.filter(id => id !== s.id) : [...(prev.serviceIds || []), s.id], serviceId: selected && prev.serviceId === s.id ? '' : (prev.serviceId || s.id) }))} />
+                      {s.name}
+                    </label>;
+                  })}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Описание работ (Что делать)</label>
@@ -1096,13 +1164,17 @@ export default function AdminDashboard() {
                   <input type="number" value={formData.priceFact} onChange={e => setFormData({...formData, priceFact: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={formData.paymentType === 'Безнал'} onChange={e => setFormData({ ...formData, paymentType: e.target.checked ? 'Безнал' : 'Нал' })} />
+                Безналичная оплата клиентом
+              </label>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">ЗП сотрудника</label>
                   <input type="number" value={formData.employeeSalary} onChange={e => setFormData({...formData, employeeSalary: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500">Доля фирмы</label>
+                  <label className="block text-xs font-semibold text-slate-500">Доля фирмы, %</label>
                   <input type="number" value={formData.companyShare} onChange={e => setFormData({...formData, companyShare: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
                 </div>
               </div>
@@ -1120,6 +1192,10 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-semibold text-slate-500">Комментарий</label>
                 <input type="text" value={formData.comment} onChange={e => setFormData({...formData, comment: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
               </div>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={formData.paid} onChange={e => setFormData({ ...formData, paid: e.target.checked })} />
+                Выплата/расчёт отмечены руководителем
+              </label>
               <div className="flex gap-2 justify-between pt-4">
                 <div>
                   {selectedOrder && (
