@@ -63,6 +63,9 @@ export async function GET(req) {
 
   // Загрузим операции лидера за период и сгруппируем по садовнику
   const operations = await prisma.operation.findMany({ where: { createdAt: { gte: start, lte: end } } });
+  const approvedExpenses = operations
+    .filter(op => op.type === 'expense' && op.approved)
+    .reduce((sum, op) => sum + Number(op.approvedAmount ?? op.amount ?? 0), 0);
   const opsByGardener = {};
   operations.forEach(op => {
     if (!opsByGardener[op.gardenerId]) opsByGardener[op.gardenerId] = [];
@@ -93,9 +96,12 @@ export async function GET(req) {
     const bonusOps = ops.filter(op => op.type === 'bonus').reduce((s, o) => s + Number(o.amount || 0), 0);
     const fineOps = ops.filter(op => op.type === 'fine').reduce((s, o) => s + Number(o.amount || 0), 0);
     const writeoffOps = ops.filter(op => op.type === 'writeoff').reduce((s, o) => s + Number(o.amount || 0), 0);
-    const pendingOperations = ops.filter(op => !op.approved).length;
-    const pendingExpenses = ops.filter(op => op.type === 'expense' && !op.approved).length;
+    const pendingOperations = ops.filter(op => op.type === 'expense' && !op.approved).length;
+    const pendingExpenses = pendingOperations;
 
+    const gardenerApprovedExpenses = ops
+      .filter(op => op.type === 'expense' && op.approved)
+      .reduce((sum, op) => sum + Number(op.approvedAmount ?? op.amount ?? 0), 0);
     const revenueWithOps = earned + bonusOps;
     const shareWithOps = share + fineOps + writeoffOps;
     const payoutWithOps = Math.max(revenueWithOps - shareWithOps - paidToGardener - paidToCompany, 0);
@@ -112,6 +118,7 @@ export async function GET(req) {
       writeoffAmount: writeoffOps,
       totalOrders: gardenerOrders.length,
       revenue: earned,
+      approvedExpenses: gardenerApprovedExpenses,
       contract,
       salary,
       share,
@@ -122,7 +129,7 @@ export async function GET(req) {
       writeoff: writeoffOps,
       pendingOperations,
       pendingExpenses,
-      net: revenueWithOps - salary - shareWithOps,
+      net: revenueWithOps - salary - shareWithOps - gardenerApprovedExpenses,
     };
   });
 
@@ -139,7 +146,9 @@ export async function GET(req) {
     },
     totals: {
       orders: orders.length,
-      revenue: totalRevenue,
+      revenue: totalRevenue - approvedExpenses,
+      grossRevenue: totalRevenue,
+      approvedExpenses,
       contract: totalContract,
       salary: totalSalary,
       companyShare: totalCompanyShare,

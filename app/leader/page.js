@@ -64,6 +64,7 @@ export default function LeaderDashboard() {
 
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
+    const approvedExpenses = Number(data.totals?.approvedExpenses || 0);
     const companyShare = Number(data.totals?.companyShare || 0);
     const salary = Number(data.totals?.salary || 0);
     const forecast = Number(data.totals?.forecastRevenue || 0);
@@ -71,6 +72,7 @@ export default function LeaderDashboard() {
     const estimated = Number(data.totals?.estimated || 0);
     return {
       revenue,
+      approvedExpenses,
       companyShare,
       salary,
       forecast,
@@ -361,6 +363,7 @@ export default function LeaderDashboard() {
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Выручка</div>
                 <div className="text-3xl font-bold text-emerald-700 mt-2">{formatMoney(summary.revenue)}</div>
+                <div className="text-[11px] text-slate-500 mt-1">Одобренные траты фирмы: −{formatMoney(summary.approvedExpenses)}</div>
               </div>
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Долг садовников фирме</div>
@@ -380,7 +383,7 @@ export default function LeaderDashboard() {
             </div>
  
             <div className="bg-slate-50 rounded-2xl border border-slate-200 p-3 text-xs text-slate-600">
-              Как считается кошелёк: «Заработано» = суммы выполненных заказов; «Премии» = начисленные бонусы; «Штрафы» = удержания; «Долг садовников фирме» = доля фирмы, штрафы и списания; «К выплате» = заработано + премии − штрафы − списания − долг садовников фирме.
+              Как считается кошелёк: выручка фирмы = выполненные заказы − одобренные траты; «К выплате» = заработано + премии − штрафы − списания − долг садовников фирме.
             </div>
  
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3">

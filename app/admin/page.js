@@ -926,7 +926,7 @@ export default function AdminDashboard() {
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
                 <div style={{ zoom: tableScale }}>
                 <table className="w-full border-collapse">
-                  <thead>
+                  <thead className="sticky top-0 z-30">
                     <tr className="bg-slate-100 border-b border-slate-200">
                       <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
                       {visibleGardeners.map(g => (
