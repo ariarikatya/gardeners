@@ -1413,7 +1413,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-    </div>
 
       {/* Модал массовой привязки VK */}
       {showVkBulkModal && (
