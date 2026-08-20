@@ -312,7 +312,7 @@ export default function LeaderDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1">Период</label>
             <div className="flex gap-2">
@@ -405,6 +405,8 @@ export default function LeaderDashboard() {
                         <td className="px-3 py-3 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
                         <td className="px-3 py-3 text-rose-700 font-semibold">{formatMoney(g.share)}</td>
                         <td className="px-3 py-3 text-violet-700 font-semibold">{formatMoney(g.estimated)}</td>
+                        
+                        {/* Колонка Премия */}
                         <td className="px-3 py-3">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.bonus)}</div>
                           <input
@@ -424,6 +426,8 @@ export default function LeaderDashboard() {
                             placeholder="Причина"
                           />
                         </td>
+
+                        {/* Колонка Штраф */}
                         <td className="px-3 py-3">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.fine)}</div>
                           <input
@@ -435,40 +439,6 @@ export default function LeaderDashboard() {
                             className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
                             placeholder="Добавить"
                           />
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.writeoff)}</div>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={g.writeoffDraft ?? ''}
-                            onChange={(e) => updateGardenerField(g.id, 'writeoffDraft', e.target.value)}
-                            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
-                            placeholder="Добавить"
-                          />
-                        </td>
-+                        <td className="px-3 py-3">
-+                          <div className="text-[10px] uppercase text-slate-400 mb-1">Доля фирмы %</div>
-+                          <input
-+                            type="number"
-+                            min="0"
-+                            max="100"
-+                            step="1"
-+                            value={g.bonusPercent ?? g.bonusPercent === 0 ? g.bonusPercent : ''}
-+                            onChange={(e) => updateGardenerField(g.id, 'bonusPercent', Number(e.target.value))}
-+                            className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
-+                            placeholder="%"
-+                          />
-+                          <button onClick={async () => {
-+                            try {
-+                              const res = await fetch('/api/leader', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: g.id, bonusPercent: g.bonusPercent, finePercent: g.finePercent, writeoffPercent: g.writeoffPercent }) });
-+                              if (!res.ok) throw new Error((await res.json()).error || 'Ошибка');
-+                              await fetchData();
-+                              alert('Процент сохранён');
-+                            } catch (err) { alert(err.message || 'Ошибка'); }
-+                          }} className="text-xs bg-emerald-600 text-white px-2 py-1 rounded">Сохранить %</button>
-+                        </td>
                           <input
                             type="text"
                             value={g.fineNote ?? ''}
@@ -477,6 +447,8 @@ export default function LeaderDashboard() {
                             placeholder="Причина"
                           />
                         </td>
+
+                        {/* Колонка Списание */}
                         <td className="px-3 py-3">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.writeoff)}</div>
                           <input
@@ -496,6 +468,47 @@ export default function LeaderDashboard() {
                             placeholder="Причина"
                           />
                         </td>
+
+                        {/* Колонка Доля фирмы % (Новая) */}
+                        <td className="px-3 py-3">
+                          <div className="text-[10px] uppercase text-slate-400 mb-1">Доля фирмы %</div>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={g.bonusPercent ?? g.bonusPercent === 0 ? g.bonusPercent : ''}
+                            onChange={(e) => updateGardenerField(g.id, 'bonusPercent', Number(e.target.value))}
+                            className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 mb-2"
+                            placeholder="%"
+                          />
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const res = await fetch('/api/leader', { 
+                                  method: 'PUT', 
+                                  headers: { 'Content-Type': 'application/json' }, 
+                                  body: JSON.stringify({ 
+                                    id: g.id, 
+                                    bonusPercent: g.bonusPercent, 
+                                    finePercent: g.finePercent, 
+                                    writeoffPercent: g.writeoffPercent 
+                                  }) 
+                                });
+                                if (!res.ok) throw new Error((await res.json()).error || 'Ошибка');
+                                await fetchData();
+                                alert('Процент сохранён');
+                              } catch (err) { 
+                                alert(err.message || 'Ошибка'); 
+                              }
+                            }} 
+                            className="text-xs bg-emerald-600 text-white px-2 py-1 rounded"
+                          >
+                            Сохранить %
+                          </button>
+                        </td>
+
+                        {/* Колонка Действия */}
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-2">
                             <button
