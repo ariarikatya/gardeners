@@ -92,8 +92,7 @@ export default function AdminDashboard() {
   const [exportPeriod, setExportPeriod] = useState('all');
   const [exportCustomStart, setExportCustomStart] = useState('');
   const [exportCustomEnd, setExportCustomEnd] = useState('');
-  const [showPastDates, setShowPastDates] = useState(false);
-  const [calendarRange, setCalendarRange] = useState('30'); // '30' | 'monthEnd' | 'yearEnd'
+  const [calendarRange, setCalendarRange] = useState('today'); // 'today' | 'month' | 'year' | 'all'
   const [tableScale, setTableScale] = useState(1);
 
   // Добавление / редактирование садовника
@@ -125,28 +124,30 @@ export default function AdminDashboard() {
 
   // Генерация дат для сетки календаря по выбранному диапазону
   const dates = [];
-  const startOffset = showPastDates ? -30 : 0; // allow viewing past dates when toggled
-  if (calendarRange === '30') {
-    for (let i = startOffset; i < 30; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() + i);
-      dates.push(d);
+  const now = new Date();
+  if (calendarRange === 'today') {
+    for (let i = 0; i < 30; i++) {
+      const date = new Date(now);
+      date.setDate(now.getDate() + i);
+      dates.push(date);
     }
-  } else if (calendarRange === 'monthEnd') {
-    const now = new Date();
-    const start = showPastDates ? new Date(now.getFullYear(), now.getMonth(), 1) : now;
-    let cursor = new Date(start);
-    while (cursor.getMonth() === start.getMonth()) {
+  } else {
+    const start = calendarRange === 'month'
+      ? new Date(now.getFullYear(), now.getMonth(), 1)
+      : calendarRange === 'year'
+        ? new Date(now.getFullYear(), 0, 1)
+        : orders.length > 0
+          ? new Date(Math.min(...orders.map(order => new Date(order.date).getTime()), now.getTime()))
+          : new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = calendarRange === 'month'
+      ? new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      : calendarRange === 'year'
+        ? new Date(now.getFullYear(), 11, 31)
+        : orders.length > 0
+          ? new Date(Math.max(...orders.map(order => new Date(order.date).getTime()), now.getTime()))
+          : now;
+    for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
       dates.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 1);
-    }
-  } else if (calendarRange === 'yearEnd') {
-    const now = new Date();
-    const end = new Date(now.getFullYear(), 11, 31);
-    let cursor = showPastDates ? new Date(now.getFullYear(), 0, 1) : new Date();
-    while (cursor <= end) {
-      dates.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 1);
     }
   }
 
@@ -616,17 +617,22 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Шапка */}
-      <header className="relative bg-emerald-900 text-white py-3 px-3 sm:px-6 flex flex-wrap gap-2 justify-between items-center shadow-md">
-        <h1 className="absolute left-3 sm:left-6 text-base sm:text-xl font-bold flex items-center gap-2">
+      <header className="bg-emerald-900 text-white py-3 px-3 sm:px-6 shadow-md">
+        <div className="flex items-center justify-between">
+        <h1 className="text-base sm:text-xl font-bold flex items-center gap-2">
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <div className="w-full flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+        <button onClick={handleLogout} className="bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
+          Выйти
+        </button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
-            <span className="text-xs font-medium text-emerald-100">Период:</span>
+            <span className="text-xs font-medium text-emerald-100">Скачать Excel:</span>
             <select
               value={exportPeriod}
               onChange={e => setExportPeriod(e.target.value)}
-              className="bg-emerald-700 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 sm:py-2 border-none"
+              className="bg-emerald-600 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 sm:py-2 border border-emerald-500"
             >
               <option value="all">За всё время</option>
               <option value="year">Этот год</option>
@@ -659,13 +665,11 @@ export default function AdminDashboard() {
           {/* Быстрые настройки отображения календаря */}
           <div className="flex items-center gap-2">
             <select value={calendarRange} onChange={e => setCalendarRange(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-500 bg-emerald-600 text-white">
-              <option value="30">30 дней</option>
-              <option value="monthEnd">До конца месяца</option>
-              <option value="yearEnd">До конца года</option>
+              <option value="today">С сегодня</option>
+              <option value="month">За месяц</option>
+              <option value="year">За год</option>
+              <option value="all">Все даты</option>
             </select>
-            <button onClick={() => setShowPastDates(s => !s)} className="text-xs rounded-lg px-2 py-1 border border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-500">
-              {showPastDates ? 'Показывать прошлое' : 'Показать прошлые'}
-            </button>
             <div className="flex items-center gap-1">
               <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">-</button>
               <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
@@ -673,9 +677,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <button onClick={handleLogout} className="absolute right-3 sm:right-6 bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
-            Выйти
-          </button>
         </div>
       </header>
 
@@ -880,8 +881,10 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Примерно где (район)</label>
-                  <input list="calendar-districts" value={filterDistrict} onChange={e => setFilterDistrict(e.target.value)} placeholder="Начните вводить район" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
-                  <datalist id="calendar-districts">{allDistricts.map(district => <option key={district} value={district} />)}</datalist>
+                  <select value={filterDistrict} onChange={e => setFilterDistrict(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white text-slate-700">
+                    <option value="">Все районы</option>
+                    {allDistricts.map(district => <option key={district} value={district}>{district}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Дни недели</label>
