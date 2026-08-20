@@ -385,7 +385,8 @@ export default function LeaderDashboard() {
  
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3">
               <h2 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">По садовникам {Number(data.totals?.pendingExpenses || 0) > 0 && <span className="text-xs bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-1">Новых трат: {data.totals.pendingExpenses}</span>}</h2>
-              <div style={{ fontSize: `${leaderScale}em` }} className="overflow-x-auto">
+              <div className="overflow-x-auto">
+                <div style={{ width: `${100 / leaderScale}%`, transform: `scale(${leaderScale})`, transformOrigin: '0 0' }}>
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 text-left">
@@ -405,7 +406,10 @@ export default function LeaderDashboard() {
                     {(data.gardeners || []).map((g) => (
                       <tr key={g.id} className="border-t border-slate-100 align-top">
                         <td className="px-3 py-3">
-                          <div className="font-semibold text-slate-800">{g.name}</div>
+                          <div className="font-semibold text-slate-800 flex items-center gap-2">
+                            {g.name}
+                            {Number(g.pendingOperations || 0) > 0 && <span title="Новые операции" className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-rose-600 text-white text-[10px]">{g.pendingOperations}</span>}
+                          </div>
                           <div className="text-xs text-slate-500">{g.phone}</div>
                         </td>
                         <td className="px-3 py-3">{g.totalOrders}</td>
@@ -539,6 +543,7 @@ export default function LeaderDashboard() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           </>

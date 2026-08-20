@@ -64,7 +64,7 @@ export default function GardenerDashboard() {
   const [factAmount, setFactAmount] = useState('');
   const [photoBeforeUrls, setPhotoBeforeUrls] = useState([]);
   const [photoAfterUrls, setPhotoAfterUrls] = useState([]);
-  const [photoActUrl, setPhotoActUrl] = useState('');
+  const [photoActUrls, setPhotoActUrls] = useState([]);
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [submitting, setSubmitting] = useState(false);
 
@@ -151,11 +151,12 @@ export default function GardenerDashboard() {
       const after = order.photoAfter ? (String(order.photoAfter).trim().startsWith('[') ? JSON.parse(order.photoAfter) : [order.photoAfter]) : [];
       setPhotoBeforeUrls(before);
       setPhotoAfterUrls(after);
-      setPhotoActUrl(order.photoAct || '');
+      const act = order.photoAct ? (String(order.photoAct).trim().startsWith('[') ? JSON.parse(order.photoAct) : [order.photoAct]) : [];
+      setPhotoActUrls(act);
     } catch (e) {
       setPhotoBeforeUrls([]);
       setPhotoAfterUrls([]);
-      setPhotoActUrl(order.photoAct || '');
+      setPhotoActUrls(order.photoAct ? [order.photoAct] : []);
     }
   };
 
@@ -194,7 +195,7 @@ export default function GardenerDashboard() {
       if (which === 'after') setPhotoAfterUrls(prev => [...prev, ...uploaded]);
       if (which === 'act') {
         // keep single act (most likely one act document) — if multiple uploaded, keep the last
-        if (uploaded.length) setPhotoActUrl(uploaded[uploaded.length - 1]);
+        if (uploaded.length) setPhotoActUrls(prev => [...prev, ...uploaded]);
       }
     } catch (err) {
       alert('Не удалось загрузить фото: ' + err.message);
@@ -208,7 +209,7 @@ export default function GardenerDashboard() {
     e.preventDefault();
     if (!actionOrder) return;
 
-    if (actionType === 'complete' && (photoBeforeUrls.length === 0 || photoAfterUrls.length === 0 || !photoActUrl)) {
+    if (actionType === 'complete' && (photoBeforeUrls.length === 0 || photoAfterUrls.length === 0 || photoActUrls.length === 0)) {
       alert('Прикрепите фото: минимум одно "до", одно "после" и акт/документ');
       return;
     }
@@ -222,7 +223,7 @@ export default function GardenerDashboard() {
       payload.priceFact = factAmount;
       payload.photoBefore = photoBeforeUrls;
       payload.photoAfter = photoAfterUrls;
-      payload.photoAct = photoActUrl;
+      payload.photoAct = photoActUrls;
     }
 
     try {
@@ -747,21 +748,11 @@ export default function GardenerDashboard() {
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
                     <div className="flex gap-2 items-center mb-2">
-                      {photoActUrl ? (
-                        <div className="flex items-center gap-2">
-                          <img src={photoActUrl} alt={`Акт`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <span className="text-xs text-emerald-700 font-medium">Загружено ✓</span>
-                          <label className="text-xs text-slate-400 underline cursor-pointer ml-auto">
-                            Заменить
-                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => handlePhotoSelect(e, 'act')} />
-                          </label>
-                        </div>
-                      ) : (
-                        <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
-                          {uploadingWhich === 'act' ? 'Загружаю...' : '📷 Выбрать фото'}
-                          <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" capture="environment" onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
-                        </label>
-                      )}
+                      {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
+                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                        {uploadingWhich === 'act' ? 'Загружаю...' : '📷 Добавить фото акта'}
+                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
+                      </label>
                     </div>
                   </div>
 

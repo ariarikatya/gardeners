@@ -10,6 +10,13 @@ const emptyOrderForm = {
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const SEARCH_HORIZON_DAYS = 60;
+const DEFAULT_DISTRICTS = [
+  'Шумейка', 'Генеральское', 'Малая Тополевка', 'Усть-Курдюм', 'Зоналка',
+  'Юбилейный', 'Кумысная поляна', 'Центр', 'Поливановка', 'Ленинский район',
+  'Трещиха', 'Маркс', 'Заводской район', 'Дальняя', 'Волжский район',
+  'Октябрьский район', 'Фрунзенский район', 'Кировский район', 'Солнечный',
+  'Соколовая гора', 'Елшанка', 'Саратов', 'Энгельс', 'Другое'
+];
 
 function toDateKey(date) {
   const d = new Date(date);
@@ -55,6 +62,14 @@ function isRussianHoliday(date) {
 
   const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return holidayKeys.has(key) || d.getDay() === 0 || d.getDay() === 6;
+}
+
+function getOrderServiceIds(order) {
+  if (Array.isArray(order.serviceIds)) return order.serviceIds;
+  if (typeof order.serviceIds === 'string' && order.serviceIds.trim()) {
+    try { return JSON.parse(order.serviceIds); } catch (e) { return order.serviceId ? [order.serviceId] : []; }
+  }
+  return order.serviceId ? [order.serviceId] : [];
 }
 
 export default function AdminDashboard() {
@@ -227,7 +242,8 @@ export default function AdminDashboard() {
           comment: existingOrder.comment || '',
           date: existingOrder.date.split('T')[0],
           gardenerId: existingOrder.gardenerId,
-          serviceId: existingOrder.serviceId || ''
+          serviceId: existingOrder.serviceId || '',
+          serviceIds: getOrderServiceIds(existingOrder)
         });
         setShowOrderModal(true);
         return;
@@ -285,7 +301,8 @@ export default function AdminDashboard() {
       comment: order.comment || '',
       date: order.date.split('T')[0],
       gardenerId: order.gardenerId,
-      serviceId: order.serviceId || ''
+      serviceId: order.serviceId || '',
+      serviceIds: getOrderServiceIds(order)
     });
     setShowOrderModal(true);
   };
@@ -535,7 +552,7 @@ export default function AdminDashboard() {
   const districtOptions = (() => {
     const counts = {};
     orders.forEach(o => { if (o.district) counts[o.district] = (counts[o.district] || 0) + 1; });
-    const list = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    const list = [...new Set([...DEFAULT_DISTRICTS, ...Object.keys(counts)])].sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b, 'ru'));
     return list;
   })();
 
@@ -599,11 +616,11 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Шапка */}
-      <header className="bg-emerald-900 text-white py-3 px-3 sm:px-6 flex flex-wrap gap-2 justify-between items-center shadow-md">
-        <h1 className="text-base sm:text-xl font-bold flex items-center gap-2">
+      <header className="relative bg-emerald-900 text-white py-3 px-3 sm:px-6 flex flex-wrap gap-2 justify-between items-center shadow-md">
+        <h1 className="absolute left-3 sm:left-6 text-base sm:text-xl font-bold flex items-center gap-2">
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+        <div className="w-full flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
             <span className="text-xs font-medium text-emerald-100">Период:</span>
             <select
@@ -626,7 +643,7 @@ export default function AdminDashboard() {
           </div>
           <a
             href={getExportUrl(exportPeriod)}
-            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap flex items-center gap-1"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap flex items-center gap-1"
             title={`Скачать Excel за выбранный период: ${exportPeriod === 'all' ? 'всё время' : exportPeriod === 'year' ? 'год' : exportPeriod === 'month' ? 'месяц' : `с ${exportCustomStart} по ${exportCustomEnd}`}`}
           >
             📊 <span className="hidden sm:inline">Экспорт в </span>Excel
@@ -634,29 +651,29 @@ export default function AdminDashboard() {
           <button
             onClick={handleSyncSheets}
             disabled={syncing}
-            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
           >
             {syncing ? '...' : <>🔄 <span className="hidden sm:inline">Google </span>Таблицы</>}
           </button>
 
           {/* Быстрые настройки отображения календаря */}
           <div className="flex items-center gap-2">
-            <select value={calendarRange} onChange={e => setCalendarRange(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600 bg-emerald-50">
+            <select value={calendarRange} onChange={e => setCalendarRange(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-500 bg-emerald-600 text-white">
               <option value="30">30 дней</option>
               <option value="monthEnd">До конца месяца</option>
               <option value="yearEnd">До конца года</option>
             </select>
-            <button onClick={() => setShowPastDates(s => !s)} className={`text-xs rounded-lg px-2 py-1 border text-slate-800 ${showPastDates ? 'bg-emerald-100 border-emerald-300' : 'bg-white border-slate-200'}`}>
+            <button onClick={() => setShowPastDates(s => !s)} className="text-xs rounded-lg px-2 py-1 border border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-500">
               {showPastDates ? 'Показывать прошлое' : 'Показать прошлые'}
             </button>
             <div className="flex items-center gap-1">
-              <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-white border rounded px-2">-</button>
-              <div className="text-xs px-2 text-slate-800">Масштаб {Math.round(tableScale * 100)}%</div>
-              <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-white text-slate-800 border rounded px-2">+</button>
+              <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">-</button>
+              <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
+              <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">+</button>
             </div>
           </div>
 
-          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
+          <button onClick={handleLogout} className="absolute right-3 sm:right-6 bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
             Выйти
           </button>
         </div>
@@ -666,25 +683,25 @@ export default function AdminDashboard() {
       <div className="bg-white border-b border-slate-200 flex overflow-x-auto px-3 sm:px-6 py-2 gap-2 sm:gap-4 text-sm sm:text-base">
         <button
           onClick={() => setActiveTab('calendar')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           📅 Календарь
         </button>
         <button
           onClick={() => setActiveTab('gardeners')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           🧑‍🌾 Садовники
         </button>
         <button
           onClick={() => setActiveTab('services')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           🌿 Услуги
         </button>
         <button
           onClick={() => setActiveTab('webleads')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           🌐 Заявки
           {webLeads.filter(l => l.status === 'Новая').length > 0 && (
@@ -1267,7 +1284,7 @@ export default function AdminDashboard() {
                     const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
                     try {
                       const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
-                      return arr.slice(0,6).map((u, i) => (
+                      return arr.map((u, i) => (
                         <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
                           <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
                           <span className="text-[10px] text-slate-400">До</span>
@@ -1280,7 +1297,7 @@ export default function AdminDashboard() {
                     const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
                     try {
                       const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
-                      return arr.slice(0,6).map((u, i) => (
+                      return arr.map((u, i) => (
                         <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
                           <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
                           <span className="text-[10px] text-slate-400">После</span>
@@ -1289,12 +1306,13 @@ export default function AdminDashboard() {
                     } catch (e) { return null; }
                   })()}
 
-                  {selectedOrder.photoAct && (
-                    <a href={selectedOrder.photoAct} target="_blank" rel="noopener noreferrer" className="block">
-                      <img src={selectedOrder.photoAct} alt="Акт" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                      <span className="text-[10px] text-slate-400">Акт</span>
-                    </a>
-                  )}
+                  {(() => {
+                    const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
+                    try {
+                      const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
+                      return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
+                    } catch (e) { return null; }
+                  })()}
                 </div>
               </div>
             )}
@@ -1365,23 +1383,14 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Услуга</label>
-                <div className="flex flex-col gap-2">
-                  <select value={formData.serviceId} onChange={e => setFormData({...formData, serviceId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
-                    <option value="">Не указана</option>
-                    {services.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <label className="text-xs text-slate-500">Выберите несколько услуг</label>
-                  <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {services.map(s => {
                       const checked = (formData.serviceIds || []).includes(s.id);
                       return <label key={s.id} className={`flex items-center gap-2 rounded-lg border px-2 py-2 text-sm cursor-pointer ${checked ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'border-slate-200 text-slate-600'}`}>
-                        <input type="checkbox" checked={checked} onChange={e => setFormData(prev => ({ ...prev, serviceIds: e.target.checked ? [...new Set([...(prev.serviceIds || []), s.id])] : (prev.serviceIds || []).filter(id => id !== s.id), serviceId: prev.serviceId || s.id }))} />
+                        <input type="checkbox" checked={checked} onChange={e => setFormData(prev => { const nextIds = e.target.checked ? [...new Set([...(prev.serviceIds || []), s.id])] : (prev.serviceIds || []).filter(id => id !== s.id); return { ...prev, serviceIds: nextIds, serviceId: nextIds[0] || '' }; })} />
                         {s.name}
                       </label>;
                     })}
-                  </div>
                 </div>
               </div>
               <div>
@@ -1425,7 +1434,6 @@ export default function AdminDashboard() {
                   <option value="Новый заказ">Новый заказ</option>
                   <option value="Перенос">Перенос</option>
                   <option value="Отказ">Отказ</option>
-                  <option value="Перенос на весну">Перенос на весну</option>
                   <option value="Перенос на весну">Перенос на весну</option>
                   <option value="Выполнен">Выполнен</option>
                   <option value="Отменен">Отменен</option>
