@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
-import amoApi from '@/lib/amoApi.fixed';
+import amoApi from '@/lib/amoApi';
 
 const prisma = new PrismaClient();
 
