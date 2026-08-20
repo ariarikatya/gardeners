@@ -65,9 +65,9 @@ export async function POST(req) {
       console.error('VK callback processing error', e);
     }
     // Respond with 'ok' per VK requirement
-    return NextResponse.json('ok');
+return new NextResponse('ok', { status: 200 });
   }
 
   // For other events just acknowledge
-  return NextResponse.json('ok');
+return new NextResponse('ok', { status: 200 });
 }
