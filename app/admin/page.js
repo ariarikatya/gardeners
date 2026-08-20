@@ -547,6 +547,12 @@ export default function AdminDashboard() {
   if (filterServiceId !== 'all') {
     visibleGardeners = visibleGardeners.filter(g => (g.services || []).some(s => s.id === filterServiceId));
   }
+  if (filterDistrict) {
+    const normalizedDistrict = filterDistrict.trim().toLocaleLowerCase('ru-RU');
+    visibleGardeners = visibleGardeners.filter(g => orders.some(order =>
+      order.gardenerId === g.id && (order.district || '').trim().toLocaleLowerCase('ru-RU') === normalizedDistrict
+    ));
+  }
 
   // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
   // Для поиска по полю "примерно где" - показываем все локации сверху
@@ -918,7 +924,7 @@ export default function AdminDashboard() {
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-                <div style={{ width: `${100 / tableScale}%`, transform: `scale(${tableScale})`, transformOrigin: '0 0' }}>
+                <div style={{ zoom: tableScale }}>
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-slate-100 border-b border-slate-200">

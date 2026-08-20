@@ -529,7 +529,7 @@ export default function LeaderDashboard() {
                             <button
                               onClick={() => openOpsModal(g.id)}
                               className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-xs border border-slate-200 hover:bg-slate-200"
-                            >Операции {Number(g.pendingOperations || 0) > 0 && <span title="Новые операции" className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-rose-600 text-white text-[10px]">{g.pendingOperations}</span>}</button>
+                            >Операции {Number(g.pendingExpenses || 0) > 0 && <span title="Новые траты" className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-[10px]">{g.pendingExpenses}</span>}</button>
                             <button
                               onClick={() => openOrdersModal(g.id)}
                               className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-xs border border-slate-200 hover:bg-slate-200"
@@ -562,12 +562,13 @@ export default function LeaderDashboard() {
                   {opsList.map(op => (
                     <li key={op.id} className="flex justify-between items-center border p-2 rounded">
                       <div className="flex-1">
-                        <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : null}</div>
+                        <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.type === 'expense' && (op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-[11px] ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded">Новая</span>)}</div>
                         {op.description && <div className="text-xs text-slate-500">{op.description}</div>}
                         <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
+                        {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-1"><img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200" /></a>}
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      {op.type === 'expense' && <div className="flex items-center gap-2">
                         <input type="number" defaultValue={op.approvedAmount ?? op.amount} min="0" className="w-24 border rounded px-2 py-1 text-sm" id={`approved-${op.id}`} />
                         <button
                           onClick={async () => {
@@ -602,7 +603,7 @@ export default function LeaderDashboard() {
                         >Снять</button>
 
                         <button onClick={() => deleteOperation(op.id)} className="text-rose-600 text-xs">Удалить</button>
-                      </div>
+                      </div>}
                     </li>
                   ))}
                 </ul>
