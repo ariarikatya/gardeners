@@ -17,8 +17,15 @@ export async function GET(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  // Показываем только активные заказы: Новые, Перенос (запрос от садовника), Выполнен
+  // Скрываем: Отказ, Перенесен (уже перенесен диспетчером)
   const orders = await prisma.order.findMany({
-    where: { gardenerId: payload.gardenerId },
+    where: { 
+      gardenerId: payload.gardenerId,
+      status: {
+        in: ['Новый заказ', 'Перенос', 'Выполнен']
+      }
+    },
     include: { service: true },
     orderBy: { date: 'asc' },
   });

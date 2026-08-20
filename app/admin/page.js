@@ -293,6 +293,9 @@ export default function AdminDashboard() {
     e.preventDefault();
     const endpoint = '/api/admin/orders';
     const method = selectedOrder ? 'PUT' : 'POST';
+    
+    // Если это редактирование существующего заказа и изменилась дата или статус с "Перенос" на "Новый заказ"
+    // то мы просто обновляем запись, а не создаем новую
     const payload = selectedOrder
       ? { id: selectedOrder.id, ...formData }
       : { ...formData, fromLead: !!convertingLeadId };
@@ -527,12 +530,16 @@ export default function AdminDashboard() {
   }
 
   // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
+  // Для поиска по полю "примерно где" - показываем все локации сверху
   const districtOptions = (() => {
     const counts = {};
     orders.forEach(o => { if (o.district) counts[o.district] = (counts[o.district] || 0) + 1; });
     const list = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
     return list;
   })();
+
+  // Все уникальные локации для быстрого поиска
+  const allDistricts = districtOptions;
 
   const visibleDates = dates.filter(d => selectedWeekdays.includes(d.getDay()));
 
@@ -596,25 +603,30 @@ export default function AdminDashboard() {
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
-          <select
-            value={exportPeriod}
-            onChange={e => setExportPeriod(e.target.value)}
-            className="bg-emerald-700 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 sm:py-2 border-none"
-          >
-            <option value="all">За всё время</option>
-            <option value="year">Этот год</option>
-            <option value="month">Этот месяц</option>
-            <option value="custom">Свой диапазон</option>
-          </select>
-          {exportPeriod === 'custom' && (
-            <div className="flex items-center gap-2 ml-2">
-              <input type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="text-xs rounded-lg px-2 py-1 border" />
-              <input type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="text-xs rounded-lg px-2 py-1 border" />
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
+            <span className="text-xs font-medium text-emerald-100">Период:</span>
+            <select
+              value={exportPeriod}
+              onChange={e => setExportPeriod(e.target.value)}
+              className="bg-emerald-700 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 sm:py-2 border-none"
+            >
+              <option value="all">За всё время</option>
+              <option value="year">Этот год</option>
+              <option value="month">Этот месяц</option>
+              <option value="custom">Свой диапазон</option>
+            </select>
+            {exportPeriod === 'custom' && (
+              <div className="flex items-center gap-1">
+                <input type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600" />
+                <span className="text-emerald-200">—</span>
+                <input type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600" />
+              </div>
+            )}
+          </div>
           <a
             href={getExportUrl(exportPeriod)}
-            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap"
+            className="bg-emerald-700 hover:bg-emerald-600 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap flex items-center gap-1"
+            title={`Скачать Excel за выбранный период: ${exportPeriod === 'all' ? 'всё время' : exportPeriod === 'year' ? 'год' : exportPeriod === 'month' ? 'месяц' : `с ${exportCustomStart} по ${exportCustomEnd}`}`}
           >
             📊 <span className="hidden sm:inline">Экспорт в </span>Excel
           </a>
@@ -879,13 +891,13 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto" style={{ transform: `scale(${tableScale})`, transformOrigin: '0 0' }}>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto" style={{ transform: `scale(${tableScale})`, transformOrigin: '0 0', minWidth: '100%' }}>
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-slate-100 border-b border-slate-200">
-                      <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-10 bg-slate-100">Дата</th>
+                      <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
                       {visibleGardeners.map(g => (
-                        <th key={g.id} className="p-3 text-sm font-semibold text-slate-600 border-r border-slate-200 min-w-[180px] sticky top-0 z-10 bg-slate-100">
+                        <th key={g.id} className="p-3 text-sm font-semibold text-slate-600 border-r border-slate-200 min-w-[180px] sticky top-0 z-20 bg-slate-100 shadow-sm">
                           {g.name}
                         </th>
                       ))}
@@ -901,7 +913,7 @@ export default function AdminDashboard() {
                         <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
                           <td className={`p-3 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
                             <span className="inline-flex items-center gap-2">
-                              <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</span>
+                              <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(/^(\\d+)/, (m, d) => `${d} `)}</span>
                               <span>({dayLabel})</span>
                               {holiday && <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Выходной</span>}
                             </span>
@@ -1306,28 +1318,37 @@ export default function AdminDashboard() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500">Район</label>
-                  <select required value={formData.district} onChange={e => setFormData({...formData, district: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
-                    <option value="" disabled>Выберите район</option>
-                    {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                    <optgroup label="Другие">
-                      <option>Шумейка</option>
-                      <option>Генеральское</option>
-                      <option>Малая Тополевка</option>
-                      <option>Усть курдюм</option>
-                      <option>Зоналка</option>
-                      <option>Юбилейный</option>
-                      <option>Кумыска</option>
-                      <option>Центр</option>
-                      <option>Поливановка</option>
-                      <option>Ленинский район</option>
-                      <option>Трещиха</option>
-                      <option>Маркс</option>
-                      <option>Заводской район</option>
-                      <option>Дальняк</option>
-                      <option>Другое</option>
-                    </optgroup>
-                  </select>
+                  <label className="block text-xs font-semibold text-slate-500">Район (примерно где)</label>
+                  <input 
+                    type="text" 
+                    list="district-list" 
+                    value={formData.district} 
+                    onChange={e => setFormData({...formData, district: e.target.value})} 
+                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
+                    placeholder="Начните вводить район..."
+                  />
+                  <datalist id="district-list">
+                    {/* Сначала популярные из заказов */}
+                    {allDistricts.slice(0, 10).map(d => <option key={d} value={d} />)}
+                    {/* Затем все остальные фиксированные варианты */}
+                    <option value="Шумейка" />
+                    <option value="Генеральское" />
+                    <option value="Малая Тополевка" />
+                    <option value="Усть курдюм" />
+                    <option value="Зоналка" />
+                    <option value="Юбилейный" />
+                    <option value="Кумыска" />
+                    <option value="Центр" />
+                    <option value="Поливановка" />
+                    <option value="Ленинский район" />
+                    <option value="Трещиха" />
+                    <option value="Маркс" />
+                    <option value="Заводской район" />
+                    <option value="Дальняк" />
+                    <option value="Другое" />
+                    {/* Остальные из истории заказов */}
+                    {allDistricts.slice(10).map(d => <option key={d} value={d} />)}
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Адрес</label>
@@ -1375,8 +1396,16 @@ export default function AdminDashboard() {
                   <input type="number" value={formData.companyShare} onChange={e => setFormData({...formData, companyShare: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
                 </div>
               </div>
-              <div className="mt-2">
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={formData.isCash ?? true} onChange={e => setFormData({...formData, isCash: e.target.checked})} /> Нал / Безнал (чек-бокс: если безнал — сумма не учитывается в "к сдаче")</label>
+              <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={formData.isCash ?? true} onChange={e => setFormData({...formData, isCash: e.target.checked})} className="w-4 h-4" /> 
+                  <span>Оплата: {formData.isCash ?? true ? 'Нал (садовник сдает % фирме)' : 'Безнал (фирма платит садовнику отдельно)'}</span>
+                </label>
+                <p className="text-xs text-slate-500 mt-1 ml-6">
+                  {formData.isCash ?? true 
+                    ? '💵 Наличные: сумма учитывается в графе "К сдаче"' 
+                    : '💳 Безнал: сумма НЕ учитывается в "К сдаче", фирма оплачивает работу отдельно'}
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Статус заказа</label>

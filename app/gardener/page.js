@@ -275,7 +275,10 @@ export default function GardenerDashboard() {
       if (orderDate < start || orderDate > end) return;
 
       const gross = Number(order.priceFact || 0);
-      const companyShare = Number(order.companyShare || 0);
+      // Если безналичный расчет - фирма получает всю сумму, садовник не должен фирме долю
+      // Если наличный - садовник должен отдать долю фирмы (companyShare)
+      const isCash = order.isCash !== undefined ? order.isCash : true;
+      const companyShare = isCash ? Number(order.companyShare || 0) : 0;
       const paidTargets = getPaidTargets(order.paidTo);
 
       if (order.status === 'Выполнен') {
@@ -610,7 +613,12 @@ export default function GardenerDashboard() {
             {(() => {
               const today = new Date();
               today.setHours(0,0,0,0);
-              const visible = orders.filter(o => showPastOrders ? true : new Date(o.date) >= today);
+              // Показываем заказы, которые не в статусе "Перенос", "Отказ" или "Перенесен" (они уже обработаны диспетчером)
+              const visible = orders.filter(o => {
+                if (!showPastOrders && new Date(o.date) < today) return false;
+                if (o.status === 'Перенос' || o.status === 'Отказ' || o.status === 'Перенесен') return false;
+                return true;
+              });
               return visible.map(renderOrderCard);
             })()}
           </div>
