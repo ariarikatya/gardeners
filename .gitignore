@@ -1,34 +1,48 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+```
+# Dependencies
+node_modules/
 
-# testing
-/coverage
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+.python-version
 
-# next.js
-/.next/
-/out/
+# Build outputs
+dist/
+build/
+*.egg-info/
 
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files
-.env*.local
+# Environment variables
 .env
+.env.local
+.env.*
 
-# vercel
-.vercel
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Temp files
+*.tmp
+*.temp
+```
