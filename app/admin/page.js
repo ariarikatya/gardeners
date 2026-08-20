@@ -97,6 +97,7 @@ export default function AdminDashboard() {
   const [filterGardenerId, setFilterGardenerId] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterServiceId, setFilterServiceId] = useState('all');
+  const [filterDistrict, setFilterDistrict] = useState('');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
   // Поиск ближайшего окна под запрос клиента
@@ -645,13 +646,13 @@ export default function AdminDashboard() {
               <option value="monthEnd">До конца месяца</option>
               <option value="yearEnd">До конца года</option>
             </select>
-            <button onClick={() => setShowPastDates(s => !s)} className={`text-xs rounded-lg px-2 py-1 border ${showPastDates ? 'bg-emerald-100 border-emerald-300' : 'bg-white border-slate-200'}`}>
+            <button onClick={() => setShowPastDates(s => !s)} className={`text-xs rounded-lg px-2 py-1 border text-slate-800 ${showPastDates ? 'bg-emerald-100 border-emerald-300' : 'bg-white border-slate-200'}`}>
               {showPastDates ? 'Показывать прошлое' : 'Показать прошлые'}
             </button>
             <div className="flex items-center gap-1">
               <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-white border rounded px-2">-</button>
-              <div className="text-xs px-2">Масштаб {tableScale}</div>
-              <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-white border rounded px-2">+</button>
+              <div className="text-xs px-2 text-slate-800">Масштаб {Math.round(tableScale * 100)}%</div>
+              <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-white text-slate-800 border rounded px-2">+</button>
             </div>
           </div>
 
@@ -861,6 +862,11 @@ export default function AdminDashboard() {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Примерно где (район)</label>
+                  <input list="calendar-districts" value={filterDistrict} onChange={e => setFilterDistrict(e.target.value)} placeholder="Начните вводить район" className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                  <datalist id="calendar-districts">{allDistricts.map(district => <option key={district} value={district} />)}</datalist>
+                </div>
+                <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Дни недели</label>
                   <div className="flex gap-1">
                     {WEEKDAY_LABELS.map((label, idx) => (
@@ -891,7 +897,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto" style={{ transform: `scale(${tableScale})`, transformOrigin: '0 0', minWidth: '100%' }}>
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+                <div style={{ width: `${100 / tableScale}%`, transform: `scale(${tableScale})`, transformOrigin: '0 0' }}>
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-slate-100 border-b border-slate-200">
@@ -919,7 +926,7 @@ export default function AdminDashboard() {
                             </span>
                           </td>
                           {visibleGardeners.map(g => {
-                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr));
+                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
                             const dayOrders = filterStatus === 'all'
                               ? dayOrdersAll
                               : dayOrdersAll.filter(o => o.status === filterStatus);
@@ -982,6 +989,7 @@ export default function AdminDashboard() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </>
           )}
@@ -1364,12 +1372,16 @@ export default function AdminDashboard() {
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
-                  <label className="text-xs text-slate-500">Или выберите несколько услуг (мультисписок)</label>
-                  <select multiple value={formData.serviceIds || []} onChange={e => setFormData({...formData, serviceIds: Array.from(e.target.selectedOptions).map(o => o.value)})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2 h-28">
-                    {services.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
+                  <label className="text-xs text-slate-500">Выберите несколько услуг</label>
+                  <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {services.map(s => {
+                      const checked = (formData.serviceIds || []).includes(s.id);
+                      return <label key={s.id} className={`flex items-center gap-2 rounded-lg border px-2 py-2 text-sm cursor-pointer ${checked ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'border-slate-200 text-slate-600'}`}>
+                        <input type="checkbox" checked={checked} onChange={e => setFormData(prev => ({ ...prev, serviceIds: e.target.checked ? [...new Set([...(prev.serviceIds || []), s.id])] : (prev.serviceIds || []).filter(id => id !== s.id), serviceId: prev.serviceId || s.id }))} />
+                        {s.name}
+                      </label>;
+                    })}
+                  </div>
                 </div>
               </div>
               <div>
@@ -1413,6 +1425,8 @@ export default function AdminDashboard() {
                   <option value="Новый заказ">Новый заказ</option>
                   <option value="Перенос">Перенос</option>
                   <option value="Отказ">Отказ</option>
+                  <option value="Перенос на весну">Перенос на весну</option>
+                  <option value="Перенос на весну">Перенос на весну</option>
                   <option value="Выполнен">Выполнен</option>
                   <option value="Отменен">Отменен</option>
                 </select>

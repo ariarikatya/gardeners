@@ -93,6 +93,8 @@ export async function GET(req) {
     const bonusOps = ops.filter(op => op.type === 'bonus').reduce((s, o) => s + Number(o.amount || 0), 0);
     const fineOps = ops.filter(op => op.type === 'fine').reduce((s, o) => s + Number(o.amount || 0), 0);
     const writeoffOps = ops.filter(op => op.type === 'writeoff').reduce((s, o) => s + Number(o.amount || 0), 0);
+    const pendingOperations = ops.filter(op => !op.approved).length;
+    const pendingExpenses = ops.filter(op => op.type === 'expense' && !op.approved).length;
 
     const revenueWithOps = earned + bonusOps;
     const shareWithOps = share + fineOps + writeoffOps;
@@ -118,6 +120,8 @@ export async function GET(req) {
       bonus: bonusOps,
       fine: fineOps,
       writeoff: writeoffOps,
+      pendingOperations,
+      pendingExpenses,
       net: revenueWithOps - salary - shareWithOps,
     };
   });
@@ -143,6 +147,8 @@ export async function GET(req) {
       avgDailyRevenue,
       payout: perGardener.reduce((sum, item) => sum + Number(item.payout || 0), 0),
       estimated: perGardener.reduce((sum, item) => sum + Number(item.estimated || 0), 0),
+      pendingOperations: perGardener.reduce((sum, item) => sum + Number(item.pendingOperations || 0), 0),
+      pendingExpenses: perGardener.reduce((sum, item) => sum + Number(item.pendingExpenses || 0), 0),
     },
     gardeners: perGardener,
   });

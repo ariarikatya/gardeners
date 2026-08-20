@@ -20,6 +20,7 @@ const OPERATION_TYPE_LABELS = {
   bonus: 'Премия',
   fine: 'Штраф',
   writeoff: 'Списание',
+  expense: 'Трата',
 };
 
 const PAYMENT_TARGET_LABELS = {
@@ -59,6 +60,7 @@ export default function LeaderDashboard() {
   const [ordersModalGardener, setOrdersModalGardener] = useState(null);
   const [ordersList, setOrdersList] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [leaderScale, setLeaderScale] = useState(1);
 
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
@@ -311,8 +313,8 @@ export default function LeaderDashboard() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
+      <main className="max-w-7xl mx-auto px-2 sm:px-3 py-3 space-y-3">
+        <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1">Период</label>
             <div className="flex gap-2">
@@ -340,13 +342,18 @@ export default function LeaderDashboard() {
               </div>
             </>
           )}
+          <div className="ml-auto flex items-center gap-2 text-xs text-slate-700">
+            <span>Масштаб {Math.round(leaderScale * 100)}%</span>
+            <button onClick={() => setLeaderScale(s => Math.max(0.7, +(s - 0.1).toFixed(1)))} className="bg-white border rounded px-2 py-1">−</button>
+            <button onClick={() => setLeaderScale(s => Math.min(1, +(s + 0.1).toFixed(1)))} className="bg-white border rounded px-2 py-1">+</button>
+          </div>
         </div>
 
         {loading ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500">Загрузка данных...</div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div style={{ fontSize: `${leaderScale}em` }} className="grid grid-cols-1 md:grid-cols-5 gap-2">
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Заказы</div>
                 <div className="text-3xl font-bold text-slate-900 mt-2">{data.totals?.orders || 0}</div>
@@ -376,9 +383,9 @@ export default function LeaderDashboard() {
               Как считается кошелёк: «Заработано» = суммы выполненных заказов; «Премии» = начисленные бонусы; «Штрафы» = удержания; «Долг садовников фирме» = доля фирмы, штрафы и списания; «К выплате» = заработано + премии − штрафы − списания − долг садовников фирме.
             </div>
  
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-              <h2 className="text-lg font-bold text-slate-800 mb-4">По садовникам</h2>
-              <div className="overflow-x-auto">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3">
+              <h2 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">По садовникам {Number(data.totals?.pendingExpenses || 0) > 0 && <span className="text-xs bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-1">Новых трат: {data.totals.pendingExpenses}</span>}</h2>
+              <div style={{ fontSize: `${leaderScale}em` }} className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 text-left">

@@ -116,6 +116,45 @@ export async function PUT(req) {
   const { id, ...updateData } = body;
 
   const existing = await prisma.order.findUnique({ where: { id } });
+  const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+
+  if (existing && (updateData.date || updateData.gardenerId) && (existing.status === 'Перенос' || existing.status === 'Отказ')) {
+    const nextDate = updateData.date ? new Date(updateData.date) : existing.date;
+    const nextGardenerId = updateData.gardenerId || existing.gardenerId;
+    const dateChanged = nextDate.toISOString().slice(0, 10) !== existing.date.toISOString().slice(0, 10);
+    const gardenerChanged = nextGardenerId !== existing.gardenerId;
+    if (dateChanged || gardenerChanged) {
+      const serviceIds = Array.isArray(updateData.serviceIds)
+        ? JSON.stringify(updateData.serviceIds)
+        : (updateData.serviceIds ?? existing.serviceIds);
+      const replacement = await prisma.$transaction(async (tx) => {
+        await tx.order.update({ where: { id }, data: { status: 'Перенесен', transferRequestedDate: null, refusalReason: null } });
+        return tx.order.create({
+          data: {
+            date: nextDate,
+            dayOfWeek: weekdayNames[nextDate.getDay()],
+            clientName: updateData.clientName ?? existing.clientName,
+            clientPhone: updateData.clientPhone ?? existing.clientPhone,
+            address: updateData.address ?? existing.address,
+            district: updateData.district ?? existing.district,
+            description: updateData.description ?? existing.description,
+            priceContract: Number(updateData.priceContract ?? existing.priceContract),
+            priceFact: Number(updateData.priceFact ?? existing.priceFact),
+            employeeSalary: Number(updateData.employeeSalary ?? existing.employeeSalary),
+            companyShare: Number(updateData.companyShare ?? existing.companyShare),
+            status: 'Новый заказ',
+            comment: updateData.comment ?? existing.comment,
+            gardenerId: nextGardenerId,
+            serviceId: updateData.serviceId === '' ? null : (updateData.serviceId ?? existing.serviceId),
+            serviceIds,
+            isCash: updateData.isCash ?? existing.isCash,
+            amoDealId: existing.amoDealId,
+          },
+        });
+      });
+      return NextResponse.json({ order: replacement, transferred: true });
+    }
+  }
 
   if (updateData.date) {
     updateData.date = new Date(updateData.date);
@@ -149,7 +188,6 @@ export async function PUT(req) {
      else if (existing.status !== 'Перенесен' && existing.status !== 'Отменен' && existing.status !== 'Перенос на весну') {
         // Создаем новый заказ для нового мастера
         const newOrderData = {
-          clientId: existing.clientId,
           clientName: existing.clientName,
           clientPhone: existing.clientPhone,
           address: existing.address,
@@ -174,7 +212,6 @@ export async function PUT(req) {
         
         // Старый заказ помечаем как перенесенный, чтобы он исчез у старого мастера
         updateData.status = 'Перенесен';
-        updateData.transferredTo = updateData.gardenerId;
         updateData.gardenerId = existing.gardenerId; // Оставляем старого мастера в записи для истории
         if (updateData.date) delete updateData.date; // Не меняем дату у старой записи
         if (updateData.dayOfWeek) delete updateData.dayOfWeek;
@@ -184,7 +221,8 @@ export async function PUT(req) {
   // Обработка статуса "Перенос на весну" - просто уводим в отказ без смены мастера
   if (updateData.status === 'Перенос на весну' && existing) {
      updateData.refusalReason = updateData.refusalReason || 'Перенос на весну';
-     // Не меняем gardenerId, просто ставим статус отказа
+    updateData.status = 'Отказ';
+    // Не меняем gardenerId: это отказ диспетчеру без назначения нового мастера.
   }
 
   if (updateData.serviceId === '') updateData.serviceId = null;

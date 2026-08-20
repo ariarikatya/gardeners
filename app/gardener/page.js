@@ -54,6 +54,7 @@ export default function GardenerDashboard() {
   });
   const [selectedDateStr, setSelectedDateStr] = useState(null);
   const [showPastOrders, setShowPastOrders] = useState(false);
+  const [activeSection, setActiveSection] = useState('records');
 
   // Модалка действия по заказу
   const [actionOrder, setActionOrder] = useState(null);
@@ -474,6 +475,11 @@ export default function GardenerDashboard() {
       </header>
 
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
+          <button onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
+        </div>
+        {activeSection === 'finance' && <>
         <div className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
             <h2 className="text-xl font-bold text-emerald-900">Кошелёк</h2>
@@ -597,7 +603,9 @@ export default function GardenerDashboard() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between mb-4">
+        </>}
+
+        {activeSection === 'records' && <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
           <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button
@@ -616,9 +624,9 @@ export default function GardenerDashboard() {
           <div className="ml-3">
             <button onClick={() => setShowPastOrders(s => !s)} className="px-3 py-1.5 text-sm rounded-lg bg-white border border-slate-200">{showPastOrders ? 'Скрыть прошедшие' : 'Показать прошедшие'}</button>
           </div>
-        </div>
+        </div>}
 
-        {loading ? (
+        {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
         ) : orders.length === 0 ? (
           <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
@@ -666,7 +674,7 @@ export default function GardenerDashboard() {
               )
             )}
           </div>
-        )}
+        ))}
       </main>
 
       {/* Модалка действия: перенос / отказ / выполнено */}
