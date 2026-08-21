@@ -16,6 +16,25 @@ function statusStyle(status) {
   }
 }
 
+function maskPhone(phone) {
+  if (!phone) return '+7 ••• ••• •• ••';
+  const digits = phone.replace(/\D/g, '');
+  const lastTwo = digits.slice(-2);
+  return `+7 ••• ••• •• ${lastTwo.padStart(2, '•')}`;
+}
+
+function formatPhoneDigits(phone) {
+  if (!phone) return '';
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('8') && digits.length === 11) {
+    digits = '7' + digits.slice(1);
+  }
+  if (digits.length === 10) {
+    digits = '7' + digits;
+  }
+  return digits;
+}
+
 // Сжимаем фото перед загрузкой, чтобы не упереться в лимит размера запроса
 function compressImage(file, maxWidth = 1600, quality = 0.8) {
   return new Promise((resolve) => {
@@ -356,7 +375,7 @@ export default function GardenerDashboard() {
         )}
 
         <div className="space-y-2 text-sm text-slate-600">
-          <div>📍 <span className="font-medium text-slate-800">{order.district ? `${order.district} • ${order.address}` : order.address}</span></div>
+          <div>📍 <a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" className="font-medium text-emerald-700 underline hover:text-emerald-800">{order.district ? `${order.district} • ${order.address}` : order.address}</a></div>
           {/* Телефон доступен с дня подготовки до завершения дня заказа. */}
           {(() => {
             const now = new Date();
@@ -368,19 +387,45 @@ export default function GardenerDashboard() {
             const showEnd = new Date(orderDateAtMidnight);
             showEnd.setHours(showEnd.getHours() + 24);
             const showPhone = order.status !== 'Выполнен' && now >= showStart && now < showEnd;
+            const phoneDigits = formatPhoneDigits(order.clientPhone);
+            const maskedPhone = maskPhone(order.clientPhone);
+
             return showPhone ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <div>📞 <a href={`tel:${order.clientPhone}`} onClick={() => markOrderAction(order, 'mark_call')} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
-                <select
-                  value={order.callStatus || ''}
-                  onChange={(e) => markOrderAction(order, 'mark_call', { callStatus: e.target.value })}
-                  className="text-xs border border-slate-300 rounded px-2 py-1 bg-white text-slate-700 font-medium cursor-pointer"
-                >
-                  <option value="" disabled>Статус звонка...</option>
-                  <option value="не дозвон">не дозвон</option>
-                  <option value="отказ">отказ</option>
-                  <option value="связался">связался</option>
-                </select>
+              <div className="space-y-2 mt-1">
+                <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <div>
+                    <span className="text-xs text-slate-400 block mb-0.5">Клиент:</span>
+                    <span className="font-semibold text-slate-800">{maskedPhone}</span>
+                  </div>
+                  <select
+                    value={order.callStatus || ''}
+                    onChange={(e) => markOrderAction(order, 'mark_call', { callStatus: e.target.value })}
+                    className="text-xs border border-slate-300 rounded px-2 py-1.5 bg-white text-slate-700 font-medium cursor-pointer"
+                  >
+                    <option value="" disabled>Статус звонка...</option>
+                    <option value="не дозвон">не дозвон</option>
+                    <option value="отказ">отказ</option>
+                    <option value="связался">связался</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <a
+                    href={`tel:${phoneDigits ? `+${phoneDigits}` : order.clientPhone}`}
+                    onClick={() => markOrderAction(order, 'mark_call')}
+                    className="flex-1 text-center text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
+                  >
+                    📞 Позвонить
+                  </a>
+                  <a
+                    href={`https://wa.me/${phoneDigits}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => markOrderAction(order, 'mark_call')}
+                    className="flex-1 text-center text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
+                  >
+                    💬 Написать (WhatsApp)
+                  </a>
+                </div>
               </div>
             ) : (
               <div>📞 <span className="text-slate-400">Номер скрыт</span></div>
@@ -405,11 +450,12 @@ export default function GardenerDashboard() {
               Причина отказа: {order.refusalReason}
             </div>
           )}
-          {order.status === 'Выполнен' && (
-            <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
-              Сумма по факту: {order.priceFact} ₽
-            </div>
-          )}
+          <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-100 flex flex-wrap justify-between items-center gap-1">
+            <span>Сумма по договору: <strong className="text-slate-900">{order.priceContract ? `${order.priceContract} ₽` : 'не указана'}</strong></span>
+            {order.status === 'Выполнен' && (
+              <span>Факт: <strong className="text-emerald-700">{order.priceFact} ₽</strong></span>
+            )}
+          </div>
         </div>
 
         {order.status === 'Новый заказ' && (

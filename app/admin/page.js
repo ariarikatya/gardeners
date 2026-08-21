@@ -996,7 +996,7 @@ export default function AdminDashboard() {
                                         }`}
                                       >
                                         {order.clientName}
-                                        <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}{order.address}</div>
+                                        <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
                                         <div className="text-xs opacity-90">{order.description}</div>
                                         {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
                                         {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
@@ -1237,7 +1237,7 @@ export default function AdminDashboard() {
                               <td className="p-3">
                                 <div className="font-semibold text-slate-800">{order.clientName}</div>
                                 <div className="text-slate-500">{order.clientPhone}</div>
-                                <div className="text-slate-500 text-[11px]">{order.district ? `${order.district} • ${order.address}` : order.address}</div>
+                                <div className="text-slate-500 text-[11px]"><a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">{order.district ? `${order.district} • ${order.address}` : order.address}</a></div>
                               </td>
                               <td className="p-3 font-medium text-emerald-800">
                                 {gardener ? gardener.name : 'Не назначен'}
