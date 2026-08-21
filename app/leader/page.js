@@ -386,39 +386,39 @@ export default function LeaderDashboard() {
               Как считается кошелёк: выручка фирмы = выполненные заказы − одобренные траты; «К выплате» = заработано + премии − штрафы − списания − долг садовников фирме.
             </div>
  
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3">
-              <h2 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">По садовникам {Number(data.totals?.pendingExpenses || 0) > 0 && <span className="text-xs bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-1">Новых трат: {data.totals.pendingExpenses}</span>}</h2>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
+              <h2 className="text-base font-bold text-slate-800 mb-1 flex items-center gap-2">По садовникам {Number(data.totals?.pendingExpenses || 0) > 0 && <span className="text-[11px] bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5">Новых трат: {data.totals.pendingExpenses}</span>}</h2>
               <div className="overflow-x-auto">
                 <div style={{ width: `${100 / leaderScale}%`, transform: `scale(${leaderScale})`, transformOrigin: '0 0' }}>
-                <table className="min-w-full text-sm">
+                <table className="min-w-full text-xs">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 text-left">
-                      <th className="px-3 py-2 font-semibold">Садовник</th>
-                      <th className="px-3 py-2 font-semibold">Заказы</th>
-                      <th className="px-3 py-2 font-semibold">Заработано</th>
-                      <th className="px-3 py-2 font-semibold">Долг садовников фирме</th>
-                      <th className="px-3 py-2 font-semibold">Будет начислено</th>
-                      <th className="px-3 py-2 font-semibold">Премия ₽</th>
-                      <th className="px-3 py-2 font-semibold">Штраф ₽</th>
-                      <th className="px-3 py-2 font-semibold">Списание ₽</th>
-                      <th className="px-3 py-2 font-semibold">% фирмы</th>
-                      <th className="px-3 py-2 font-semibold">Действие</th>
+                      <th className="px-2 py-1.5 font-semibold">Садовник</th>
+                      <th className="px-2 py-1.5 font-semibold">Заказы</th>
+                      <th className="px-2 py-1.5 font-semibold">Заработано</th>
+                      <th className="px-2 py-1.5 font-semibold">Долг фирме</th>
+                      <th className="px-2 py-1.5 font-semibold">Начислено</th>
+                      <th className="px-2 py-1.5 font-semibold">Премия ₽</th>
+                      <th className="px-2 py-1.5 font-semibold">Штраф ₽</th>
+                      <th className="px-2 py-1.5 font-semibold">Списание ₽</th>
+                      <th className="px-2 py-1.5 font-semibold">% фирмы</th>
+                      <th className="px-2 py-1.5 font-semibold">Действие</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(data.gardeners || []).map((g) => (
                       <tr key={g.id} className="border-t border-slate-100 align-top">
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-2">
                           <div className="font-semibold text-slate-800">{g.name}</div>
                           <div className="text-xs text-slate-500">{g.phone}</div>
                         </td>
-                        <td className="px-3 py-3">{g.totalOrders}</td>
-                        <td className="px-3 py-3 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
-                        <td className="px-3 py-3 text-rose-700 font-semibold">{formatMoney(g.share)}</td>
-                        <td className="px-3 py-3 text-violet-700 font-semibold">{formatMoney(g.estimated)}</td>
+                        <td className="px-2 py-2">{g.totalOrders}</td>
+                        <td className="px-2 py-2 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
+                        <td className="px-2 py-2 text-rose-700 font-semibold">{formatMoney(g.share)}</td>
+                        <td className="px-2 py-2 text-violet-700 font-semibold">{formatMoney(g.estimated)}</td>
                         
                         {/* Колонка Премия */}
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-2">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.bonus)}</div>
                           <input
                             type="number"
@@ -439,7 +439,7 @@ export default function LeaderDashboard() {
                         </td>
 
                         {/* Колонка Штраф */}
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-2">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.fine)}</div>
                           <input
                             type="number"
@@ -460,7 +460,7 @@ export default function LeaderDashboard() {
                         </td>
 
                         {/* Колонка Списание */}
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-2">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Итого: {formatMoney(g.writeoff)}</div>
                           <input
                             type="number"
@@ -481,7 +481,7 @@ export default function LeaderDashboard() {
                         </td>
 
                         {/* Колонка Доля фирмы % (Новая) */}
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-2">
                           <div className="text-[10px] uppercase text-slate-400 mb-1">Доля фирмы %</div>
                           <input
                             type="number"
@@ -520,7 +520,7 @@ export default function LeaderDashboard() {
                         </td>
 
                         {/* Колонка Действия */}
-                        <td className="px-3 py-3">
+                        <td className="px-2 py-2">
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => saveGardenerSettings(g)}

@@ -925,12 +925,12 @@ export default function AdminDashboard() {
 
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
                 <div style={{ zoom: tableScale }}>
-                <table className="w-full border-collapse">
+                <table className="w-full border-collapse text-xs">
                   <thead className="sticky top-0 z-30">
                     <tr className="bg-slate-100 border-b border-slate-200">
-                      <th className="p-3 text-left text-sm font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
+                      <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
                       {visibleGardeners.map(g => (
-                        <th key={g.id} className="p-3 text-sm font-semibold text-slate-600 border-r border-slate-200 min-w-[180px] sticky top-0 z-20 bg-slate-100 shadow-sm">
+                        <th key={g.id} className="p-2 text-xs font-semibold text-slate-600 border-r border-slate-200 min-w-[160px] sticky top-0 z-20 bg-slate-100 shadow-sm">
                           {g.name}
                         </th>
                       ))}
@@ -944,11 +944,10 @@ export default function AdminDashboard() {
 
                       return (
                         <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
-                          <td className={`p-3 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
-                            <span className="inline-flex items-center gap-2">
-                              <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).replace(/^(\\d+)/, (m, d) => `${d} `)}</span>
-                              <span>({dayLabel})</span>
-                              {holiday && <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">Выходной</span>}
+                          <td className={`p-2 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
+                            <span className="flex flex-col gap-0.5">
+                              <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
+                              {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
                             </span>
                           </td>
                           {visibleGardeners.map(g => {
@@ -960,7 +959,7 @@ export default function AdminDashboard() {
                             const activeCount = dayOrdersAll.filter(o => o.status === 'Новый заказ').length;
 
                             return (
-                              <td key={g.id} className="p-2 border-r border-slate-200 text-center text-sm align-top">
+                              <td key={g.id} className="p-1.5 border-r border-slate-200 text-center text-xs align-top">
                                 {dayOff && dayOrdersAll.length === 0 ? (
                                   <div className="p-2 rounded-lg bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-1">
                                     🚫 Выходной
