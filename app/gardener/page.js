@@ -165,11 +165,11 @@ export default function GardenerDashboard() {
     setActionType(null);
   };
 
-  const markOrderAction = async (order, action) => {
+  const markOrderAction = async (order, action, extraPayload = {}) => {
     const res = await fetch('/api/gardener/orders', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: order.id, action }),
+      body: JSON.stringify({ id: order.id, action, ...extraPayload }),
     });
     if (res.ok) fetchOrders();
     else alert((await res.json()).error || 'Не удалось сохранить действие');
@@ -366,7 +366,19 @@ export default function GardenerDashboard() {
             showEnd.setHours(showEnd.getHours() + 24);
             const showPhone = order.status !== 'Выполнен' && now >= showStart && now < showEnd;
             return showPhone ? (
-              <div>📞 <a href={`tel:${order.clientPhone}`} onClick={() => markOrderAction(order, 'mark_call')} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div>📞 <a href={`tel:${order.clientPhone}`} onClick={() => markOrderAction(order, 'mark_call')} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+                <select
+                  value={order.callStatus || ''}
+                  onChange={(e) => markOrderAction(order, 'mark_call', { callStatus: e.target.value })}
+                  className="text-xs border border-slate-300 rounded px-2 py-1 bg-white text-slate-700 font-medium cursor-pointer"
+                >
+                  <option value="" disabled>Статус звонка...</option>
+                  <option value="не дозвон">не дозвон</option>
+                  <option value="отказ">отказ</option>
+                  <option value="связался">связался</option>
+                </select>
+              </div>
             ) : (
               <div>📞 <span className="text-slate-400">Номер скрыт</span></div>
             );

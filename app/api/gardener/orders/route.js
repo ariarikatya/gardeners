@@ -37,7 +37,7 @@ export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt } = await req.json();
+  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt, callStatus } = await req.json();
 
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order || order.gardenerId !== payload.gardenerId) {
@@ -84,6 +84,7 @@ export async function PUT(req) {
     data = { cardFilledAt: cardFilledAt ? new Date(cardFilledAt) : new Date() };
   } else if (action === 'mark_call') {
     data = { clientCalledAt: clientCalledAt ? new Date(clientCalledAt) : new Date() };
+    if (callStatus !== undefined) data.callStatus = callStatus;
   } else {
     return NextResponse.json({ error: 'Неизвестное действие' }, { status: 400 });
   }

@@ -79,6 +79,7 @@ model Order {
   isCash                Boolean   @default(true) // true = нал, false = безнал
   cardFilledAt          DateTime? // метка, что карточка заказа заполнена садовником
   clientCalledAt        DateTime? // метка, что садовник позвонил клиенту
+  callStatus            String?   // статус звонка: "не дозвон" | "отказ" | "связался"
 
   // Связанные операции (штрафы, траты, премии) — добавлено для идемпотентности
   operations            Operation[]
