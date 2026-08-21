@@ -18,26 +18,32 @@ function statusStyle(status) {
 
 // Сжимаем фото перед загрузкой, чтобы не упереться в лимит размера запроса
 function compressImage(file, maxWidth = 1600, quality = 0.8) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    if (!file || !(file instanceof Blob)) return resolve(file);
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        let { width, height } = img;
-        if (width > maxWidth) {
-          height = Math.round(height * (maxWidth / width));
-          width = maxWidth;
+        try {
+          let { width, height } = img;
+          if (width > maxWidth) {
+            height = Math.round(height * (maxWidth / width));
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => (blob ? resolve(blob) : resolve(file)), 'image/jpeg', quality);
+        } catch (err) {
+          resolve(file);
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Не удалось обработать фото'))), 'image/jpeg', quality);
       };
-      img.onerror = () => reject(new Error('Не удалось прочитать фото'));
+      img.onerror = () => resolve(file);
       img.src = e.target.result;
     };
-    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.onerror = () => resolve(file);
     reader.readAsDataURL(file);
   });
 }
@@ -193,10 +199,7 @@ export default function GardenerDashboard() {
 
       if (which === 'before') setPhotoBeforeUrls(prev => [...prev, ...uploaded]);
       if (which === 'after') setPhotoAfterUrls(prev => [...prev, ...uploaded]);
-      if (which === 'act') {
-        // keep single act (most likely one act document) — if multiple uploaded, keep the last
-        if (uploaded.length) setPhotoActUrls(prev => [...prev, ...uploaded]);
-      }
+      if (which === 'act') setPhotoActUrls(prev => [...prev, ...uploaded]);
     } catch (err) {
       alert('Не удалось загрузить фото: ' + err.message);
     } finally {
@@ -744,7 +747,7 @@ export default function GardenerDashboard() {
                       {photoBeforeUrls.map((u, idx) => (
                         <div key={u} className="relative">
                           <img src={u} alt={`До ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <button onClick={() => setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                          <button type="button" onClick={() => setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
                         </div>
                       ))}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
@@ -758,7 +761,7 @@ export default function GardenerDashboard() {
                       {photoAfterUrls.map((u, idx) => (
                         <div key={u} className="relative">
                           <img src={u} alt={`После ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <button onClick={() => setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                          <button type="button" onClick={() => setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
                         </div>
                       ))}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
