@@ -102,7 +102,7 @@ export async function GET(req) {
     const gardenerApprovedExpenses = ops
       .filter(op => op.type === 'expense' && op.approved)
       .reduce((sum, op) => sum + Number(op.approvedAmount ?? op.amount ?? 0), 0);
-    const revenueWithOps = earned + bonusOps;
+    const revenueWithOps = earned + bonusOps + gardenerApprovedExpenses;
     const shareWithOps = share + fineOps + writeoffOps;
     const payoutWithOps = Math.max(revenueWithOps - shareWithOps - paidToGardener - paidToCompany, 0);
 

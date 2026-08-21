@@ -316,8 +316,11 @@ export default function GardenerDashboard() {
     const writeoffOps = operations
       .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'writeoff')
       .reduce((s, o) => s + Number(o.amount || 0), 0);
+    const approvedExpenseOps = operations
+      .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'expense' && op.approved)
+      .reduce((s, o) => s + Number(o.approvedAmount ?? o.amount ?? 0), 0);
 
-    const revenueWithOps = earned + bonusOps;
+    const revenueWithOps = earned + bonusOps + approvedExpenseOps;
     const debtWithOps = companyDebt + fineOps + writeoffOps;
     const payout = Math.max(revenueWithOps - debtWithOps - paidToGardener - paidToCompany, 0);
 
@@ -582,23 +585,29 @@ export default function GardenerDashboard() {
 
             <div>
               <div className="text-sm text-slate-600 mb-2">Ваши траты в период</div>
-              {operations.length === 0 ? (
+              {operations.filter(o => o.type === 'expense').length === 0 ? (
                 <div className="text-sm text-slate-400">Трат нет</div>
               ) : (
-                <ul className="space-y-2 max-h-40 overflow-auto">
-                  {operations.filter(o => o.type === 'expense').map(op => (
-                    <li key={op.id} className="border rounded p-2 flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">{op.description || 'Трата'} — {formatMoney(op.amount)}</div>
-                        <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
-                        {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-700">Открыть чек</a>}
-                      </div>
-                      <div className="text-xs">
-                        {op.approved ? <span className="text-emerald-700">Утверждён {op.approvedAmount ? `на ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-slate-500">В ожидании</span>}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="space-y-2 max-h-40 overflow-auto">
+                    {operations.filter(o => o.type === 'expense').map(op => (
+                      <li key={op.id} className="border rounded p-2 flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-medium">{op.description || 'Трата'} — {formatMoney(op.amount)}</div>
+                          <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
+                          {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-700">Открыть чек</a>}
+                        </div>
+                        <div className="text-xs">
+                          {op.approved ? <span className="text-emerald-700">Утверждён {op.approvedAmount ? `на ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-slate-500">В ожидании</span>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-800">
+                    <span>Итого трат:</span>
+                    <span>{formatMoney(operations.filter(o => o.type === 'expense').reduce((sum, o) => sum + Number(o.amount || 0), 0))}</span>
+                  </div>
+                </>
               )}
             </div>
           </div>

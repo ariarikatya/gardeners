@@ -398,6 +398,7 @@ export default function LeaderDashboard() {
                       <th className="px-2 py-1.5 font-semibold">Заработано</th>
                       <th className="px-2 py-1.5 font-semibold">Долг фирме</th>
                       <th className="px-2 py-1.5 font-semibold">Начислено</th>
+                      <th className="px-2 py-1.5 font-semibold">К выплате</th>
                       <th className="px-2 py-1.5 font-semibold">Премия ₽</th>
                       <th className="px-2 py-1.5 font-semibold">Штраф ₽</th>
                       <th className="px-2 py-1.5 font-semibold">Списание ₽</th>
@@ -416,6 +417,7 @@ export default function LeaderDashboard() {
                         <td className="px-2 py-2 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
                         <td className="px-2 py-2 text-rose-700 font-semibold">{formatMoney(g.share)}</td>
                         <td className="px-2 py-2 text-violet-700 font-semibold">{formatMoney(g.estimated)}</td>
+                        <td className="px-2 py-2 text-sky-700 font-bold">{formatMoney(g.payout)}</td>
                         
                         {/* Колонка Премия */}
                         <td className="px-2 py-2">
