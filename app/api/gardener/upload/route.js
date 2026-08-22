@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
+import { PrismaClient } from '@prisma/client';
+import { uploadToYandexDisk, sanitizeName } from '@/lib/yandexDisk';
+
+const prisma = new PrismaClient();
 
 async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;
@@ -43,6 +47,39 @@ export async function POST(req) {
       const errorMsg = data.error?.message || 'ImgBB отклонил загрузку фото';
       return NextResponse.json({ error: errorMsg }, { status: 500 });
     }
+
+    // Fire-and-forget: отправка копии на Яндекс.Диск без ожидания ответа и без блокировки ImgBB
+    (async () => {
+      try {
+        const fileBuffer = Buffer.from(arrayBuffer);
+        const type = incomingForm.get('type') || 'order'; // 'order' | 'receipt'
+        const timestamp = Date.now();
+
+        let gardenerName = payload.name;
+        if (!gardenerName && payload.gardenerId) {
+          const gardenerObj = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
+          if (gardenerObj) gardenerName = gardenerObj.name;
+        }
+        gardenerName = sanitizeName(gardenerName || payload.username || 'Садовник');
+
+        if (type === 'receipt') {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const folderPath = `/Садовники/${gardenerName}/Траты/${todayStr}`;
+          const fileName = `receipt_${timestamp}.jpg`;
+          await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
+        } else {
+          // Order photo
+          const which = incomingForm.get('which') || 'photo'; // 'before' | 'after' | 'act'
+          const orderDate = sanitizeName(incomingForm.get('orderDate') || new Date().toISOString().split('T')[0]);
+          const clientName = sanitizeName(incomingForm.get('clientName') || 'Клиент');
+          const folderPath = `/Заказы/${orderDate}_${clientName}`;
+          const fileName = `${which}_${timestamp}.jpg`;
+          await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
+        }
+      } catch (err) {
+        console.error('Yandex.Disk fire-and-forget background error:', err);
+      }
+    })();
 
     return NextResponse.json({ url: data.data.url });
   } catch (e) {

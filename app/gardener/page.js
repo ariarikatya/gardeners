@@ -126,6 +126,7 @@ export default function GardenerDashboard() {
       const compressed = await compressImage(file);
       const formData = new FormData();
       formData.append('image', compressed, 'receipt.jpg');
+      formData.append('type', 'receipt');
       const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (res.ok) return data.url;
@@ -210,6 +211,12 @@ export default function GardenerDashboard() {
         const compressed = await compressImage(file);
         const formData = new FormData();
         formData.append('image', compressed, 'photo.jpg');
+        formData.append('type', 'order');
+        formData.append('which', which);
+        if (actionOrder) {
+          formData.append('orderDate', actionOrder.date ? actionOrder.date.split('T')[0] : '');
+          formData.append('clientName', actionOrder.clientName || '');
+        }
         const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if (res.ok) uploaded.push(data.url);
