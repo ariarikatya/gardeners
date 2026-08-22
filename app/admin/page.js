@@ -255,6 +255,15 @@ export default function AdminDashboard() {
     setSelectedOrder(null);
     const dateStr = lead.preferredDate ? lead.preferredDate.split('T')[0] : '';
     setSelectedSlot({ date: dateStr, gardenerId: '' });
+
+    let matchedServiceId = lead.serviceId || '';
+    if (!matchedServiceId && lead.serviceName && services.length > 0) {
+      const found = services.find(s => s.title.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
+      if (found) {
+        matchedServiceId = found.id;
+      }
+    }
+
     setFormData({
       ...emptyOrderForm,
       clientName: lead.name,
@@ -263,7 +272,8 @@ export default function AdminDashboard() {
       district: lead.district || '',
       description: lead.comment || '',
       date: dateStr,
-      serviceId: lead.serviceId || ''
+      serviceId: matchedServiceId,
+      serviceIds: matchedServiceId ? [matchedServiceId] : []
     });
     setShowOrderModal(true);
   };
@@ -313,6 +323,12 @@ export default function AdminDashboard() {
 
   const handleSaveOrder = async (e) => {
     e.preventDefault();
+
+    if ((formData.status === 'Отказ' || formData.status === 'Отменен') && (!formData.refusalReason || !formData.refusalReason.trim())) {
+      alert('Заполните причину отказа / отмены заказа!');
+      return;
+    }
+
     const endpoint = '/api/admin/orders';
     const method = selectedOrder ? 'PUT' : 'POST';
     
@@ -556,6 +572,21 @@ export default function AdminDashboard() {
       order.gardenerId === g.id && (order.district || '').trim().toLocaleLowerCase('ru-RU') === normalizedDistrict
     ));
   }
+
+  const filteredOrders = orders.filter(o => {
+    if (filterGardenerId !== 'all' && o.gardenerId !== filterGardenerId) return false;
+    if (filterStatus !== 'all' && o.status !== filterStatus) return false;
+    if (filterServiceId !== 'all' && getOrderServiceIds(o).indexOf(filterServiceId) === -1) return false;
+    if (filterDistrict) {
+      const normDist = filterDistrict.trim().toLocaleLowerCase('ru-RU');
+      const orderDist = (o.district || '').trim().toLocaleLowerCase('ru-RU');
+      if (!orderDist.includes(normDist)) return false;
+    }
+    return true;
+  });
+
+  const isFilterActive = filterGardenerId !== 'all' || filterStatus !== 'all' || filterServiceId !== 'all' || !!filterDistrict.trim();
+  const isEmptyFilterResult = visibleGardeners.length === 0 || (isFilterActive && filteredOrders.length === 0);
 
   // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
   // Для поиска по полю "примерно где" - показываем все локации сверху
@@ -937,99 +968,105 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-                <div style={{ zoom: tableScale }}>
-                <table className="w-full border-collapse text-xs">
-                  <thead className="sticky top-0 z-30">
-                    <tr className="bg-slate-100 border-b border-slate-200">
-                      <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
-                      {visibleGardeners.map(g => (
-                        <th key={g.id} className="p-2 text-xs font-semibold text-slate-600 border-r border-slate-200 min-w-[160px] sticky top-0 z-20 bg-slate-100 shadow-sm">
-                          {g.name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleDates.map(date => {
-                      const dateStr = date.toISOString().split('T')[0];
-                      const dayLabel = WEEKDAY_LABELS[date.getDay()];
-                      const holiday = isRussianHoliday(date);
-
-                      return (
-                        <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
-                          <td className={`p-2 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
-                            <span className="flex flex-col gap-0.5">
-                              <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
-                              {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
-                            </span>
-                          </td>
-                          {visibleGardeners.map(g => {
-                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
-                            const dayOrders = filterStatus === 'all'
-                              ? dayOrdersAll
-                              : dayOrdersAll.filter(o => o.status === filterStatus);
-                            const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
-                            const activeCount = dayOrdersAll.filter(o => o.status === 'Новый заказ').length;
-
-                            return (
-                              <td key={g.id} className="p-1.5 border-r border-slate-200 text-center text-xs align-top">
-                                {dayOff && dayOrdersAll.length === 0 ? (
-                                  <div className="p-2 rounded-lg bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-1">
-                                    🚫 Выходной
-                                    <button onClick={() => handleRemoveDayOff(dayOff.id)} className="text-xs underline hover:text-slate-900">
-                                      Убрать
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-1">
-                                    {dayOrders.map(order => (
-                                      <div
-                                        key={order.id}
-                                        onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
-                                        className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
-                                          order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
-                                          order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
-                                          order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
-                                          order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
-                                          activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
-                                        }`}
-                                      >
-                                        {order.clientName}
-                                        <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
-                                        <div className="text-xs opacity-90">{order.description}</div>
-                                        {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
-                                        {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
-                                      </div>
-                                    ))}
-                                    <div className="flex gap-1">
-                                      <button
-                                        onClick={() => openNewOrderModal(dateStr, g.id)}
-                                        className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium border border-dashed border-emerald-300 transition-all"
-                                      >
-                                        {dayOrders.length === 0 ? 'Свободно' : '+ Ещё'}
-                                      </button>
-                                      {dayOrdersAll.length === 0 && (
-                                        <button
-                                          onClick={() => handleMarkDayOff(dateStr, g.id)}
-                                          className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg text-xs font-medium border border-dashed border-slate-300 transition-all"
-                                        >
-                                          Выходной
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              {isEmptyFilterResult ? (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center text-slate-500 font-medium">
+                  <div className="text-4xl mb-3">🔍</div>
+                  <div className="text-base font-semibold text-slate-700 mb-1">По выбранным фильтрам ничего не найдено</div>
+                  <p className="text-xs text-slate-400">Попробуйте изменить параметры фильтрации или сбросить их</p>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto max-h-[75vh] relative">
+                  <table style={{ zoom: tableScale }} className="w-full border-collapse text-xs relative">
+                    <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
+                      <tr className="bg-slate-100 border-b border-slate-200">
+                        <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
+                        {visibleGardeners.map(g => (
+                          <th key={g.id} className="p-2 text-xs font-semibold text-slate-600 border-r border-slate-200 min-w-[160px] sticky top-0 z-20 bg-slate-100 shadow-sm">
+                            {g.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleDates.map(date => {
+                        const dateStr = date.toISOString().split('T')[0];
+                        const dayLabel = WEEKDAY_LABELS[date.getDay()];
+                        const holiday = isRussianHoliday(date);
+
+                        return (
+                          <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
+                            <td className={`p-2 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
+                              <span className="flex flex-col gap-0.5">
+                                <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
+                                {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
+                              </span>
+                            </td>
+                            {visibleGardeners.map(g => {
+                              const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
+                              const dayOrders = filterStatus === 'all'
+                                ? dayOrdersAll
+                                : dayOrdersAll.filter(o => o.status === filterStatus);
+                              const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
+                              const activeCount = dayOrdersAll.filter(o => o.status === 'Новый заказ').length;
+
+                              return (
+                                <td key={g.id} className="p-1.5 border-r border-slate-200 text-center text-xs align-top">
+                                  {dayOff && dayOrdersAll.length === 0 ? (
+                                    <div className="p-2 rounded-lg bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-1">
+                                      🚫 Выходной
+                                      <button onClick={() => handleRemoveDayOff(dayOff.id)} className="text-xs underline hover:text-slate-900">
+                                        Убрать
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-1">
+                                      {dayOrders.map(order => (
+                                        <div
+                                          key={order.id}
+                                          onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
+                                          className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
+                                            order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
+                                            order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
+                                            order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
+                                            order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
+                                            activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
+                                          }`}
+                                        >
+                                          {order.clientName}
+                                          <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
+                                          <div className="text-xs opacity-90">{order.description}</div>
+                                          {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
+                                          {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
+                                        </div>
+                                      ))}
+                                      <div className="flex gap-1">
+                                        <button
+                                          onClick={() => openNewOrderModal(dateStr, g.id)}
+                                          className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium border border-dashed border-emerald-300 transition-all"
+                                        >
+                                          {dayOrders.length === 0 ? 'Свободно' : '+ Ещё'}
+                                        </button>
+                                        {dayOrdersAll.length === 0 && (
+                                          <button
+                                            onClick={() => handleMarkDayOff(dateStr, g.id)}
+                                            className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg text-xs font-medium border border-dashed border-slate-300 transition-all"
+                                          >
+                                            Выходной
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </>
           )}
 
@@ -1520,10 +1557,19 @@ export default function AdminDashboard() {
                   <option value="Отменен">Отменен</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500">Причина отказа</label>
-                <input type="text" value={formData.refusalReason || ''} onChange={e => setFormData({...formData, refusalReason: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" placeholder="Причина отказа садовника или клиента..." />
-              </div>
+              {(formData.status === 'Отказ' || formData.status === 'Отменен') && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500">Причина отказа / отмены <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.refusalReason || ''}
+                    onChange={e => setFormData({...formData, refusalReason: e.target.value})}
+                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
+                    placeholder="Укажите причину отказа или отмены..."
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Комментарий</label>
                 <input type="text" value={formData.comment} onChange={e => setFormData({...formData, comment: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />

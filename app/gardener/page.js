@@ -126,6 +126,7 @@ export default function GardenerDashboard() {
       const compressed = await compressImage(file);
       const formData = new FormData();
       formData.append('image', compressed, 'receipt.jpg');
+      formData.append('type', 'receipt');
       const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (res.ok) return data.url;
@@ -210,6 +211,12 @@ export default function GardenerDashboard() {
         const compressed = await compressImage(file);
         const formData = new FormData();
         formData.append('image', compressed, 'photo.jpg');
+        formData.append('type', 'order');
+        formData.append('which', which);
+        if (actionOrder) {
+          formData.append('orderDate', actionOrder.date ? actionOrder.date.split('T')[0] : '');
+          formData.append('clientName', actionOrder.clientName || '');
+        }
         const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if (res.ok) uploaded.push(data.url);
@@ -406,6 +413,7 @@ export default function GardenerDashboard() {
                     <option value="не дозвон">не дозвон</option>
                     <option value="отказ">отказ</option>
                     <option value="связался">связался</option>
+                    <option value="написал смс">написал смс</option>
                   </select>
                 </div>
                 <div className="flex gap-2">
@@ -417,13 +425,11 @@ export default function GardenerDashboard() {
                     📞 Позвонить
                   </a>
                   <a
-                    href={`https://wa.me/${phoneDigits}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href={`sms:+${phoneDigits || order.clientPhone}`}
                     onClick={() => markOrderAction(order, 'mark_call')}
-                    className="flex-1 text-center text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
+                    className="flex-1 text-center text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
                   >
-                    💬 Написать (WhatsApp)
+                    💬 SMS
                   </a>
                 </div>
               </div>
