@@ -59,6 +59,7 @@ export async function POST(req) {
         district: body.district,
         comment: comment || null,
         serviceId: serviceId || null,
+        serviceName: serviceName || null,
         preferredDate: prefDate,
       },
     });

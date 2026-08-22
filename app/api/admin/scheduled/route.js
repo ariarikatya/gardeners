@@ -11,6 +11,15 @@ async function checkAdmin(req) {
   return payload && payload.role === 'ADMIN';
 }
 
+async function checkAuth(req) {
+  const cronSecretHeader = req.headers.get('x-cron-secret');
+  const cronSecretEnv = process.env.CRON_SECRET;
+  if (cronSecretEnv && cronSecretHeader === cronSecretEnv) {
+    return true;
+  }
+  return await checkAdmin(req);
+}
+
 function startOfDay(d) {
   const x = new Date(d);
   x.setHours(0,0,0,0);
@@ -18,7 +27,9 @@ function startOfDay(d) {
 }
 
 export async function POST(req) {
-  if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!(await checkAuth(req))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const now = new Date();
   const today = startOfDay(now);
@@ -32,12 +43,14 @@ export async function POST(req) {
       const todays = await prisma.order.findMany({ where: { date: { gte: today, lte: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59) } } });
       for (const o of todays) {
         if (!o.cardFilledAt && o.status !== 'Выполнен' && o.status !== 'Отменен') {
-    // проверяем наличие штрафа по orderId — чтобы не создавать дубликаты
-    const exists = await prisma.operation.findFirst({ where: { gardenerId: o.gardenerId, type: 'fine', orderId: o.id } });
-    if (!exists) {
-      const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 300, description: `Штраф: не заполнил карточку до 20:00 (order:${o.id})` } });
-      created.push(op);
-    }
+          // проверяем наличие штрафа за карточку по orderId — чтобы не создавать дубликаты
+          const exists = await prisma.operation.findFirst({
+            where: { gardenerId: o.gardenerId, type: 'fine', orderId: o.id, description: { contains: '20:00' } }
+          });
+          if (!exists) {
+            const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 300, description: `Штраф: не заполнил карточку до 20:00 (order:${o.id})` } });
+            created.push(op);
+          }
         }
       }
     }
@@ -47,7 +60,10 @@ export async function POST(req) {
       const toms = await prisma.order.findMany({ where: { date: { gte: tomorrow, lte: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 23, 59, 59) } } });
       for (const o of toms) {
         if (!o.callStatus && o.status !== 'Выполнен' && o.status !== 'Отменен') {
-          const exists = await prisma.operation.findFirst({ where: { gardenerId: o.gardenerId, type: 'fine', orderId: o.id } });
+          // проверяем наличие штрафа за прозвон по orderId — чтобы не создавать дубликаты
+          const exists = await prisma.operation.findFirst({
+            where: { gardenerId: o.gardenerId, type: 'fine', orderId: o.id, description: { contains: '18:00' } }
+          });
           if (!exists) {
             const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 1000, description: `Штраф: не связался с клиентом до 18:00 (order:${o.id})` } });
             created.push(op);

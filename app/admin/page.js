@@ -255,6 +255,15 @@ export default function AdminDashboard() {
     setSelectedOrder(null);
     const dateStr = lead.preferredDate ? lead.preferredDate.split('T')[0] : '';
     setSelectedSlot({ date: dateStr, gardenerId: '' });
+
+    let matchedServiceId = lead.serviceId || '';
+    if (!matchedServiceId && lead.serviceName && services.length > 0) {
+      const found = services.find(s => s.title.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
+      if (found) {
+        matchedServiceId = found.id;
+      }
+    }
+
     setFormData({
       ...emptyOrderForm,
       clientName: lead.name,
@@ -263,7 +272,8 @@ export default function AdminDashboard() {
       district: lead.district || '',
       description: lead.comment || '',
       date: dateStr,
-      serviceId: lead.serviceId || ''
+      serviceId: matchedServiceId,
+      serviceIds: matchedServiceId ? [matchedServiceId] : []
     });
     setShowOrderModal(true);
   };
@@ -965,10 +975,9 @@ export default function AdminDashboard() {
                   <p className="text-xs text-slate-400">Попробуйте изменить параметры фильтрации или сбросить их</p>
                 </div>
               ) : (
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto max-h-[80vh] overflow-y-auto relative">
-                  <div style={{ zoom: tableScale }}>
-                  <table className="w-full border-collapse text-xs">
-                    <thead className="sticky top-0 z-30 shadow-sm">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto max-h-[75vh] relative">
+                  <table style={{ zoom: tableScale }} className="w-full border-collapse text-xs relative">
+                    <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
                       <tr className="bg-slate-100 border-b border-slate-200">
                         <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
                         {visibleGardeners.map(g => (
@@ -1056,7 +1065,6 @@ export default function AdminDashboard() {
                       })}
                     </tbody>
                   </table>
-                  </div>
                 </div>
               )}
             </>
