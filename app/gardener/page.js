@@ -16,28 +16,53 @@ function statusStyle(status) {
   }
 }
 
+function maskPhone(phone) {
+  if (!phone) return '+7 ••• ••• •• ••';
+  const digits = phone.replace(/\D/g, '');
+  const lastTwo = digits.slice(-2);
+  return `+7 ••• ••• •• ${lastTwo.padStart(2, '•')}`;
+}
+
+function formatPhoneDigits(phone) {
+  if (!phone) return '';
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('8') && digits.length === 11) {
+    digits = '7' + digits.slice(1);
+  }
+  if (digits.length === 10) {
+    digits = '7' + digits;
+  }
+  return digits;
+}
+
 // Сжимаем фото перед загрузкой, чтобы не упереться в лимит размера запроса
 function compressImage(file, maxWidth = 1600, quality = 0.8) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    if (!file || !(file instanceof Blob)) return resolve(file);
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        let { width, height } = img;
-        if (width > maxWidth) {
-          height = Math.round(height * (maxWidth / width));
-          width = maxWidth;
+        try {
+          let { width, height } = img;
+          if (width > maxWidth) {
+            height = Math.round(height * (maxWidth / width));
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => (blob ? resolve(blob) : resolve(file)), 'image/jpeg', quality);
+        } catch (err) {
+          resolve(file);
         }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Не удалось обработать фото'))), 'image/jpeg', quality);
       };
-      img.onerror = () => reject(new Error('Не удалось прочитать фото'));
+      img.onerror = () => resolve(file);
       img.src = e.target.result;
     };
-    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.onerror = () => resolve(file);
     reader.readAsDataURL(file);
   });
 }
@@ -165,11 +190,11 @@ export default function GardenerDashboard() {
     setActionType(null);
   };
 
-  const markOrderAction = async (order, action) => {
+  const markOrderAction = async (order, action, extraPayload = {}) => {
     const res = await fetch('/api/gardener/orders', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: order.id, action }),
+      body: JSON.stringify({ id: order.id, action, ...extraPayload }),
     });
     if (res.ok) fetchOrders();
     else alert((await res.json()).error || 'Не удалось сохранить действие');
@@ -193,10 +218,7 @@ export default function GardenerDashboard() {
 
       if (which === 'before') setPhotoBeforeUrls(prev => [...prev, ...uploaded]);
       if (which === 'after') setPhotoAfterUrls(prev => [...prev, ...uploaded]);
-      if (which === 'act') {
-        // keep single act (most likely one act document) — if multiple uploaded, keep the last
-        if (uploaded.length) setPhotoActUrls(prev => [...prev, ...uploaded]);
-      }
+      if (which === 'act') setPhotoActUrls(prev => [...prev, ...uploaded]);
     } catch (err) {
       alert('Не удалось загрузить фото: ' + err.message);
     } finally {
@@ -316,8 +338,11 @@ export default function GardenerDashboard() {
     const writeoffOps = operations
       .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'writeoff')
       .reduce((s, o) => s + Number(o.amount || 0), 0);
+    const approvedExpenseOps = operations
+      .filter(op => new Date(op.createdAt) >= start && new Date(op.createdAt) <= end && op.type === 'expense' && op.approved)
+      .reduce((s, o) => s + Number(o.approvedAmount ?? o.amount ?? 0), 0);
 
-    const revenueWithOps = earned + bonusOps;
+    const revenueWithOps = earned + bonusOps + approvedExpenseOps;
     const debtWithOps = companyDebt + fineOps + writeoffOps;
     const payout = Math.max(revenueWithOps - debtWithOps - paidToGardener - paidToCompany, 0);
 
@@ -350,7 +375,7 @@ export default function GardenerDashboard() {
         )}
 
         <div className="space-y-2 text-sm text-slate-600">
-          <div>📍 <span className="font-medium text-slate-800">{order.district ? `${order.district} • ${order.address}` : order.address}</span></div>
+          <div>📍 <a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" className="font-medium text-emerald-700 underline hover:text-emerald-800">{order.district ? `${order.district} • ${order.address}` : order.address}</a></div>
           {/* Телефон доступен с дня подготовки до завершения дня заказа. */}
           {(() => {
             const now = new Date();
@@ -362,8 +387,46 @@ export default function GardenerDashboard() {
             const showEnd = new Date(orderDateAtMidnight);
             showEnd.setHours(showEnd.getHours() + 24);
             const showPhone = order.status !== 'Выполнен' && now >= showStart && now < showEnd;
+            const phoneDigits = formatPhoneDigits(order.clientPhone);
+            const maskedPhone = maskPhone(order.clientPhone);
+
             return showPhone ? (
-              <div>📞 <a href={`tel:${order.clientPhone}`} onClick={() => markOrderAction(order, 'mark_call')} className="text-emerald-600 font-medium underline">{order.clientPhone}</a></div>
+              <div className="space-y-2 mt-1">
+                <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <div>
+                    <span className="text-xs text-slate-400 block mb-0.5">Клиент:</span>
+                    <span className="font-semibold text-slate-800">{maskedPhone}</span>
+                  </div>
+                  <select
+                    value={order.callStatus || ''}
+                    onChange={(e) => markOrderAction(order, 'mark_call', { callStatus: e.target.value })}
+                    className="text-xs border border-slate-300 rounded px-2 py-1.5 bg-white text-slate-700 font-medium cursor-pointer"
+                  >
+                    <option value="" disabled>Статус звонка...</option>
+                    <option value="не дозвон">не дозвон</option>
+                    <option value="отказ">отказ</option>
+                    <option value="связался">связался</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <a
+                    href={`tel:${phoneDigits ? `+${phoneDigits}` : order.clientPhone}`}
+                    onClick={() => markOrderAction(order, 'mark_call')}
+                    className="flex-1 text-center text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
+                  >
+                    📞 Позвонить
+                  </a>
+                  <a
+                    href={`https://wa.me/${phoneDigits}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => markOrderAction(order, 'mark_call')}
+                    className="flex-1 text-center text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
+                  >
+                    💬 Написать (WhatsApp)
+                  </a>
+                </div>
+              </div>
             ) : (
               <div>📞 <span className="text-slate-400">Номер скрыт</span></div>
             );
@@ -387,11 +450,12 @@ export default function GardenerDashboard() {
               Причина отказа: {order.refusalReason}
             </div>
           )}
-          {order.status === 'Выполнен' && (
-            <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
-              Сумма по факту: {order.priceFact} ₽
-            </div>
-          )}
+          <div className="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-100 flex flex-wrap justify-between items-center gap-1">
+            <span>Сумма по договору: <strong className="text-slate-900">{order.priceContract ? `${order.priceContract} ₽` : 'не указана'}</strong></span>
+            {order.status === 'Выполнен' && (
+              <span>Факт: <strong className="text-emerald-700">{order.priceFact} ₽</strong></span>
+            )}
+          </div>
         </div>
 
         {order.status === 'Новый заказ' && (
@@ -582,23 +646,29 @@ export default function GardenerDashboard() {
 
             <div>
               <div className="text-sm text-slate-600 mb-2">Ваши траты в период</div>
-              {operations.length === 0 ? (
+              {operations.filter(o => o.type === 'expense').length === 0 ? (
                 <div className="text-sm text-slate-400">Трат нет</div>
               ) : (
-                <ul className="space-y-2 max-h-40 overflow-auto">
-                  {operations.filter(o => o.type === 'expense').map(op => (
-                    <li key={op.id} className="border rounded p-2 flex items-center justify-between">
-                      <div>
-                        <div className="text-sm font-medium">{op.description || 'Трата'} — {formatMoney(op.amount)}</div>
-                        <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
-                        {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-700">Открыть чек</a>}
-                      </div>
-                      <div className="text-xs">
-                        {op.approved ? <span className="text-emerald-700">Утверждён {op.approvedAmount ? `на ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-slate-500">В ожидании</span>}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="space-y-2 max-h-40 overflow-auto">
+                    {operations.filter(o => o.type === 'expense').map(op => (
+                      <li key={op.id} className="border rounded p-2 flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-medium">{op.description || 'Трата'} — {formatMoney(op.amount)}</div>
+                          <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
+                          {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-700">Открыть чек</a>}
+                        </div>
+                        <div className="text-xs">
+                          {op.approved ? <span className="text-emerald-700">Утверждён {op.approvedAmount ? `на ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-slate-500">В ожидании</span>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-800">
+                    <span>Итого трат:</span>
+                    <span>{formatMoney(operations.filter(o => o.type === 'expense').reduce((sum, o) => sum + Number(o.amount || 0), 0))}</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -723,7 +793,7 @@ export default function GardenerDashboard() {
                       {photoBeforeUrls.map((u, idx) => (
                         <div key={u} className="relative">
                           <img src={u} alt={`До ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <button onClick={() => setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                          <button type="button" onClick={() => setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
                         </div>
                       ))}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
@@ -737,7 +807,7 @@ export default function GardenerDashboard() {
                       {photoAfterUrls.map((u, idx) => (
                         <div key={u} className="relative">
                           <img src={u} alt={`После ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <button onClick={() => setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                          <button type="button" onClick={() => setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
                         </div>
                       ))}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">

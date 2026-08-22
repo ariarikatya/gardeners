@@ -398,6 +398,7 @@ export default function LeaderDashboard() {
                       <th className="px-2 py-1.5 font-semibold">Заработано</th>
                       <th className="px-2 py-1.5 font-semibold">Долг фирме</th>
                       <th className="px-2 py-1.5 font-semibold">Начислено</th>
+                      <th className="px-2 py-1.5 font-semibold">К выплате</th>
                       <th className="px-2 py-1.5 font-semibold">Премия ₽</th>
                       <th className="px-2 py-1.5 font-semibold">Штраф ₽</th>
                       <th className="px-2 py-1.5 font-semibold">Списание ₽</th>
@@ -416,6 +417,7 @@ export default function LeaderDashboard() {
                         <td className="px-2 py-2 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
                         <td className="px-2 py-2 text-rose-700 font-semibold">{formatMoney(g.share)}</td>
                         <td className="px-2 py-2 text-violet-700 font-semibold">{formatMoney(g.estimated)}</td>
+                        <td className="px-2 py-2 text-sky-700 font-bold">{formatMoney(g.payout)}</td>
                         
                         {/* Колонка Премия */}
                         <td className="px-2 py-2">
@@ -642,6 +644,8 @@ export default function LeaderDashboard() {
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
+                            {o.address && <div className="text-xs text-slate-600 mt-0.5">📍 <a href={`https://yandex.ru/maps/?text=${encodeURIComponent(o.district ? `${o.district}, ${o.address}` : o.address)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline font-medium">{o.district ? `${o.district} • ${o.address}` : o.address}</a></div>}
+                            {o.refusalReason && <div className="text-xs text-rose-600 font-medium mt-0.5">Причина отказа: {o.refusalReason}</div>}
                             <div className="text-xs text-slate-500 mt-1">Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</div>
                             <div className="text-xs text-slate-500 mt-1">Текущий статус: {getPaymentTargetLabel(o.paidTo, o.paid)}</div>
                           </div>

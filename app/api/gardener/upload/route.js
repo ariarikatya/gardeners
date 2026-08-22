@@ -28,7 +28,7 @@ export async function POST(req) {
     const arrayBuffer = await file.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString('base64');
 
-    const uploadForm = new URLSearchParams();
+    const uploadForm = new FormData();
     uploadForm.append('key', apiKey);
     uploadForm.append('image', base64);
 
@@ -39,8 +39,9 @@ export async function POST(req) {
     const data = await imgbbRes.json();
 
     if (!data.success) {
-      console.error('ImgBB error:', data);
-      return NextResponse.json({ error: 'ImgBB отклонил загрузку фото' }, { status: 500 });
+      console.error('ImgBB upload error:', data);
+      const errorMsg = data.error?.message || 'ImgBB отклонил загрузку фото';
+      return NextResponse.json({ error: errorMsg }, { status: 500 });
     }
 
     return NextResponse.json({ url: data.data.url });

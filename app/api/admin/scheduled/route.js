@@ -46,10 +46,10 @@ export async function POST(req) {
     if (now.getHours() >= 18) {
       const toms = await prisma.order.findMany({ where: { date: { gte: tomorrow, lte: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 23, 59, 59) } } });
       for (const o of toms) {
-        if (!o.clientCalledAt && o.status !== 'Выполнен' && o.status !== 'Отменен') {
+        if (!o.callStatus && o.status !== 'Выполнен' && o.status !== 'Отменен') {
           const exists = await prisma.operation.findFirst({ where: { gardenerId: o.gardenerId, type: 'fine', orderId: o.id } });
           if (!exists) {
-            const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 1000, description: `Штраф: не позвонил клиенту до 18:00 (order:${o.id})` } });
+            const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 1000, description: `Штраф: не связался с клиентом до 18:00 (order:${o.id})` } });
             created.push(op);
           }
         }

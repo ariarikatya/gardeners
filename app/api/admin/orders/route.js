@@ -28,7 +28,7 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, status, fromLead, serviceIds, isCash } = body;
+  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -50,6 +50,7 @@ export async function POST(req) {
         companyShare: parseFloat(companyShare) || 0,
         status: status || 'Новый заказ',
         comment,
+        refusalReason: refusalReason || null,
         gardenerId,
         serviceId: serviceId || null,
         serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
@@ -118,103 +119,32 @@ export async function PUT(req) {
   const existing = await prisma.order.findUnique({ where: { id } });
   const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 
-  if (existing && (updateData.date || updateData.gardenerId) && (existing.status === 'Перенос' || existing.status === 'Отказ')) {
-    const nextDate = updateData.date ? new Date(updateData.date) : existing.date;
-    const nextGardenerId = updateData.gardenerId || existing.gardenerId;
-    const dateChanged = nextDate.toISOString().slice(0, 10) !== existing.date.toISOString().slice(0, 10);
-    const gardenerChanged = nextGardenerId !== existing.gardenerId;
-    if (dateChanged || gardenerChanged) {
-      const serviceIds = Array.isArray(updateData.serviceIds)
-        ? JSON.stringify(updateData.serviceIds)
-        : (updateData.serviceIds ?? existing.serviceIds);
-      const replacement = await prisma.$transaction(async (tx) => {
-        await tx.order.update({ where: { id }, data: { status: 'Перенесен', transferRequestedDate: null, refusalReason: null } });
-        return tx.order.create({
-          data: {
-            date: nextDate,
-            dayOfWeek: weekdayNames[nextDate.getDay()],
-            clientName: updateData.clientName ?? existing.clientName,
-            clientPhone: updateData.clientPhone ?? existing.clientPhone,
-            address: updateData.address ?? existing.address,
-            district: updateData.district ?? existing.district,
-            description: updateData.description ?? existing.description,
-            priceContract: Number(updateData.priceContract ?? existing.priceContract),
-            priceFact: Number(updateData.priceFact ?? existing.priceFact),
-            employeeSalary: Number(updateData.employeeSalary ?? existing.employeeSalary),
-            companyShare: Number(updateData.companyShare ?? existing.companyShare),
-            status: 'Новый заказ',
-            comment: updateData.comment ?? existing.comment,
-            gardenerId: nextGardenerId,
-            serviceId: updateData.serviceId === '' ? null : (updateData.serviceId ?? existing.serviceId),
-            serviceIds,
-            isCash: updateData.isCash ?? existing.isCash,
-            amoDealId: existing.amoDealId,
-          },
-        });
-      });
-      return NextResponse.json({ order: replacement, transferred: true });
-    }
-  }
-
   if (updateData.date) {
     updateData.date = new Date(updateData.date);
     const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
     updateData.dayOfWeek = days[updateData.date.getDay()];
 
     updateData.transferRequestedDate = null;
-    // Если меняем дату у существующего заказа - это перенос, делаем его "Новым заказом" на новую дату
-    if (existing && existing.status === 'Перенос') {
-      updateData.status = 'Новый заказ';
+    // При изменении даты перенесенного/находящегося в переносе заказа, обновляем его на "Новый заказ"
+    if (existing && (existing.status === 'Перенос' || existing.status === 'Перенесен')) {
+      updateData.status = updateData.status || 'Новый заказ';
       updateData.refusalReason = null;
     }
-    // Если дата меняется у активного заказа, просто обновляем дату (старая запись перезаписывается)
     if (existing && existing.date && new Date(existing.date).toDateString() !== updateData.date.toDateString()) {
-       // Дата изменилась - старый заказ на старой дате исчезает (обновляется запись), 
-       // статус ставим "Новый заказ" если он не был выполнен/отменен
        if (existing.status !== 'Выполнен' && existing.status !== 'Отменен' && existing.status !== 'Отказ') {
           updateData.status = 'Новый заказ';
        }
     }
   }
 
-  // Логика смены мастера (перенос на другого сотрудника)
+  // Логика смены мастера
   if (updateData.gardenerId && existing && existing.gardenerId !== updateData.gardenerId) {
-     // Если заказ был в отказе и назначаем нового мастера - делаем его новым заказом
-     if (existing.status === 'Отказ') {
-        updateData.status = 'Новый заказ';
-        updateData.refusalReason = null; // Сбрасываем причину отказа, т.к. мастер новый
-     }
-     // Если заказ активный и мы меняем мастера - создаем копию для нового мастера, а старый помечаем
-     else if (existing.status !== 'Перенесен' && existing.status !== 'Отменен' && existing.status !== 'Перенос на весну') {
-        // Создаем новый заказ для нового мастера
-        const newOrderData = {
-          clientName: existing.clientName,
-          clientPhone: existing.clientPhone,
-          address: existing.address,
-          district: existing.district,
-          date: updateData.date || existing.date,
-          dayOfWeek: updateData.dayOfWeek || existing.dayOfWeek,
-          serviceId: existing.serviceId,
-          serviceIds: existing.serviceIds,
-          priceContract: existing.priceContract,
-          priceFact: existing.priceFact,
-          employeeSalary: existing.employeeSalary,
-          companyShare: existing.companyShare,
-          status: 'Новый заказ', // У нового мастера он новый - сбрасываем статус отказа
-          gardenerId: updateData.gardenerId,
-          refusalReason: null, // Сбрасываем причину отказа для нового мастера
-          transferRequestedDate: null,
-          isCash: existing.isCash !== undefined ? existing.isCash : true,
-          amoDealId: null // Новая сделка или привязка по желанию
-        };
-        
-        await prisma.order.create({ data: newOrderData });
-        
-        // Старый заказ помечаем как перенесенный, чтобы он исчез у старого мастера
-        updateData.status = 'Перенесен';
-        updateData.gardenerId = existing.gardenerId; // Оставляем старого мастера в записи для истории
-        if (updateData.date) delete updateData.date; // Не меняем дату у старой записи
-        if (updateData.dayOfWeek) delete updateData.dayOfWeek;
+     if (existing.status === 'Отказ' || existing.status === 'Перенос' || existing.status === 'Перенесен') {
+        updateData.status = updateData.status || 'Новый заказ';
+        updateData.refusalReason = null;
+        updateData.transferRequestedDate = null;
+     } else if (existing.status !== 'Отменен' && existing.status !== 'Перенос на весну') {
+        updateData.status = updateData.status || 'Новый заказ';
      }
   }
   

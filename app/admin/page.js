@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-  status: 'Новый заказ', comment: '', date: '', gardenerId: '', serviceId: '', serviceIds: [], isCash: true
+  status: 'Новый заказ', comment: '', refusalReason: '', date: '', gardenerId: '', serviceId: '', serviceIds: [], isCash: true
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -293,6 +293,7 @@ export default function AdminDashboard() {
       clientName: order.clientName,
       clientPhone: order.clientPhone,
       address: order.address,
+      district: order.district || '',
       description: order.description,
       priceContract: order.priceContract,
       priceFact: order.priceFact,
@@ -300,10 +301,12 @@ export default function AdminDashboard() {
       companyShare: order.companyShare,
       status: order.status,
       comment: order.comment || '',
+      refusalReason: order.refusalReason || '',
       date: order.date.split('T')[0],
       gardenerId: order.gardenerId,
       serviceId: order.serviceId || '',
-      serviceIds: getOrderServiceIds(order)
+      serviceIds: getOrderServiceIds(order),
+      isCash: order.isCash !== undefined ? order.isCash : true,
     });
     setShowOrderModal(true);
   };
@@ -717,6 +720,17 @@ export default function AdminDashboard() {
             </span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab('refusals')}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'refusals' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+        >
+          ❌ Отказы
+          {orders.filter(o => o.status === 'Отказ').length > 0 && (
+            <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {orders.filter(o => o.status === 'Отказ').length}
+            </span>
+          )}
+        </button>
       </div>
 
       {loading ? (
@@ -951,7 +965,7 @@ export default function AdminDashboard() {
                             </span>
                           </td>
                           {visibleGardeners.map(g => {
-                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
+                            const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
                             const dayOrders = filterStatus === 'all'
                               ? dayOrdersAll
                               : dayOrdersAll.filter(o => o.status === filterStatus);
@@ -982,7 +996,7 @@ export default function AdminDashboard() {
                                         }`}
                                       >
                                         {order.clientName}
-                                        <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}{order.address}</div>
+                                        <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
                                         <div className="text-xs opacity-90">{order.description}</div>
                                         {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
                                         {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
@@ -1188,6 +1202,65 @@ export default function AdminDashboard() {
                   </button>
                 </form>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'refusals' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h3 className="text-lg font-bold text-slate-700">Раздел «Отказы» ({orders.filter(o => o.status === 'Отказ').length})</h3>
+              </div>
+              {(() => {
+                const refusedOrders = orders.filter(o => o.status === 'Отказ');
+                return refusedOrders.length === 0 ? (
+                  <p className="text-sm text-slate-400 py-3">Отказов нет.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                          <th className="p-3">Дата</th>
+                          <th className="p-3">Клиент</th>
+                          <th className="p-3">Садовник</th>
+                          <th className="p-3">Причина отказа</th>
+                          <th className="p-3">Действия</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {refusedOrders.map(order => {
+                          const gardener = gardeners.find(g => g.id === order.gardenerId) || order.gardener;
+                          return (
+                            <tr key={order.id} className="hover:bg-slate-50">
+                              <td className="p-3 whitespace-nowrap font-medium text-slate-700">
+                                {new Date(order.date).toLocaleDateString('ru-RU')}
+                              </td>
+                              <td className="p-3">
+                                <div className="font-semibold text-slate-800">{order.clientName}</div>
+                                <div className="text-slate-500">{order.clientPhone}</div>
+                                <div className="text-slate-500 text-[11px]"><a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">{order.district ? `${order.district} • ${order.address}` : order.address}</a></div>
+                              </td>
+                              <td className="p-3 font-medium text-emerald-800">
+                                {gardener ? gardener.name : 'Не назначен'}
+                              </td>
+                              <td className="p-3 font-medium text-rose-700">
+                                {order.refusalReason || 'Причина не указана'}
+                              </td>
+                              <td className="p-3">
+                                <button
+                                  onClick={() => openEditOrderModal(order)}
+                                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg whitespace-nowrap"
+                                >
+                                  Переназначить / Редактировать
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -1446,6 +1519,10 @@ export default function AdminDashboard() {
                   <option value="Выполнен">Выполнен</option>
                   <option value="Отменен">Отменен</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500">Причина отказа</label>
+                <input type="text" value={formData.refusalReason || ''} onChange={e => setFormData({...formData, refusalReason: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" placeholder="Причина отказа садовника или клиента..." />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Комментарий</label>
