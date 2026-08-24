@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
 import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi'; // Исправлено имя файла
+import { sendVkMessage } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
 
@@ -103,6 +104,22 @@ export async function POST(req) {
         console.error('Failed to create amo lead (API) for admin-created order:', e.message);
       }
     }
+
+    // Уведомление садовника во ВКонтакте (fire-and-forget)
+    (async () => {
+      try {
+        if (order.gardenerId && process.env.VK_GROUP_TOKEN) {
+          const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
+          if (g && g.vkId) {
+            const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
+            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}`;
+            await sendVkMessage(g.vkId, text);
+          }
+        }
+      } catch (err) {
+        console.error('VK notify error (POST order):', err.message);
+      }
+    })();
 
     return NextResponse.json({ order });
   } catch (e) {
@@ -217,6 +234,51 @@ export async function PUT(req) {
     } catch (e) {
       console.error('Failed updating amo lead stage on admin PUT:', e.message);
     }
+
+    // Уведомление садовника во ВКонтакте (fire-and-forget)
+    (async () => {
+      try {
+        if (!process.env.VK_GROUP_TOKEN) return;
+
+        // 1. Отмена заказа
+        if (updateData.status === 'Отменен' && existing && existing.status !== 'Отменен') {
+          const gId = order.gardenerId || existing.gardenerId;
+          if (gId) {
+            const g = await prisma.gardener.findUnique({ where: { id: gId } });
+            if (g && g.vkId) {
+              const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
+              const text = `❌ Заказ на ${dateFormatted} отменен.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}`;
+              await sendVkMessage(g.vkId, text);
+            }
+          }
+          return;
+        }
+
+        // 2. Перенос заказа (смена даты)
+        const isDateChanged = updateData.date && existing && existing.date && new Date(existing.date).toDateString() !== new Date(updateData.date).toDateString();
+        if (isDateChanged && order.gardenerId) {
+          const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
+          if (g && g.vkId) {
+            const newDateFormatted = new Date(order.date).toISOString().split('T')[0];
+            const text = `🗓 Заказ перенесен на новую дату: ${newDateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}`;
+            await sendVkMessage(g.vkId, text);
+          }
+        }
+
+        // 3. Смена/назначение садовника (новый заказ для садовника)
+        const isGardenerChanged = updateData.gardenerId && existing && existing.gardenerId !== updateData.gardenerId;
+        if (isGardenerChanged && order.gardenerId) {
+          const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
+          if (g && g.vkId) {
+            const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
+            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}`;
+            await sendVkMessage(g.vkId, text);
+          }
+        }
+      } catch (err) {
+        console.error('VK notify error (PUT order):', err.message);
+      }
+    })();
 
     return NextResponse.json({ order });
   } catch (e) {
