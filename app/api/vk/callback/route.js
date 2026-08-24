@@ -75,7 +75,7 @@ export async function POST(req) {
         
         try {
           if (process.env.VK_GROUP_TOKEN) {
-            await sendVkMessage(fromId, `Привязка уведомлений выполнена. Теперь вы будете получать сообщения об утверждении трат.`);
+            await sendVkMessage(fromId, `Привязка уведомлений выполнена. Теперь вы будете получать сообщения о заказах и об утверждении трат.`);
           }
         } catch (e) {
           console.error('Failed to send VK confirmation:', e.message);
