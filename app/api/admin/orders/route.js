@@ -117,7 +117,7 @@ export async function POST(req) {
           }
         }
       } catch (err) {
-        console.error('VK notify error (POST order):', err.message);
+        console.error(`VK notify failed for order ${order.id}:`, err.message);
       }
     })();
 
@@ -276,7 +276,7 @@ export async function PUT(req) {
           }
         }
       } catch (err) {
-        console.error('VK notify error (PUT order):', err.message);
+        console.error(`VK notify failed for order ${order.id}:`, err.message);
       }
     })();
 
