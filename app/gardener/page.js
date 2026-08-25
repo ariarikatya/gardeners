@@ -253,6 +253,7 @@ export default function GardenerDashboard() {
         formData.append('type', 'order');
         formData.append('which', which);
         if (actionOrder) {
+          formData.append('orderId', actionOrder.id);
           formData.append('orderDate', actionOrder.date ? actionOrder.date.split('T')[0] : '');
           formData.append('clientName', actionOrder.clientName || '');
         }
