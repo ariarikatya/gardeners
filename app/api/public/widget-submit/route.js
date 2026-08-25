@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi';
+import { sendVkMessage, getSiteUrl } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
 
@@ -95,6 +96,23 @@ export async function POST(req) {
     } catch (e) {
       console.error('Failed to create amo lead (API):', e.message);
     }
+
+    // Уведомление диспетчера во ВКонтакте (fire-and-forget)
+    (async () => {
+      try {
+        const dispatcherIds = (process.env.DISPATCHER_VK_ID || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (dispatcherIds.length > 0 && process.env.VK_GROUP_TOKEN) {
+          const siteUrl = getSiteUrl();
+          const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
+          const text = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»: ${siteUrl}/admin`;
+          for (const dVkId of dispatcherIds) {
+            sendVkMessage(dVkId, text).catch(err => console.error(`Failed sending widget notification to dispatcher ${dVkId}:`, err.message));
+          }
+        }
+      } catch (err) {
+        console.error('VK notify dispatcher error:', err.message);
+      }
+    })();
 
     return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
   } catch (e) {

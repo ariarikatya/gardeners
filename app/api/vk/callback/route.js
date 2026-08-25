@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 // ИСПРАВЛЕНО: используем import вместо require для совместимости с Next.js App Router
-import { sendVkMessage } from '@/lib/vkApi';
+import { sendVkMessage, getSiteUrl } from '@/lib/vkApi';
 
 // ИСПРАВЛЕНО: безопасная инициализация Prisma для серверлесс-среды (Netlify)
 const globalForPrisma = globalThis;
@@ -75,7 +75,8 @@ export async function POST(req) {
         
         try {
           if (process.env.VK_GROUP_TOKEN) {
-            await sendVkMessage(fromId, `Привязка уведомлений выполнена. Теперь вы будете получать сообщения о заказах и об утверждении трат.`);
+            const siteUrl = getSiteUrl();
+            await sendVkMessage(fromId, `Привязка уведомлений выполнена. Теперь вы будете получать сообщения о заказах и об утверждении трат.\n${siteUrl}/gardener`);
           }
         } catch (e) {
           console.error('Failed to send VK confirmation:', e.message);

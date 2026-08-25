@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
 import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi'; // Исправлено имя файла
-import { sendVkMessage } from '@/lib/vkApi';
+import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
 
@@ -52,7 +52,7 @@ export async function POST(req) {
         status: status || 'Новый заказ',
         comment,
         refusalReason: refusalReason || null,
-        gardenerId,
+        gardenerId: gardenerId || null,
         serviceId: serviceId || null,
         serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
         isCash: typeof isCash === 'boolean' ? isCash : true,
@@ -108,11 +108,24 @@ export async function POST(req) {
     // Уведомление садовника во ВКонтакте (fire-and-forget)
     (async () => {
       try {
-        if (order.gardenerId && process.env.VK_GROUP_TOKEN) {
+        const siteUrl = getSiteUrl();
+        if (order.status === 'Аукцион') {
+          let serviceName = '';
+          if (order.serviceId) {
+            const svc = await prisma.service.findUnique({ where: { id: order.serviceId } });
+            if (svc) serviceName = svc.name;
+          }
+          await notifyAuction({
+            date: order.date,
+            district: order.district,
+            serviceName,
+            description: order.description
+          }, prisma);
+        } else if (order.gardenerId && process.env.VK_GROUP_TOKEN) {
           const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
           if (g && g.vkId) {
             const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
-            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}`;
+            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}\n${siteUrl}/gardener`;
             await sendVkMessage(g.vkId, text);
           }
         }
@@ -238,6 +251,23 @@ export async function PUT(req) {
     // Уведомление садовника во ВКонтакте (fire-and-forget)
     (async () => {
       try {
+        const siteUrl = getSiteUrl();
+
+        if (order.status === 'Аукцион' && existing.status !== 'Аукцион') {
+          let serviceName = '';
+          if (order.serviceId) {
+            const svc = await prisma.service.findUnique({ where: { id: order.serviceId } });
+            if (svc) serviceName = svc.name;
+          }
+          await notifyAuction({
+            date: order.date,
+            district: order.district,
+            serviceName,
+            description: order.description
+          }, prisma);
+          return;
+        }
+
         if (!process.env.VK_GROUP_TOKEN) return;
 
         // 1. Отмена заказа
@@ -247,7 +277,7 @@ export async function PUT(req) {
             const g = await prisma.gardener.findUnique({ where: { id: gId } });
             if (g && g.vkId) {
               const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
-              const text = `❌ Заказ на ${dateFormatted} отменен.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}`;
+              const text = `❌ Заказ на ${dateFormatted} отменен.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\n${siteUrl}/gardener`;
               await sendVkMessage(g.vkId, text);
             }
           }
@@ -260,7 +290,7 @@ export async function PUT(req) {
           const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
           if (g && g.vkId) {
             const newDateFormatted = new Date(order.date).toISOString().split('T')[0];
-            const text = `🗓 Заказ перенесен на новую дату: ${newDateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}`;
+            const text = `🗓 Заказ перенесен на новую дату: ${newDateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}\n${siteUrl}/gardener`;
             await sendVkMessage(g.vkId, text);
           }
         }
@@ -271,7 +301,7 @@ export async function PUT(req) {
           const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
           if (g && g.vkId) {
             const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
-            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}`;
+            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}\n${siteUrl}/gardener`;
             await sendVkMessage(g.vkId, text);
           }
         }
