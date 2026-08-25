@@ -2,50 +2,34 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  // Админ — просто User с ролью ADMIN, без привязки к Gardener
-  await prisma.user.upsert({
-    where: { phone: '79999999999' },
-    update: {},
-    create: {
-      phone: '79999999999',
-      name: 'Админ',
-      role: 'ADMIN',
-    },
-  });
-
-  // Руководитель — отдельный кабинет
-  await prisma.user.upsert({
-    where: { phone: '79999999998' },
-    update: {},
-    create: {
-      phone: '79999999998',
-      name: 'Руководитель',
-      role: 'LEADER',
-    },
-  });
-
-  // Тестовый садовник — создаём и Gardener, и связанного User для входа
-  const existingGardener = await prisma.gardener.findUnique({
-    where: { phone: '79000000000' },
-  });
-
-  if (!existingGardener) {
-    await prisma.gardener.create({
+  // Создаём начального Админа, только если в системе вообще нет ни одного админа
+  const existingAdmin = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
+  if (!existingAdmin) {
+    await prisma.user.create({
       data: {
-        name: 'Тестовый садовник',
-        phone: '79000000000',
-        user: {
-          create: {
-            phone: '79000000000',
-            name: 'Тестовый садовник',
-            role: 'GARDENER',
-          },
-        },
+        phone: '79999999999',
+        name: 'Админ',
+        role: 'ADMIN',
       },
     });
+    console.log('Создан начальный админ (79999999999)');
   }
 
-  console.log('Seed OK: admin 79999999999, gardener 79000000000');
+  // Создаём начального Руководителя, только если в системе вообще нет ни одного руководителя
+  const existingLeader = await prisma.user.findFirst({ where: { role: 'LEADER' } });
+  if (!existingLeader) {
+    await prisma.user.create({
+      data: {
+        phone: '79999999998',
+        name: 'Руководитель',
+        role: 'LEADER',
+      },
+    });
+    console.log('Создан начальный руководитель (79999999998)');
+  }
+
+  // Создание тестового садовника полностью удалено, чтобы предотвратить воссоздание после удаления
+  console.log('Seed OK');
 }
 
 main()
