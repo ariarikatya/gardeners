@@ -81,6 +81,7 @@ export default function AdminDashboard() {
   const [dayOffs, setDayOffs] = useState([]);
   const [services, setServices] = useState([]);
   const [webLeads, setWebLeads] = useState([]);
+  const [hasAdminVk, setHasAdminVk] = useState(false);
   const [showAllLeads, setShowAllLeads] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -186,6 +187,7 @@ export default function AdminDashboard() {
       setDayOffs(dataD.dayOffs || []);
       setServices(dataS.services || []);
       setWebLeads(dataW.webLeads || []);
+      setHasAdminVk(Boolean(dataW.hasAdminVk));
     } catch (e) {
       console.error(e);
     } finally {
@@ -1157,34 +1159,58 @@ export default function AdminDashboard() {
                   {gardeners.map(g => (
                     <div key={g.id} className="py-3 flex justify-between items-center">
                       {editingGardener && editingGardener.id === g.id ? (
-                        <form onSubmit={handleUpdateGardener} className="flex-1 flex items-center gap-2">
-                          <input
-                            type="text" required
-                            value={editingGardener.name}
-                            onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
-                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
-                          />
-                          <input
-                            type="text" required
-                            value={editingGardener.phone}
-                            onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
-                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
-                          />
-                          <div className="flex flex-wrap gap-2">
-                            {services.map(s => (
-                              <label key={s.id} className={`text-xs px-2 py-1 rounded-lg border cursor-pointer ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                                <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
-                                {s.name}
-                              </label>
-                            ))}
+                        <form onSubmit={handleUpdateGardener} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Имя садовника</label>
+                              <input
+                                type="text" required
+                                value={editingGardener.name}
+                                onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Телефон</label>
+                              <input
+                                type="text" required
+                                value={editingGardener.phone}
+                                onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              />
+                            </div>
                           </div>
-                          <div className="mt-2">
-                            <label className="block text-xs text-slate-500">VK id</label>
-                            <input type="text" value={editingGardener.vkId ?? ''} onChange={e => setEditingGardener({...editingGardener, vkId: e.target.value})} className="mt-1 px-2 py-1 rounded-lg border text-sm w-48" placeholder="peer id или user id" />
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Умеет делать (услуги)</label>
+                            <div className="flex flex-wrap gap-2">
+                              {services.map(s => (
+                                <label key={s.id} className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-all ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
+                                  <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
+                                  {s.name}
+                                </label>
+                              ))}
+                            </div>
                           </div>
-                          <div className="flex gap-2 mt-3">
-                            <button type="submit" className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm">Сохранить</button>
-                            <button type="button" onClick={() => setEditingGardener(null)} className="text-slate-500 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm">Отмена</button>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">VK id</label>
+                            <input
+                              type="text"
+                              value={editingGardener.vkId ?? ''}
+                              onChange={e => setEditingGardener({...editingGardener, vkId: e.target.value})}
+                              className="w-full sm:w-64 px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              placeholder="peer id или user id"
+                            />
+                          </div>
+
+                          <div className="flex gap-2 pt-2 border-t border-slate-200 justify-end">
+                            <button type="button" onClick={() => setEditingGardener(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 text-sm">
+                              Отмена
+                            </button>
+                            <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm">
+                              Сохранить
+                            </button>
                           </div>
                         </form>
                       ) : (
@@ -1449,6 +1475,18 @@ export default function AdminDashboard() {
 
           {activeTab === 'webleads' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              {hasAdminVk ? (
+                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-semibold text-emerald-800 flex items-center gap-2">
+                  <span>✅</span> VK-уведомления подключены ✓
+                </div>
+              ) : (
+                <div className="mb-4 p-3.5 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-900 flex items-center gap-2">
+                  <span>🔔</span>
+                  <div>
+                    <b>Подключите VK-уведомления:</b> напишите свой номер телефона в сообщения группы ВКонтакте — и заявки будут приходить вам в ВК.
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <h3 className="text-lg font-bold text-slate-700">Заявки с сайта</h3>
                 <button

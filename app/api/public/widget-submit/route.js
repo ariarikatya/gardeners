@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi';
-import { sendVkMessage, getSiteUrl } from '@/lib/vkApi';
+import { notifyDispatchers } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
 
@@ -100,15 +100,9 @@ export async function POST(req) {
     // Уведомление диспетчера во ВКонтакте (fire-and-forget)
     (async () => {
       try {
-        const dispatcherIds = (process.env.DISPATCHER_VK_ID || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (dispatcherIds.length > 0 && process.env.VK_GROUP_TOKEN) {
-          const siteUrl = getSiteUrl();
-          const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
-          const text = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»: ${siteUrl}/admin`;
-          for (const dVkId of dispatcherIds) {
-            sendVkMessage(dVkId, text).catch(err => console.error(`Failed sending widget notification to dispatcher ${dVkId}:`, err.message));
-          }
-        }
+        const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
+        const text = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»:`;
+        await notifyDispatchers(text, prisma);
       } catch (err) {
         console.error('VK notify dispatcher error:', err.message);
       }

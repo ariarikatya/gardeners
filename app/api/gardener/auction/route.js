@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
+import { notifyDispatchers } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
 
@@ -57,6 +58,18 @@ export async function POST(req) {
       },
       include: { service: true, gardener: true }
     });
+
+    // Уведомление диспетчера во ВКонтакте (fire-and-forget)
+    (async () => {
+      try {
+        const gardenerName = updated.gardener ? updated.gardener.name : 'Садовник';
+        const dateStr = updated.date ? new Date(updated.date).toISOString().split('T')[0] : '';
+        const text = `⚡ Заказ с аукциона забран!\nСадовник: ${gardenerName}\nДата: ${dateStr}\nКлиент: ${updated.clientName}\nАдрес: ${updated.address}`;
+        await notifyDispatchers(text, prisma);
+      } catch (err) {
+        console.error('VK notify dispatcher on auction claim error:', err.message);
+      }
+    })();
 
     return NextResponse.json({ success: true, order: updated });
   } catch (e) {

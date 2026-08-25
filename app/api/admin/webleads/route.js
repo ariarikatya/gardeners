@@ -18,13 +18,17 @@ export async function GET(req) {
     orderBy: { createdAt: 'desc' },
   });
 
+  const adminWithVk = await prisma.user.findFirst({
+    where: { role: { in: ['ADMIN', 'LEADER'] }, vkId: { not: null } }
+  });
+
   const services = await prisma.service.findMany();
   const withServiceNames = webLeads.map((l) => ({
     ...l,
     serviceName: services.find((s) => s.id === l.serviceId)?.name || null,
   }));
 
-  return NextResponse.json({ webLeads: withServiceNames });
+  return NextResponse.json({ webLeads: withServiceNames, hasAdminVk: Boolean(adminWithVk) });
 }
 
 export async function PUT(req) {

@@ -18,6 +18,7 @@ model User {
   phone      String    @unique
   name       String
   role       Role      @default(GARDENER)
+  vkId       String?   // VK user id / peer id for notifications
   gardenerId String?   @unique
   gardener   Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
 }
