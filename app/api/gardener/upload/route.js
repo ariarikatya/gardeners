@@ -62,20 +62,11 @@ export async function POST(req) {
         }
         gardenerName = sanitizeName(gardenerName || payload.username || 'Садовник');
 
-        if (type === 'receipt') {
-          const todayStr = new Date().toISOString().split('T')[0];
-          const folderPath = `/Садовники/${gardenerName}/Траты/${todayStr}`;
-          const fileName = `receipt_${timestamp}.jpg`;
-          await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
-        } else {
-          // Order photo
-          const which = incomingForm.get('which') || 'photo'; // 'before' | 'after' | 'act'
-          const orderDate = sanitizeName(incomingForm.get('orderDate') || new Date().toISOString().split('T')[0]);
-          const clientName = sanitizeName(incomingForm.get('clientName') || 'Клиент');
-          const folderPath = `/Заказы/${orderDate}_${clientName}`;
-          const fileName = `${which}_${timestamp}.jpg`;
-          await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
-        }
+        const orderId = incomingForm.get('orderId');
+        const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
+        const folderPath = orderId ? `/Садовники/Заказ ${sanitizeName(orderId)}` : `/Садовники/Без_ID_${timestamp}`;
+        const fileName = `${which}_${timestamp}.jpg`;
+        await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
       } catch (err) {
         console.error('Yandex.Disk fire-and-forget background error:', err);
       }

@@ -59,7 +59,7 @@ export async function POST(req) {
       },
     });
 
-    if (!fromLead) {
+    if (fromLead) {
       let serviceName = '';
       if (serviceId) {
         const service = await prisma.service.findUnique({ where: { id: serviceId } });
@@ -78,7 +78,6 @@ export async function POST(req) {
       if (serviceName) noteParts.push('Услуга: ' + serviceName);
       if (gardenerName) noteParts.push('Исполнитель: ' + gardenerName);
       noteParts.push('Дата визита: ' + orderDate.toISOString().split('T')[0]);
-      noteParts.push('Заказ заведён диспетчером напрямую');
       noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
       await forwardToAmo({
@@ -101,7 +100,7 @@ export async function POST(req) {
           }
         }
       } catch (e) {
-        console.error('Failed to create amo lead (API) for admin-created order:', e.message);
+        console.error('Failed to create amo lead (API) for order:', e.message);
       }
     }
 
