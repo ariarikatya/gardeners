@@ -80,6 +80,45 @@ export default function GardenerDashboard() {
   const [selectedDateStr, setSelectedDateStr] = useState(null);
   const [showPastOrders, setShowPastOrders] = useState(false);
   const [activeSection, setActiveSection] = useState('records');
+  const [auctionOrders, setAuctionOrders] = useState([]);
+  const [loadingAuction, setLoadingAuction] = useState(false);
+  const [claimingId, setClaimingId] = useState(null);
+
+  const fetchAuction = async () => {
+    setLoadingAuction(true);
+    try {
+      const res = await fetch('/api/gardener/auction');
+      const data = await res.json();
+      setAuctionOrders(data.orders || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingAuction(false);
+    }
+  };
+
+  const handleClaimOrder = async (orderId) => {
+    setClaimingId(orderId);
+    try {
+      const res = await fetch('/api/gardener/auction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Не удалось забрать заказ');
+        await fetchAuction();
+        return;
+      }
+      alert('Поздравляем! Заказ успешно забран и добавлен в ваши заказы.');
+      await Promise.all([fetchOrders(), fetchAuction()]);
+    } catch (e) {
+      alert('Ошибка при попытке забрать заказ');
+    } finally {
+      setClaimingId(null);
+    }
+  };
 
   // Модалка действия по заказу
   const [actionOrder, setActionOrder] = useState(null);
@@ -548,8 +587,63 @@ export default function GardenerDashboard() {
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
         <div className="flex gap-2 mb-4">
           <button onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
+          <button onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
+            🔔 Аукцион
+            {auctionOrders.length > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full font-bold">
+                {auctionOrders.length}
+              </span>
+            )}
+          </button>
           <button onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
         </div>
+
+        {activeSection === 'auction' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xl font-bold text-emerald-900">Аукцион заказов</h2>
+                <button onClick={fetchAuction} className="text-xs text-emerald-700 underline">Обновить</button>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">
+                Свободные заказы, которые диспетчер выставил на аукцион. Кто первый нажимает «Забрать заказ» — тот и становится исполнителем!
+              </p>
+
+              {loadingAuction ? (
+                <div className="text-center text-slate-500 py-6">Загрузка аукционов...</div>
+              ) : auctionOrders.length === 0 ? (
+                <div className="text-center text-slate-400 py-8 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  На данный момент свободных аукционных заказов нет
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {auctionOrders.map(order => (
+                    <div key={order.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-200 text-amber-900">🔔 Аукцион</span>
+                        <span className="text-xs font-bold text-slate-700">📅 {order.date ? order.date.split('T')[0] : ''}</span>
+                      </div>
+                      <div className="text-sm font-bold text-slate-800">📍 Район: {order.district || 'Не указан'}</div>
+                      <div className="text-xs text-slate-600 mt-1">🌿 Услуги: {order.service?.name || 'Не указаны'}</div>
+                      {order.description && <div className="text-xs text-slate-600 mt-2 bg-white p-2.5 rounded-lg border border-slate-200">{order.description}</div>}
+                      {order.priceContract > 0 && <div className="text-xs font-semibold text-emerald-800 mt-2">Сумма по договору: {order.priceContract} ₽</div>}
+
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          disabled={claimingId === order.id}
+                          onClick={() => handleClaimOrder(order.id)}
+                          className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50 text-sm"
+                        >
+                          {claimingId === order.id ? 'Забираю...' : '⚡ Забрать заказ'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {activeSection === 'finance' && <>
         <div className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">

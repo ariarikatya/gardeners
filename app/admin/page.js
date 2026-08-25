@@ -75,11 +75,13 @@ function getOrderServiceIds(order) {
 export default function AdminDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('calendar');
+  const [auctionOrders, setAuctionOrders] = useState([]);
   const [gardeners, setGardeners] = useState([]);
   const [orders, setOrders] = useState([]);
   const [dayOffs, setDayOffs] = useState([]);
   const [services, setServices] = useState([]);
   const [webLeads, setWebLeads] = useState([]);
+  const [hasAdminVk, setHasAdminVk] = useState(false);
   const [showAllLeads, setShowAllLeads] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -178,11 +180,14 @@ export default function AdminDashboard() {
       const dataD = await resD.json();
       const dataS = await resS.json();
       const dataW = await resW.json();
+      const allOrd = dataO.orders || [];
       setGardeners(dataG.gardeners || []);
-      setOrders(dataO.orders || []);
+      setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(dataD.dayOffs || []);
       setServices(dataS.services || []);
       setWebLeads(dataW.webLeads || []);
+      setHasAdminVk(Boolean(dataW.hasAdminVk));
     } catch (e) {
       console.error(e);
     } finally {
@@ -219,6 +224,59 @@ export default function AdminDashboard() {
     setSelectedSlot({ date: dateStr, gardenerId });
     setFormData({ ...emptyOrderForm, date: dateStr, gardenerId, serviceId: '' });
     setShowOrderModal(true);
+  };
+
+  const sendLeadToAuction = async (lead) => {
+    const dateStr = lead.preferredDate ? lead.preferredDate.split('T')[0] : new Date().toISOString().split('T')[0];
+
+    let matchedServiceId = lead.serviceId || '';
+    if (!matchedServiceId && lead.serviceName && services.length > 0) {
+      const found = services.find(s => s.title.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
+      if (found) {
+        matchedServiceId = found.id;
+      }
+    }
+
+    const payload = {
+      ...emptyOrderForm,
+      clientName: lead.name,
+      clientPhone: lead.phone,
+      address: lead.address || '',
+      district: lead.district || '',
+      description: lead.comment || '',
+      date: dateStr,
+      serviceId: matchedServiceId,
+      serviceIds: matchedServiceId ? JSON.stringify([matchedServiceId]) : null,
+      status: 'Аукцион',
+      gardenerId: null,
+      wasAuction: true,
+      fromLead: true
+    };
+
+    const res = await fetch('/api/admin/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      await fetch('/api/admin/webleads', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: lead.id,
+          status: 'Обработана',
+          assignedTo: 'Аукцион',
+          createdOrderId: data.order ? data.order.id : undefined
+        })
+      });
+      fetchData();
+      alert('Заявка успешно выставлена на аукцион!');
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Не удалось отправить заявку на аукцион');
+    }
   };
 
   const openLeadAsOrder = (lead) => {
@@ -321,10 +379,10 @@ export default function AdminDashboard() {
     setShowOrderModal(true);
   };
 
-  const handleSaveOrder = async (e) => {
-    e.preventDefault();
+  const handleSaveOrder = async (e, forceAuction = false) => {
+    if (e) e.preventDefault();
 
-    if ((formData.status === 'Отказ' || formData.status === 'Отменен') && (!formData.refusalReason || !formData.refusalReason.trim())) {
+    if (!forceAuction && (formData.status === 'Отказ' || formData.status === 'Отменен') && (!formData.refusalReason || !formData.refusalReason.trim())) {
       alert('Заполните причину отказа / отмены заказа!');
       return;
     }
@@ -332,11 +390,17 @@ export default function AdminDashboard() {
     const endpoint = '/api/admin/orders';
     const method = selectedOrder ? 'PUT' : 'POST';
     
-    // Если это редактирование существующего заказа и изменилась дата или статус с "Перенос" на "Новый заказ"
-    // то мы просто обновляем запись, а не создаем новую
+    const targetStatus = forceAuction ? 'Аукцион' : formData.status;
+    const formDataCustom = {
+      ...formData,
+      status: targetStatus,
+      gardenerId: forceAuction ? null : formData.gardenerId,
+      wasAuction: forceAuction ? true : undefined
+    };
+
     const payload = selectedOrder
-      ? { id: selectedOrder.id, ...formData }
-      : { ...formData, fromLead: !!convertingLeadId };
+      ? { id: selectedOrder.id, ...formDataCustom }
+      : { ...formDataCustom, fromLead: !!convertingLeadId };
 
     const res = await fetch(endpoint, {
       method,
@@ -741,6 +805,17 @@ export default function AdminDashboard() {
           🌿 Услуги
         </button>
         <button
+          onClick={() => setActiveTab('auction')}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'auction' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+        >
+          🔔 Аукцион
+          {auctionOrders.filter(o => o.status === 'Аукцион').length > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full">
+              {auctionOrders.filter(o => o.status === 'Аукцион').length}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => setActiveTab('webleads')}
           className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
@@ -1084,34 +1159,58 @@ export default function AdminDashboard() {
                   {gardeners.map(g => (
                     <div key={g.id} className="py-3 flex justify-between items-center">
                       {editingGardener && editingGardener.id === g.id ? (
-                        <form onSubmit={handleUpdateGardener} className="flex-1 flex items-center gap-2">
-                          <input
-                            type="text" required
-                            value={editingGardener.name}
-                            onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
-                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
-                          />
-                          <input
-                            type="text" required
-                            value={editingGardener.phone}
-                            onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
-                            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-sm"
-                          />
-                          <div className="flex flex-wrap gap-2">
-                            {services.map(s => (
-                              <label key={s.id} className={`text-xs px-2 py-1 rounded-lg border cursor-pointer ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                                <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
-                                {s.name}
-                              </label>
-                            ))}
+                        <form onSubmit={handleUpdateGardener} className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Имя садовника</label>
+                              <input
+                                type="text" required
+                                value={editingGardener.name}
+                                onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Телефон</label>
+                              <input
+                                type="text" required
+                                value={editingGardener.phone}
+                                onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              />
+                            </div>
                           </div>
-                          <div className="mt-2">
-                            <label className="block text-xs text-slate-500">VK id</label>
-                            <input type="text" value={editingGardener.vkId ?? ''} onChange={e => setEditingGardener({...editingGardener, vkId: e.target.value})} className="mt-1 px-2 py-1 rounded-lg border text-sm w-48" placeholder="peer id или user id" />
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Умеет делать (услуги)</label>
+                            <div className="flex flex-wrap gap-2">
+                              {services.map(s => (
+                                <label key={s.id} className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-all ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
+                                  <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
+                                  {s.name}
+                                </label>
+                              ))}
+                            </div>
                           </div>
-                          <div className="flex gap-2 mt-3">
-                            <button type="submit" className="text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded-lg text-sm">Сохранить</button>
-                            <button type="button" onClick={() => setEditingGardener(null)} className="text-slate-500 hover:bg-slate-50 px-3 py-1.5 rounded-lg text-sm">Отмена</button>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1">VK id</label>
+                            <input
+                              type="text"
+                              value={editingGardener.vkId ?? ''}
+                              onChange={e => setEditingGardener({...editingGardener, vkId: e.target.value})}
+                              className="w-full sm:w-64 px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              placeholder="peer id или user id"
+                            />
+                          </div>
+
+                          <div className="flex gap-2 pt-2 border-t border-slate-200 justify-end">
+                            <button type="button" onClick={() => setEditingGardener(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 text-sm">
+                              Отмена
+                            </button>
+                            <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm">
+                              Сохранить
+                            </button>
                           </div>
                         </form>
                       ) : (
@@ -1301,8 +1400,93 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {activeTab === 'auction' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <span>🔔</span> Активные заказы на аукционе
+                </h3>
+                {auctionOrders.filter(o => o.status === 'Аукцион').length === 0 ? (
+                  <div className="text-sm text-slate-400 py-4">Активных аукционов пока нет</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {auctionOrders.filter(o => o.status === 'Аукцион').map(order => (
+                      <div key={order.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/50 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-200 text-amber-900">Аукцион</span>
+                            <span className="text-xs text-slate-500">📅 {order.date ? order.date.split('T')[0] : ''}</span>
+                          </div>
+                          <div className="text-sm font-bold text-slate-800">{order.clientName}</div>
+                          <div className="text-xs text-slate-600 mt-1">📍 {order.district ? `${order.district}, ` : ''}{order.address}</div>
+                          <div className="text-xs text-slate-600 mt-1">🌿 {order.service?.name || 'Услуги не указаны'}</div>
+                          {order.description && <div className="text-xs text-slate-500 mt-2 bg-white p-2 rounded border border-slate-100">{order.description}</div>}
+                          {order.priceContract > 0 && <div className="text-xs font-semibold text-emerald-700 mt-2">Сумма: {order.priceContract} ₽</div>}
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-amber-200/60 flex justify-end">
+                          <button onClick={() => openEditOrderModal(order)} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700">Редактировать</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <span>✅</span> Завершённые аукционы
+                </h3>
+                {auctionOrders.filter(o => o.status !== 'Аукцион').length === 0 ? (
+                  <div className="text-sm text-slate-400 py-4">История завершённых аукционов пуста</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                          <th className="p-2.5 font-semibold text-slate-600">Дата</th>
+                          <th className="p-2.5 font-semibold text-slate-600">Клиент / Адрес</th>
+                          <th className="p-2.5 font-semibold text-slate-600">Кто забрал</th>
+                          <th className="p-2.5 font-semibold text-slate-600">Когда забрал</th>
+                          <th className="p-2.5 font-semibold text-slate-600">Текущий статус</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {auctionOrders.filter(o => o.status !== 'Аукцион').map(o => (
+                          <tr key={o.id} className="hover:bg-slate-50">
+                            <td className="p-2.5 text-slate-700">{o.date ? o.date.split('T')[0] : ''}</td>
+                            <td className="p-2.5">
+                              <div className="font-semibold text-slate-800">{o.clientName}</div>
+                              <div className="text-[11px] text-slate-500">{o.address}</div>
+                            </td>
+                            <td className="p-2.5 font-semibold text-emerald-800">{o.gardener?.name || 'Неизвестно'}</td>
+                            <td className="p-2.5 text-slate-500">{o.claimedAt ? new Date(o.claimedAt).toLocaleString('ru-RU') : '—'}</td>
+                            <td className="p-2.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">{o.status}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'webleads' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              {hasAdminVk ? (
+                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-semibold text-emerald-800 flex items-center gap-2">
+                  <span>✅</span> VK-уведомления подключены ✓
+                </div>
+              ) : (
+                <div className="mb-4 p-3.5 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-900 flex items-center gap-2">
+                  <span>🔔</span>
+                  <div>
+                    <b>Подключите VK-уведомления:</b> напишите свой номер телефона в сообщения группы ВКонтакте — и заявки будут приходить вам в ВК.
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <h3 className="text-lg font-bold text-slate-700">Заявки с сайта</h3>
                 <button
@@ -1350,6 +1534,12 @@ export default function AdminDashboard() {
                             className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
                           >
                             {lead.assignedTo ? 'Переназначить' : 'Назначить'}
+                          </button>
+                          <button
+                            onClick={() => sendLeadToAuction(lead)}
+                            className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg"
+                          >
+                            На аукцион
                           </button>
                           {lead.status === 'Новая' && (
                             <button
@@ -1442,8 +1632,8 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Садовник</label>
-                  <select required value={formData.gardenerId} onChange={e => setFormData({...formData, gardenerId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
-                    <option value="" disabled>Выберите садовника</option>
+                  <select value={formData.gardenerId} onChange={e => setFormData({...formData, gardenerId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                    <option value="">Без садовника (для аукциона)</option>
                     {gardeners.map(g => (
                       <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
@@ -1585,6 +1775,9 @@ export default function AdminDashboard() {
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setShowOrderModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">
                     Отмена
+                  </button>
+                  <button type="button" onClick={() => handleSaveOrder(null, true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg">
+                    На аукцион
                   </button>
                   <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
                     Сохранить

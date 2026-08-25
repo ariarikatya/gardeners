@@ -66,8 +66,9 @@ export async function PUT(req) {
     // Если операция утверждена — отправим уведомление садовнику во ВК (если есть vkId)
     try {
       if (data.approved && op.gardener && op.gardener.vkId && process.env.VK_GROUP_TOKEN) {
-        const { sendVkMessage } = require('@/lib/vkApi');
-        const text = `Ваша трата на ${op.amount} ₽ по заказу ${op.orderId ? op.orderId : ''} была подтверждена${op.approvedAmount && op.approvedAmount !== op.amount ? ` на ${op.approvedAmount} ₽` : ''}.`;
+        const { sendVkMessage, getSiteUrl } = require('@/lib/vkApi');
+        const siteUrl = getSiteUrl();
+        const text = `Ваша трата на ${op.amount} ₽ по заказу ${op.orderId ? op.orderId : ''} была подтверждена${op.approvedAmount && op.approvedAmount !== op.amount ? ` на ${op.approvedAmount} ₽` : ''}.\n${siteUrl}/gardener`;
         // fire-and-forget, don't block main response
         sendVkMessage(op.gardener.vkId, text).catch(err => console.error('VK notify failed', err.message));
       }

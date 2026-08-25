@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 // ИСПРАВЛЕНО: используем import вместо require для совместимости с Next.js App Router
-import { sendVkMessage } from '@/lib/vkApi';
+import { sendVkMessage, getSiteUrl } from '@/lib/vkApi';
 
 // ИСПРАВЛЕНО: безопасная инициализация Prisma для серверлесс-среды (Netlify)
 const globalForPrisma = globalThis;
@@ -75,10 +75,30 @@ export async function POST(req) {
         
         try {
           if (process.env.VK_GROUP_TOKEN) {
-            await sendVkMessage(fromId, `Привязка уведомлений выполнена. Теперь вы будете получать сообщения о заказах и об утверждении трат.`);
+            const siteUrl = getSiteUrl();
+            await sendVkMessage(fromId, `Привязка уведомлений выполнена. Теперь вы будете получать сообщения о заказах и об утверждении трат.\n${siteUrl}/gardener`);
           }
         } catch (e) {
           console.error('Failed to send VK confirmation:', e.message);
+        }
+      } else {
+        // Если садовник не найден по телефону — ищем в таблице User по номеру телефона
+        let userCandidate = null;
+        if (phoneCandidate) {
+          userCandidate = await prisma.user.findFirst({ where: { phone: { contains: phoneCandidate } } });
+        }
+        if (userCandidate && (userCandidate.role === 'ADMIN' || userCandidate.role === 'LEADER')) {
+          if (!userCandidate.vkId || userCandidate.vkId !== String(fromId)) {
+            await prisma.user.update({ where: { id: userCandidate.id }, data: { vkId: String(fromId) } });
+          }
+          try {
+            if (process.env.VK_GROUP_TOKEN) {
+              const siteUrl = getSiteUrl();
+              await sendVkMessage(fromId, `Привязка уведомлений руководителя выполнена. Вы будете получать уведомления о заявках с сайта и аукционе.\n${siteUrl}/admin`);
+            }
+          } catch (e) {
+            console.error('Failed to send VK confirmation to admin:', e.message);
+          }
         }
       }
     }
