@@ -12,7 +12,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-const ADMIN_PANEL_URL = 'https://gardenersorders.vercel.app/admin';
+const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: CORS_HEADERS });

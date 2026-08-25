@@ -7,7 +7,7 @@ import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
 
-const ADMIN_PANEL_URL = 'https://gardenersorders.vercel.app/admin';
+const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
 
 async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
