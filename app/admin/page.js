@@ -83,6 +83,7 @@ export default function AdminDashboard() {
   const [webLeads, setWebLeads] = useState([]);
   const [hasAdminVk, setHasAdminVk] = useState(false);
   const [showAllLeads, setShowAllLeads] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Состояния для форм заказа
@@ -168,13 +169,18 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resG, resO, resD, resS, resW] = await Promise.all([
+      const [resG, resO, resD, resS, resW, resMe] = await Promise.all([
         fetch('/api/admin/gardeners'),
         fetch('/api/admin/orders'),
         fetch('/api/admin/dayoff'),
         fetch('/api/admin/services'),
-        fetch('/api/admin/webleads')
+        fetch('/api/admin/webleads'),
+        fetch('/api/auth/me')
       ]);
+      if (resMe.ok) {
+        const meData = await resMe.json();
+        setCurrentUser(meData.user || null);
+      }
       const dataG = await resG.json();
       const dataO = await resO.json();
       const dataD = await resD.json();
@@ -737,6 +743,14 @@ export default function AdminDashboard() {
           >
             🔌 amoCRM
           </a>
+          {currentUser?.role === 'LEADER' && (
+            <a
+              href="/admin/phones"
+              className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
+            >
+              📱 Номера телефонов
+            </a>
+          )}
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
             <span className="text-xs font-medium text-emerald-100">Скачать Excel:</span>
             <select
