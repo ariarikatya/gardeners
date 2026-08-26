@@ -731,6 +731,12 @@ export default function AdminDashboard() {
         </button>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
+          <a
+            href="/admin/amo-connect"
+            className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
+          >
+            🔌 amoCRM
+          </a>
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
             <span className="text-xs font-medium text-emerald-100">Скачать Excel:</span>
             <select
