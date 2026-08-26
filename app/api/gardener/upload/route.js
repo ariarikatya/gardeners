@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
 import { PrismaClient } from '@prisma/client';
-import { uploadToYandexDisk, sanitizeName } from '@/lib/yandexDisk';
+import { uploadToYandexDisk } from '@/lib/yandexDisk';
 
 const prisma = new PrismaClient();
 
@@ -24,57 +24,73 @@ export async function POST(req) {
 
   try {
     const incomingForm = await req.formData();
-    const file = incomingForm.get('image');
-    if (!file) {
+    const rawFiles = incomingForm.getAll('image');
+    const files = rawFiles.filter(f => f && typeof f === 'object' && typeof f.arrayBuffer === 'function');
+
+    if (files.length === 0) {
       return NextResponse.json({ error: 'Файл не передан' }, { status: 400 });
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString('base64');
-
-    const uploadForm = new FormData();
-    uploadForm.append('key', apiKey);
-    uploadForm.append('image', base64);
-
-    const imgbbRes = await fetch('https://api.imgbb.com/1/upload', {
-      method: 'POST',
-      body: uploadForm,
-    });
-    const data = await imgbbRes.json();
-
-    if (!data.success) {
-      console.error('ImgBB upload error:', data);
-      const errorMsg = data.error?.message || 'ImgBB отклонил загрузку фото';
-      return NextResponse.json({ error: errorMsg }, { status: 500 });
+    // 1. Определение имени садовника и имени папки
+    let gardenerName = payload.name;
+    if (!gardenerName && payload.gardenerId) {
+      const gardenerObj = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
+      if (gardenerObj) gardenerName = gardenerObj.name;
     }
 
-    // Fire-and-forget: отправка копии на Яндекс.Диск без ожидания ответа и без блокировки ImgBB
-    (async () => {
+    const dateStr = new Date().toISOString().split('T')[0]; // формат YYYY-MM-DD
+    const safeGardenerName = gardenerName ? gardenerName.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_') : 'Unknown';
+    const folderName = `${dateStr}_${safeGardenerName}`;
+    const folderPath = `/Садовники/${folderName}`;
+
+    console.log(`📁 Создаю/проверяю папку: /Садовники/${folderName}`);
+    console.log(`📤 Загружаю фото в Яндекс Диск. Всего файлов: ${files.length}`);
+
+    // 2. Параллельная загрузка всех файлов в ImgBB и Яндекс.Диск с ожиданиями (Promise.all)
+    const uploadPromises = files.map(async (file, index) => {
+      const arrayBuffer = await file.arrayBuffer();
+      const fileBuffer = Buffer.from(arrayBuffer);
+      const base64 = fileBuffer.toString('base64');
+
+      // Загрузка в ImgBB
+      const uploadForm = new FormData();
+      uploadForm.append('key', apiKey);
+      uploadForm.append('image', base64);
+
+      const imgbbRes = await fetch('https://api.imgbb.com/1/upload', {
+        method: 'POST',
+        body: uploadForm,
+      });
+      const data = await imgbbRes.json();
+
+      if (!data.success) {
+        console.error('ImgBB upload error:', data);
+        throw new Error(data.error?.message || 'ImgBB отклонил загрузку фото');
+      }
+
+      // Загрузка в Яндекс.Диск
+      const type = incomingForm.get('type') || 'order'; // 'order' | 'receipt'
+      const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
+      const timestamp = Date.now();
+      const fileName = `${which}_${timestamp}_${index + 1}.jpg`;
+
       try {
-        const fileBuffer = Buffer.from(arrayBuffer);
-        const type = incomingForm.get('type') || 'order'; // 'order' | 'receipt'
-        const timestamp = Date.now();
-
-        let gardenerName = payload.name;
-        if (!gardenerName && payload.gardenerId) {
-          const gardenerObj = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
-          if (gardenerObj) gardenerName = gardenerObj.name;
-        }
-        gardenerName = sanitizeName(gardenerName || payload.username || 'Садовник');
-
-        const orderId = incomingForm.get('orderId');
-        const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
-        const folderPath = orderId ? `/Садовники/Заказ ${sanitizeName(orderId)}` : `/Садовники/Без_ID_${timestamp}`;
-        const fileName = `${which}_${timestamp}.jpg`;
         await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
       } catch (err) {
-        console.error('Yandex.Disk fire-and-forget background error:', err);
+        console.error(`Ошибка отправки файла ${fileName} на Яндекс.Диск:`, err);
       }
-    })();
 
-    return NextResponse.json({ url: data.data.url });
+      return data.data.url;
+    });
+
+    const urls = await Promise.all(uploadPromises);
+
+    return NextResponse.json({
+      url: urls[0],
+      urls: urls
+    });
   } catch (e) {
     console.error('Upload error:', e);
-    return NextResponse.json({ error: 'Не удалось загрузить фото' }, { status: 500 });
+    return NextResponse.json({ error: e.message || 'Не удалось загрузить фото' }, { status: 500 });
   }
 }
