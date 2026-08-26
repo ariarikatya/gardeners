@@ -81,6 +81,7 @@ export async function POST(req) {
       workDescription: comment || undefined,
       address: address || undefined,
       services: serviceName || undefined,
+      serviceName: serviceName || undefined,
       approxWhere: body.district || undefined,
     });
 
