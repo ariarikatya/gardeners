@@ -745,10 +745,10 @@ export default function AdminDashboard() {
           </a>
           {currentUser?.role === 'LEADER' && (
             <a
-              href="/admin/phones"
+              href="/admin/users"
               className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
             >
-              📱 Номера телефонов
+              👥 Управление пользователями
             </a>
           )}
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
