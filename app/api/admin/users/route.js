@@ -88,7 +88,8 @@ export async function PUT(req) {
     return NextResponse.json({
       success: true,
       user: updatedUser,
-      hadVkReset: phoneChanged && hadVk
+      hadVkReset: phoneChanged && hadVk,
+      vkIdReset: phoneChanged && hadVk
     });
   } catch (err) {
     console.error('❌ Ошибка PUT /api/admin/users:', err);

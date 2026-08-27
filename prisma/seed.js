@@ -2,20 +2,24 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  // Создаём начального Админа, только если в системе вообще нет ни одного админа
-  const existingAdmin = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
-  if (!existingAdmin) {
-    await prisma.user.create({
-      data: {
-        phone: '79085535311',
-        name: 'Админ',
-        role: 'ADMIN',
-      },
+  // Ищем и принудительно обновляем или создаем начального Админа
+  const adminUser = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
+  if (adminUser) {
+    // Если админ уже есть, ПРИНУДИТЕЛЬНО обновляем его номер и имя
+    await prisma.user.update({
+      where: { id: adminUser.id },
+      data: { phone: '79085535311', name: 'Админ' }
     });
-    console.log('Создан начальный админ (79085535311)');
+    console.log('✅ Номер существующего Админа принудительно обновлен на 79085535311');
+  } else {
+    // Если админа нет, создаем его
+    await prisma.user.create({
+      data: { phone: '79085535311', name: 'Админ', role: 'ADMIN' }
+    });
+    console.log('✅ Создан новый Админ с номером 79085535311');
   }
 
-  // Создаём начального Руководителя, только если в системе вообще нет ни одного руководителя
+  // Создаём или обновляем начального Руководителя
   const existingLeader = await prisma.user.findFirst({ where: { role: 'LEADER' } });
   if (!existingLeader) {
     await prisma.user.create({
@@ -28,7 +32,6 @@ async function main() {
     console.log('Создан начальный руководитель (79999999998)');
   }
 
-  // Создание тестового садовника полностью удалено, чтобы предотвратить воссоздание после удаления
   console.log('Seed OK');
 }
 
