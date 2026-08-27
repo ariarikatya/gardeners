@@ -90,11 +90,11 @@ export default function AdminUsersPage() {
         return;
       }
 
-      if (data.hadVkReset) {
+      if (data.hadVkReset || data.vkIdReset) {
         setMessages(prev => ({
           ...prev,
           [user.id]: {
-            text: 'ВНИМАНИЕ: Номер изменён, привязка к VK сброшена. Пользователю нужно заново написать новый номер в сообщения группы https://vk.com/club239199622',
+            text: 'Номер изменен. Привязка VK сброшена. Пользователю нужно написать новый номер в сообщения группы https://vk.com/club239199622',
             isWarning: true,
           },
         }));
