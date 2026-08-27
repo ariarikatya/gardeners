@@ -748,7 +748,7 @@ export default function AdminDashboard() {
               href="/admin/users"
               className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
             >
-              👥 Управление пользователями
+              👥 Пользователи
             </a>
           )}
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
@@ -1544,6 +1544,39 @@ export default function AdminDashboard() {
                           </div>
                           {lead.serviceName && <div className="text-xs text-emerald-700 mt-1">🌿 {lead.serviceName}</div>}
                           {lead.preferredDate && <div className="text-xs text-slate-500 mt-1">Желаемая дата: {lead.preferredDate.split('T')[0]}</div>}
+                          {(lead.preferredGardenerName || lead.preferredInventory) && (
+                            <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1">
+                              {lead.preferredGardenerName && <div>👤 <b>Предпочтение по садовнику:</b> {lead.preferredGardenerName}</div>}
+                              {lead.preferredInventory && <div>🧰 <b>Предпочтение по инвентарю:</b> {lead.preferredInventory}</div>}
+                              <div className="flex gap-2 pt-1">
+                                <button
+                                  onClick={async () => {
+                                    if (lead.preferredGardenerId) {
+                                      openLeadAsOrder({ ...lead, gardenerId: lead.preferredGardenerId });
+                                    } else {
+                                      openLeadAsOrder(lead);
+                                    }
+                                  }}
+                                  className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-2 py-1 rounded"
+                                >
+                                  ✓ Подтвердить
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    await fetch('/api/admin/webleads', {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ id: lead.id, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null })
+                                    });
+                                    fetchData();
+                                  }}
+                                  className="text-[11px] bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-1 rounded"
+                                >
+                                  ✕ Отклонить
+                                </button>
+                              </div>
+                            </div>
+                          )}
                           {lead.comment && <div className="text-xs text-slate-500 mt-1 bg-white p-2 rounded border border-slate-100">{lead.comment}</div>}
                           {lead.assignedTo && <div className="text-xs font-semibold text-emerald-800 mt-1">👤 Назначен садовник: {lead.assignedTo}</div>}
                           <div className="text-[11px] text-slate-400 mt-1">{new Date(lead.createdAt).toLocaleString('ru-RU')}</div>

@@ -84,6 +84,11 @@ model Order {
   clientCalledAt        DateTime? // метка, что садовник позвонил клиенту
   callStatus            String?   // статус звонка: "не дозвон" | "отказ" | "связался" | "написал смс"
 
+  // Предпочтения клиента из виджета
+  preferredGardenerId   String?
+  preferredGardenerName String?
+  preferredInventory    String?
+
   // Связанные операции (штрафы, траты, премии) — добавлено для идемпотентности
   operations            Operation[]
 
@@ -142,6 +147,11 @@ model WebLead {
 
   // ID сделки/лида в amoCRM (если заявка была передана в amo через API)
   amoDealId       String?
+
+  // Предпочтения клиента из виджета
+  preferredGardenerId   String?
+  preferredGardenerName String?
+  preferredInventory    String?
 
   createdAt      DateTime  @default(now())
 }
