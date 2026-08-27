@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { forwardToAmo } from '@/lib/amo';
-import amoApi from '@/lib/amoApi';
 import { notifyDispatchers } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
@@ -65,7 +64,7 @@ export async function POST(req) {
       },
     });
 
-    // ...и одновременно уходит в amoCRM — сразу, не дожидаясь, пока диспетчер назначит садовника
+    // ...и одновременно уходит в amoCRM — сразу через веб-формы (forwardToAmo)
     const noteParts = [];
     if (comment) noteParts.push(comment);
     if (address) noteParts.push('Адрес: ' + address);
@@ -85,18 +84,7 @@ export async function POST(req) {
       approxWhere: body.district || undefined,
     });
 
-    // Также создаём сделку в amoCRM через API (если настроены токены)
-    try {
-      if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-        const leadNote = noteParts.join(' | ');
-        const amoId = await amoApi.createLead({ name: name, phone: phone, note: leadNote, serviceName: serviceName });
-        if (amoId) {
-          await prisma.webLead.update({ where: { id: lead.id }, data: { amoDealId: String(amoId) } });
-        }
-      }
-    } catch (e) {
-      console.error('Failed to create amo lead (API):', e.message);
-    }
+    console.log('✅ Заявка успешно отправлена в amoCRM через веб-форму. ServiceName:', serviceName);
 
     // Уведомление диспетчера во ВКонтакте (fire-and-forget)
     (async () => {
