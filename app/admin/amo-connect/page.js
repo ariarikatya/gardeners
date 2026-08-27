@@ -1,10 +1,18 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 export default function AmoConnectPage() {
+  const [siteOrigin, setSiteOrigin] = useState('https://gardeners-agro.netlify.app');
+
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setSiteOrigin(window.location.origin);
+    }
+
     const scriptId = 'amocrm_oauth_script';
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://gardeners-agro.netlify.app';
+
     if (!document.getElementById(scriptId)) {
       const script = document.createElement('script');
       script.id = scriptId;
@@ -12,9 +20,9 @@ export default function AmoConnectPage() {
       script.charset = 'utf-8';
       script.dataset.name = 'Садовники';
       script.dataset.description = 'Интеграция для сайта о заказах садовников';
-      script.dataset.redirect_uri = 'https://gardeners-agro.netlify.app';
-      script.dataset.secrets_uri = 'https://gardeners-agro.netlify.app/api/amo/secrets';
-      script.dataset.logo = 'https://gardeners-agro.netlify.app/logo.png';
+      script.dataset.redirect_uri = `${origin}/api/amo/callback`;
+      script.dataset.secrets_uri = `${origin}/api/amo/secrets`;
+      script.dataset.logo = `${origin}/logo.png`;
       script.dataset.scopes = 'crm,notifications';
       script.dataset.title = 'Подключить amoCRM';
       script.src = 'https://www.amocrm.ru/auth/button.min.js';
@@ -55,9 +63,9 @@ export default function AmoConnectPage() {
                 charset="utf-8"
                 data-name="Садовники"
                 data-description="Интеграция для сайта о заказах садовников"
-                data-redirect_uri="https://gardeners-agro.netlify.app"
-                data-secrets_uri="https://gardeners-agro.netlify.app/api/amo/secrets"
-                data-logo="https://gardeners-agro.netlify.app/logo.png"
+                data-redirect_uri={`${siteOrigin}/api/amo/callback`}
+                data-secrets_uri={`${siteOrigin}/api/amo/secrets`}
+                data-logo={`${siteOrigin}/logo.png`}
                 data-scopes="crm,notifications"
                 data-title="Подключить amoCRM"
                 src="https://www.amocrm.ru/auth/button.min.js"
