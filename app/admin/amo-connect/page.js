@@ -4,29 +4,42 @@ import Link from 'next/link';
 
 export default function AmoConnectPage() {
   const [siteOrigin, setSiteOrigin] = useState('https://gardeners-agro.netlify.app');
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setSiteOrigin(window.location.origin);
-    }
+      const origin = window.location.origin;
+      setSiteOrigin(origin);
 
-    const scriptId = 'amocrm_oauth_script';
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://gardeners-agro.netlify.app';
+      const handleMessage = (event) => {
+        if (event.data && (event.data.success || event.data.type === 'amocrm_connected')) {
+          console.log('✅ Получено сообщение об успешном подключении amoCRM:', event.data);
+          setConnected(true);
+        }
+      };
 
-    if (!document.getElementById(scriptId)) {
-      const script = document.createElement('script');
-      script.id = scriptId;
-      script.className = 'amocrm_oauth';
-      script.charset = 'utf-8';
-      script.dataset.name = 'Садовники';
-      script.dataset.description = 'Интеграция для сайта о заказах садовников';
-      script.dataset.redirect_uri = `${origin}/api/amo/callback`;
-      script.dataset.secrets_uri = `${origin}/api/amo/secrets`;
-      script.dataset.logo = `${origin}/logo.png`;
-      script.dataset.scopes = 'crm,notifications';
-      script.dataset.title = 'Подключить amoCRM';
-      script.src = 'https://www.amocrm.ru/auth/button.min.js';
-      document.body.appendChild(script);
+      window.addEventListener('message', handleMessage);
+
+      const scriptId = 'amocrm_oauth_script';
+      if (!document.getElementById(scriptId)) {
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.className = 'amocrm_oauth';
+        script.charset = 'utf-8';
+        script.dataset.name = 'Садовники';
+        script.dataset.description = 'Интеграция для сайта о заказах садовников';
+        script.dataset.redirect_uri = `${origin}/api/amo/callback`;
+        script.dataset.secrets_uri = `${origin}/api/amo/secrets`;
+        script.dataset.logo = `${origin}/logo.png`;
+        script.dataset.scopes = 'crm,notifications';
+        script.dataset.title = 'Подключить amoCRM';
+        script.src = 'https://www.amocrm.ru/auth/button.min.js';
+        document.body.appendChild(script);
+      }
+
+      return () => {
+        window.removeEventListener('message', handleMessage);
+      };
     }
   }, []);
 
@@ -46,15 +59,25 @@ export default function AmoConnectPage() {
         </div>
 
         <div className="space-y-6">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-900">
-            <h2 className="font-bold text-lg mb-2">Инструкция по автоподключению:</h2>
-            <ol className="list-decimal list-inside space-y-1.5 text-sm">
-              <li>Убедитесь, что вы авторизованы в вашей учетной записи amoCRM в этом же браузере.</li>
-              <li>Нажмите синюю кнопку <strong>«Подключить amoCRM»</strong> ниже.</li>
-              <li>В появившемся окне amoCRM выберите ваш аккаунт и подтвердите права доступа.</li>
-              <li>Токены авторизации будут автоматически получены и сохранены в базе данных системы.</li>
-            </ol>
-          </div>
+          {connected ? (
+            <div className="bg-emerald-100 border border-emerald-300 rounded-2xl p-6 text-center text-emerald-900 shadow-sm">
+              <div className="text-4xl mb-2">✅</div>
+              <h2 className="text-xl font-bold mb-1">amoCRM успешно подключена!</h2>
+              <p className="text-sm text-emerald-800">
+                Авторизационные токены получены и сохранены в базе данных. Статусы заказов и примечания будут автоматически синхронизироваться.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-900">
+              <h2 className="font-bold text-lg mb-2">Инструкция по автоподключению:</h2>
+              <ol className="list-decimal list-inside space-y-1.5 text-sm">
+                <li>Убедитесь, что вы авторизованы в вашей учетной записи amoCRM в этом же браузере.</li>
+                <li>Нажмите синюю кнопку <strong>«Подключить amoCRM»</strong> ниже.</li>
+                <li>В появившемся окне amoCRM выберите ваш аккаунт и подтвердите права доступа.</li>
+                <li>Окно автоматически закроется, а токены сохранения будут занесены в базу данных.</li>
+              </ol>
+            </div>
+          )}
 
           <div className="flex flex-col items-center justify-center py-8 bg-slate-50 border border-dashed border-slate-300 rounded-2xl min-h-[140px]">
             <div id="amocrm_button_container" className="my-2">

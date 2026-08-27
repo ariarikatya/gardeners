@@ -20,7 +20,11 @@ export async function OPTIONS() {
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { name, phone, address, comment, serviceId, serviceName, preferredDate } = body;
+    const {
+      name, phone, address, comment, serviceId, serviceName, preferredDate,
+      gardenerId, masterName, preferredGardenerId, preferredGardenerName,
+      inventory, preferredInventory
+    } = body;
 
     if (!phone) {
       return NextResponse.json({ error: 'Укажите телефон' }, { status: 400, headers: CORS_HEADERS });
@@ -33,6 +37,10 @@ export async function POST(req) {
 
     const phoneClean = String(phone).trim();
     const prefDate = preferredDate ? new Date(preferredDate) : null;
+
+    const finalGardenerId = preferredGardenerId || gardenerId || null;
+    const finalGardenerName = preferredGardenerName || masterName || null;
+    const finalInventory = preferredInventory || (Array.isArray(inventory) ? inventory.join(', ') : inventory) || null;
 
     // Предотвращаем дубли: если за последние 60 минут уже была заявка с таким телефоном
     // или если уже есть заявка с тем же телефоном и желаемой датой — считаем дублированной
@@ -61,15 +69,24 @@ export async function POST(req) {
         serviceId: serviceId || null,
         serviceName: serviceName || null,
         preferredDate: prefDate,
+        preferredGardenerId: finalGardenerId,
+        preferredGardenerName: finalGardenerName,
+        preferredInventory: finalInventory,
       },
     });
 
     // ...и одновременно уходит в amoCRM — сразу через веб-формы (forwardToAmo)
     const noteParts = [];
     if (comment) noteParts.push(comment);
-    if (address) noteParts.push('Адрес: ' + address);
     if (serviceName) noteParts.push('Услуга: ' + serviceName);
     if (preferredDate) noteParts.push('Желаемая дата: ' + preferredDate);
+    if (finalGardenerName || finalInventory) {
+      const prefStr = [
+        finalGardenerName ? `Садовник: ${finalGardenerName}` : null,
+        finalInventory ? `Инвентарь: ${finalInventory}` : null,
+      ].filter(Boolean).join(', ');
+      noteParts.push('Клиент предпочел: ' + prefStr);
+    }
     noteParts.push('Заявка с виджета онлайн-записи сайта');
     noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
@@ -78,7 +95,7 @@ export async function POST(req) {
       clientPhone: phone,
       note: noteParts.join(' | '),
       workDescription: comment || undefined,
-      address: address || undefined,
+      address: address || undefined, // Передается только в параметре address!
       services: serviceName || undefined,
       serviceName: serviceName || undefined,
       approxWhere: body.district || undefined,

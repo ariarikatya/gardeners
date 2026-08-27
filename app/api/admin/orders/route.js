@@ -320,9 +320,26 @@ export async function DELETE(req) {
 
   const { id } = await req.json();
   try {
+    const existingOrder = await prisma.order.findUnique({ where: { id } });
+    if (existingOrder) {
+      const amoLeadId = existingOrder.amoDealId;
+      console.log('🗑️ Удаляем заказ:', id, 'amoLeadId:', amoLeadId);
+
+      if (amoLeadId && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+        try {
+          // Вызываем amoCRM API для удаления сделки/лида
+          await amoApi.apiRequest(`/api/v4/leads/${amoLeadId}`, { method: 'DELETE' });
+          console.log(`✅ Сделка ${amoLeadId} удалена из amoCRM`);
+        } catch (amoErr) {
+          console.error(`⚠️ Не удалось удалить сделку ${amoLeadId} из amoCRM (продолжаем удаление локально):`, amoErr.message);
+        }
+      }
+    }
+
     await prisma.order.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (e) {
+    console.error('Ошибка удаления заказа:', e);
     return NextResponse.json({ error: 'Не удалось удалить заказ' }, { status: 400 });
   }
 }
