@@ -110,10 +110,12 @@ export async function POST(req) {
     console.log('4. forwardToAmo результат:', JSON.stringify(result));
 
     // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId
+    console.log('🔍 НАЧИНАЮ ПОИСК amoDealId в amoCRM...');
     try {
       console.log('⏳ Жду 3 секунды перед поиском сделки в amoCRM...');
       await new Promise(resolve => setTimeout(resolve, 3000));
 
+      console.log('🔍 Читаю токены amoCRM из таблицы SystemSetting...');
       const clientIdDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
       const clientSecretDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
       const refreshTokenDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_REFRESH_TOKEN' } });
@@ -124,55 +126,72 @@ export async function POST(req) {
       const refreshToken = refreshTokenDb?.value || process.env.AMO_REFRESH_TOKEN;
       const subdomain = subDb?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
 
-      console.log('🔍 Запрашиваю свежий токен amoCRM через refresh_token...');
-      const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_id: clientId,
-          client_secret: clientSecret,
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-          redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
-        })
-      });
+      if (!clientId || !clientSecret || !refreshToken) {
+        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: В БД отсутствуют токены amoCRM!');
+        console.error('  client_id:', clientId ? 'найден' : 'НЕ НАЙДЕН');
+        console.error('  client_secret:', clientSecret ? 'найден' : 'НЕ НАЙДЕН');
+        console.error('  refresh_token:', refreshToken ? 'найден' : 'НЕ НАЙДЕН');
+        console.error('  Проверьте таблицу SystemSetting или пройдите OAuth на /admin/amo-connect');
+        // Не прерывай выполнение, просто выйди из блока поиска
+      } else {
+        console.log('✅ Токены найдены в БД, продолжаю поиск сделки...');
 
-      const tokenData = await tokenRes.json().catch(() => ({}));
-      console.log('🔍 ОБМЕН ТОКЕНА: статус', tokenRes.status);
-      console.log('🔍 НОВЫЙ ТОКЕН:', tokenData.access_token ? 'получен' : 'ОШИБКА ' + JSON.stringify(tokenData));
-
-      if (tokenRes.ok && tokenData.access_token) {
-        await prisma.systemSetting.upsert({ where: { key: 'AMO_ACCESS_TOKEN' }, update: { value: tokenData.access_token }, create: { key: 'AMO_ACCESS_TOKEN', value: tokenData.access_token } });
-        if (tokenData.refresh_token) {
-          await prisma.systemSetting.upsert({ where: { key: 'AMO_REFRESH_TOKEN' }, update: { value: tokenData.refresh_token }, create: { key: 'AMO_REFRESH_TOKEN', value: tokenData.refresh_token } });
-          console.log('✅ Новый refresh_token обновлен в БД');
-        }
-
-        const queryPhone = phoneClean.replace(/\D/g, '');
-        console.log('🔍 ПОИСК СДЕЛКИ: делаю запрос GET /api/v4/leads?query=' + queryPhone);
-        const searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${tokenData.access_token}`,
-            'Content-Type': 'application/json',
-          },
+        console.log('🔍 Запрашиваю свежий токен amoCRM через refresh_token...');
+        const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            client_id: clientId,
+            client_secret: clientSecret,
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+            redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
+          })
         });
 
-        const searchData = await searchRes.json().catch(() => null);
-        console.log('🔍 ПОИСК СДЕЛКИ: статус', searchRes.status, 'тело:', JSON.stringify(searchData));
+        const tokenData = await tokenRes.json().catch(() => ({}));
+        console.log('🔍 ОБМЕН ТОКЕНА: статус', tokenRes.status);
+        console.log('🔍 НОВЫЙ ТОКЕН:', tokenData.access_token ? 'получен' : 'ОШИБКА ' + JSON.stringify(tokenData));
 
-        if (searchRes.ok && searchData) {
-          const leads = searchData?._embedded?.leads || [];
-          if (leads.length > 0) {
-            const foundLeadId = String(leads[0].id);
-            console.log('9. Сохраняю amoDealId:', foundLeadId);
-            await prisma.webLead.update({
-              where: { id: lead.id },
-              data: { amoDealId: foundLeadId },
-            });
-          } else {
-            console.log('9. Сделка по запросу не найдена в amoCRM.');
+        if (tokenRes.ok && tokenData.access_token) {
+          console.log('🔍 Сохраняю обновленные токены в SystemSetting...');
+          await prisma.systemSetting.upsert({ where: { key: 'AMO_ACCESS_TOKEN' }, update: { value: tokenData.access_token }, create: { key: 'AMO_ACCESS_TOKEN', value: tokenData.access_token } });
+          if (tokenData.refresh_token) {
+            await prisma.systemSetting.upsert({ where: { key: 'AMO_REFRESH_TOKEN' }, update: { value: tokenData.refresh_token }, create: { key: 'AMO_REFRESH_TOKEN', value: tokenData.refresh_token } });
+            console.log('✅ Новый refresh_token обновлен в БД');
           }
+
+          const queryPhone = phoneClean.replace(/\D/g, '');
+          console.log('🔍 ПОИСК СДЕЛКИ: делаю запрос GET /api/v4/leads?query=' + queryPhone);
+          const searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${tokenData.access_token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          const searchData = await searchRes.json().catch(() => null);
+          console.log('🔍 ПОИСК СДЕЛКИ: статус', searchRes.status, 'тело:', JSON.stringify(searchData));
+
+          if (searchRes.ok && searchData) {
+            const leads = searchData?._embedded?.leads || [];
+            if (leads.length > 0) {
+              const foundLeadId = String(leads[0].id);
+              console.log('9. Сохраняю amoDealId:', foundLeadId);
+              await prisma.webLead.update({
+                where: { id: lead.id },
+                data: { amoDealId: foundLeadId },
+              });
+              console.log('✅ amoDealId успешно сохранен в WebLead:', foundLeadId);
+            } else {
+              console.log('9. Сделка по запросу не найдена в amoCRM.');
+            }
+          } else {
+            console.error('❌ Ошибка при выполнении поиска сделки в amoCRM. Статус:', searchRes.status);
+          }
+        } else {
+          console.error('❌ Не удалось обновить access_token в amoCRM:', JSON.stringify(tokenData));
         }
       }
     } catch (amoSearchErr) {

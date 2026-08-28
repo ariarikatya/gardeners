@@ -21,22 +21,29 @@ export async function GET() {
       },
     });
 
-    const mappedGardeners = gardeners.map((g, index) => ({
-      id: index + 1,
-      gardenerId: g.id,
-      name: g.name,
-      video: '',
-      experience: 'Более 3 лет',
-      status: 'Свободен',
-      special: g.services.map((s) => s.name).join(', ') || 'Обрезание, уход за садом',
-      stats: {
-        ordersCount: 0,
+    const mappedGardeners = gardeners.map((g, index) => {
+      const photoUrl = g.videoUrl || g.photoUrl || '/placeholder-gardener.jpg';
+      const skills = g.services ? g.services.map((s) => s.name) : [];
+      const special = skills.join(', ') || 'Обрезание, уход за садом';
+
+      return {
+        id: index + 1,
+        gardenerId: g.id,
+        name: g.name,
+        photo: photoUrl,
+        experience: 'Более 3 лет',
+        status: 'Свободен',
+        special: special,
         rating: 5.0,
         reviewsCount: 0,
-      },
-      inventory: [],
-      preparations: [],
-    }));
+        skills: skills,
+        inventory: [],
+        preparations: [],
+        reviews: [],
+        works: [],
+        companyExperience: '',
+      };
+    });
 
     return NextResponse.json(
       { gardeners: mappedGardeners },
