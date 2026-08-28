@@ -12,13 +12,17 @@ export default function AmoConnectPage() {
       setSiteOrigin(origin);
 
       const handleMessage = (event) => {
-        if (event.data && (event.data.success || event.data.type === 'amocrm_connected')) {
+        if (event.data && (event.data.type === 'AMO_AUTH_SUCCESS' || event.data.type === 'amocrm_connected' || event.data.success)) {
           console.log('✅ Получено сообщение об успешном подключении amoCRM:', event.data);
           setConnected(true);
+          alert('✅ amoCRM успешно подключена!');
         }
       };
 
       window.addEventListener('message', handleMessage);
+
+      const redirectUri = "https://gardeners-agro.netlify.app/api/amo/callback";
+      const secretsUri = "https://gardeners-agro.netlify.app/api/amo/secrets";
 
       const scriptId = 'amocrm_oauth_script';
       if (!document.getElementById(scriptId)) {
@@ -28,8 +32,8 @@ export default function AmoConnectPage() {
         script.charset = 'utf-8';
         script.dataset.name = 'Садовники';
         script.dataset.description = 'Интеграция для сайта о заказах садовников';
-        script.dataset.redirect_uri = `${origin}/api/amo/callback`;
-        script.dataset.secrets_uri = `${origin}/api/amo/secrets`;
+        script.dataset.redirect_uri = redirectUri;
+        script.dataset.secrets_uri = secretsUri;
         script.dataset.logo = `${origin}/logo.png`;
         script.dataset.scopes = 'crm,notifications';
         script.dataset.title = 'Подключить amoCRM';
@@ -86,8 +90,8 @@ export default function AmoConnectPage() {
                 charset="utf-8"
                 data-name="Садовники"
                 data-description="Интеграция для сайта о заказах садовников"
-                data-redirect_uri={`${siteOrigin}/api/amo/callback`}
-                data-secrets_uri={`${siteOrigin}/api/amo/secrets`}
+                data-redirect_uri="https://gardeners-agro.netlify.app/api/amo/callback"
+                data-secrets_uri="https://gardeners-agro.netlify.app/api/amo/secrets"
                 data-logo={`${siteOrigin}/logo.png`}
                 data-scopes="crm,notifications"
                 data-title="Подключить amoCRM"

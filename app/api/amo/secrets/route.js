@@ -44,6 +44,8 @@ export async function POST(req) {
       });
     }
 
+    console.log('✅ Секреты amoCRM сохранены в БД');
+
     return NextResponse.json({ success: true }, { status: 200, headers: CORS_HEADERS });
   } catch (error) {
     console.error('❌ Ошибка в /api/amo/secrets:', error);
