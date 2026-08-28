@@ -289,31 +289,31 @@ export default function AdminDashboard() {
   const openLeadAsOrder = (lead) => {
     setConvertingLeadId(lead.id);
 
-    if (lead.createdOrderId) {
-      const existingOrder = orders.find(o => o.id === lead.createdOrderId);
-      if (existingOrder) {
-        // Уже назначали раньше — редактируем ТОТ ЖЕ заказ, а не создаём новый
-        setSelectedOrder(existingOrder);
-        setFormData({
-          clientName: existingOrder.clientName,
-          clientPhone: existingOrder.clientPhone,
-          address: existingOrder.address,
-          district: existingOrder.district || '',
-          description: existingOrder.description,
-          priceContract: existingOrder.priceContract,
-          priceFact: existingOrder.priceFact,
-          employeeSalary: existingOrder.employeeSalary,
-          companyShare: existingOrder.companyShare,
-          status: existingOrder.status,
-          comment: existingOrder.comment || '',
-          date: existingOrder.date.split('T')[0],
-          gardenerId: existingOrder.gardenerId,
-          serviceId: existingOrder.serviceId || '',
-          serviceIds: getOrderServiceIds(existingOrder)
-        });
-        setShowOrderModal(true);
-        return;
-      }
+    const existingOrder = lead.createdOrderId ? orders.find(o => o.id === lead.createdOrderId) : null;
+    if (existingOrder) {
+      // Редактируем существующий заказ (PUT)
+      setSelectedOrder(existingOrder);
+      setFormData({
+        clientName: existingOrder.clientName,
+        clientPhone: existingOrder.clientPhone,
+        address: existingOrder.address,
+        district: existingOrder.district || '',
+        description: existingOrder.description,
+        priceContract: existingOrder.priceContract,
+        priceFact: existingOrder.priceFact,
+        employeeSalary: existingOrder.employeeSalary,
+        companyShare: existingOrder.companyShare,
+        status: existingOrder.status,
+        comment: existingOrder.comment || '',
+        refusalReason: existingOrder.refusalReason || '',
+        date: existingOrder.date ? existingOrder.date.split('T')[0] : '',
+        gardenerId: existingOrder.gardenerId || '',
+        serviceId: existingOrder.serviceId || '',
+        serviceIds: getOrderServiceIds(existingOrder),
+        isCash: existingOrder.isCash !== undefined ? existingOrder.isCash : true,
+      });
+      setShowOrderModal(true);
+      return;
     }
 
     // Первое назначение — создаём новый заказ
@@ -323,7 +323,7 @@ export default function AdminDashboard() {
 
     let matchedServiceId = lead.serviceId || '';
     if (!matchedServiceId && lead.serviceName && services.length > 0) {
-      const found = services.find(s => s.title.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
+      const found = services.find(s => s.name && s.name.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
       if (found) {
         matchedServiceId = found.id;
       }

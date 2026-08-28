@@ -103,6 +103,42 @@ export async function POST(req) {
 
     console.log('✅ Заявка успешно отправлена в amoCRM через веб-форму. ServiceName:', serviceName);
 
+    // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId
+    try {
+      const tokenSetting = await prisma.systemSetting.findUnique({ where: { key: 'AMO_ACCESS_TOKEN' } });
+      const accessToken = tokenSetting ? tokenSetting.value : null;
+
+      const subSetting = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
+      const amoSubdomain = subSetting?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+
+      if (accessToken) {
+        const queryPhone = phoneClean.replace(/\D/g, '');
+        const searchRes = await fetch(`https://${amoSubdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (searchRes.ok) {
+          const searchData = await searchRes.json().catch(() => null);
+          const leads = searchData?._embedded?.leads || [];
+          if (leads.length > 0) {
+            // Находим наиболее свежую сделку
+            const foundLeadId = String(leads[0].id);
+            await prisma.webLead.update({
+              where: { id: lead.id },
+              data: { amoDealId: foundLeadId },
+            });
+            console.log('✅ Сохранен amoDealId для webLead:', foundLeadId);
+          }
+        }
+      }
+    } catch (amoSearchErr) {
+      console.error('⚠️ Ошибка поиска/сохранения amoDealId в widget-submit:', amoSearchErr.message);
+    }
+
     // Уведомление диспетчера во ВКонтакте (fire-and-forget)
     (async () => {
       try {
