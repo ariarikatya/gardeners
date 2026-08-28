@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
 import { PrismaClient } from '@prisma/client';
-import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
@@ -96,7 +95,7 @@ export async function POST(req) {
   }
 
   try {
-    const { name, phone, password } = await req.json();
+    const { name, phone } = await req.json();
     if (!name || !phone) {
       return NextResponse.json({ error: 'Укажите имя и телефон' }, { status: 400 });
     }
@@ -109,12 +108,6 @@ export async function POST(req) {
     const existing = await prisma.user.findFirst({ where: { phone: cleanPhone } });
     if (existing) {
       return NextResponse.json({ error: 'Пользователь с таким номером уже существует' }, { status: 400 });
-    }
-
-    // Хеширование пароля при наличии
-    let hashedPassword = null;
-    if (password) {
-      hashedPassword = crypto.createHash('sha256').update(String(password)).digest('hex');
     }
 
     const newUser = await prisma.user.create({

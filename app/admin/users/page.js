@@ -14,7 +14,6 @@ export default function AdminUsersPage() {
   // Форма добавления нового диспетчера
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState('');
 
@@ -133,8 +132,8 @@ export default function AdminUsersPage() {
 
   const handleCreateDispatcher = async (e) => {
     e.preventDefault();
-    if (!newName || !newPhone || !newPassword) {
-      alert('Укажите имя, телефон и пароль для нового диспетчера');
+    if (!newName || !newPhone) {
+      alert('Укажите имя и телефон для нового диспетчера');
       return;
     }
 
@@ -145,7 +144,7 @@ export default function AdminUsersPage() {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, phone: newPhone, password: newPassword })
+        body: JSON.stringify({ name: newName, phone: newPhone })
       });
       const data = await res.json();
 
@@ -157,7 +156,6 @@ export default function AdminUsersPage() {
       setCreateMsg(`✅ Диспетчер ${data.user.name} успешно создан!`);
       setNewName('');
       setNewPhone('');
-      setNewPassword('');
       await fetchUsers();
     } catch (err) {
       alert('Ошибка при вызове сервера');
@@ -194,7 +192,7 @@ export default function AdminUsersPage() {
           <h2 className="text-lg font-bold text-emerald-900 mb-3 flex items-center gap-2">
             ➕ Добавить диспетчера
           </h2>
-          <form onSubmit={handleCreateDispatcher} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <form onSubmit={handleCreateDispatcher} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Имя</label>
               <input
@@ -214,17 +212,6 @@ export default function AdminUsersPage() {
                 placeholder="79085535311"
                 value={newPhone}
                 onChange={e => setNewPhone(e.target.value)}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Пароль</label>
-              <input
-                type="password"
-                required
-                placeholder="Пароль"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white"
               />
             </div>
