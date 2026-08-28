@@ -327,25 +327,24 @@ export async function DELETE(req) {
 
     if (existingOrder) {
       const amoLeadId = existingOrder.amoDealId;
-      console.log('📋 Перевод заказа в отмену:', id);
+      console.log(' Перевод заказа в отказ:', id);
       console.log('📋 amoLeadId:', amoLeadId);
 
       if (amoLeadId && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
         try {
           const serviceName = existingOrder.service ? existingOrder.service.name : '';
-          // Переводим сделку в этап Отказные / Отмена вместо удаления
           await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
-          await amoApi.addNoteToLead(amoLeadId, 'Заказ отменён диспетчером');
-          console.log('✅ Заказ переведен в отмену в amoCRM');
+          await amoApi.addNoteToLead(amoLeadId, 'Отказ');
+          console.log('✅ Заказ переведен в отказ в amoCRM');
         } catch (amoErr) {
-          console.error('⚠️ Ошибка перевода заказа в отмену в amoCRM:', amoErr.message);
+          console.error('⚠️ Ошибка перевода заказа в отказ в amoCRM:', amoErr.message);
         }
       }
     }
 
     await prisma.order.update({
       where: { id },
-      data: { status: 'Отменен' }
+      data: { status: 'Отказ', refusalReason: 'Отменен диспетчером' }
     });
     return NextResponse.json({ success: true });
   } catch (e) {
