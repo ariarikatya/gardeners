@@ -91,17 +91,6 @@ export async function POST(req) {
         approxWhere: district || undefined,
       });
 
-      try {
-        if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-          const amoId = await amoApi.createLead({ name: clientName, phone: clientPhone, note: noteParts.join(' | '), serviceName });
-          if (amoId) {
-            await prisma.order.update({ where: { id: order.id }, data: { amoDealId: String(amoId) } });
-            order.amoDealId = String(amoId);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to create amo lead (API) for order:', e.message);
-      }
     }
 
     // Уведомление садовника во ВКонтакте (fire-and-forget)
@@ -188,25 +177,6 @@ export async function PUT(req) {
   if (updateData.district === '') updateData.district = null;
   delete updateData.fromLead;
 
-  if (updateData.date && existing && existing.amoDealId) {
-    try {
-      const svcId = updateData.serviceId !== undefined ? updateData.serviceId : existing.serviceId;
-      const svc = svcId ? await prisma.service.findUnique({ where: { id: svcId } }) : null;
-      const serviceName = svc ? svc.name : '';
-
-      await amoApi.addNoteToLead(existing.amoDealId, `Заказ перенесён диспетчером на ${updateData.date.toISOString().split('T')[0]}`);
-      await amoApi.updateLeadStage(existing.amoDealId, serviceName, 'refusal');
-
-      if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-        const clientName = updateData.clientName !== undefined ? updateData.clientName : existing.clientName;
-        const clientPhone = updateData.clientPhone !== undefined ? updateData.clientPhone : existing.clientPhone;
-        const newAmoId = await amoApi.createLead({ name: clientName, phone: clientPhone, note: `Перенесён заказ: ${updateData.date.toISOString().split('T')[0]}`, serviceName });
-        if (newAmoId) updateData.amoDealId = String(newAmoId);
-      }
-    } catch (e) {
-      console.error('Failed to handle amo transfer for date change:', e.message);
-    }
-  }
 
   if (updateData.serviceIds !== undefined) {
     if (Array.isArray(updateData.serviceIds)) updateData.serviceIds = JSON.stringify(updateData.serviceIds);
@@ -225,26 +195,38 @@ export async function PUT(req) {
       data: updateData,
     });
 
-    try {
-      if (order.amoDealId && updateData.status && existing && existing.status !== updateData.status && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-        if (updateData.status === 'Отказ') {
-          const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
-          const serviceName = svc ? svc.name : '';
-          await amoApi.updateLeadStage(order.amoDealId, serviceName, 'refusal');
-          const reason = updateData.refusalReason || order.refusalReason || '';
-          if (reason) await amoApi.addNoteToLead(order.amoDealId, 'Отказ: ' + reason);
+    const amoLeadId = order.amoDealId || existing?.amoDealId;
+    const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
+    const serviceName = svc ? svc.name : '';
+
+    console.log('🔍 ПРОВЕРКА ЗАКАЗА:', {
+      orderId: order.id,
+      amoLeadId: amoLeadId || null,
+      status: order.status,
+      serviceName: serviceName
+    });
+
+    if (!amoLeadId) {
+      console.warn('⚠️ У заказа НЕТ amoLeadId. Обновление статуса только в локальной БД. amoCRM не затронут.');
+    } else if (updateData.status && existing && existing.status !== updateData.status) {
+      console.log('✅ Найден amoLeadId:', amoLeadId, 'Пытаемся обновить статус в amoCRM...');
+      try {
+        if (updateData.status === 'Отказ' || updateData.status === 'Отменен') {
+          await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
+          const reason = updateData.refusalReason || order.refusalReason || 'отменено диспетчером';
+          await amoApi.addNoteToLead(amoLeadId, `Отказ. Причина: ${reason}`);
+          console.log('🟢 УСПЕХ: Статус в amoCRM обновлен на Отказ для amoLeadId:', amoLeadId);
         } else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') {
-          const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
-          const serviceName = svc ? svc.name : '';
-          await amoApi.updateLeadStage(order.amoDealId, serviceName, 'complete');
+          await amoApi.updateLeadStage(amoLeadId, serviceName, 'complete');
+          console.log('🟢 УСПЕХ: Статус в amoCRM обновлен на Выполнено для amoLeadId:', amoLeadId);
         } else if (updateData.status === 'Новый заказ') {
-          const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
-          const serviceName = svc ? svc.name : '';
-          await amoApi.updateLeadStage(order.amoDealId, serviceName, 'reset');
+          await amoApi.updateLeadStage(amoLeadId, serviceName, 'reset');
+          console.log('🟢 УСПЕХ: Статус в amoCRM обновлен на Новый заказ для amoLeadId:', amoLeadId);
         }
+      } catch (amoError) {
+        console.error('🔴 ОШИБКА AMOCRM:', amoError.message);
+        console.error('Детали ошибки:', amoError);
       }
-    } catch (e) {
-      console.error('Failed updating amo lead stage on admin PUT:', e.message);
     }
 
     // Уведомление садовника во ВКонтакте (fire-and-forget)
@@ -327,17 +309,26 @@ export async function DELETE(req) {
 
     if (existingOrder) {
       const amoLeadId = existingOrder.amoDealId;
-      console.log(' Перевод заказа в отказ:', id);
-      console.log('📋 amoLeadId:', amoLeadId);
+      const serviceName = existingOrder.service ? existingOrder.service.name : '';
 
-      if (amoLeadId && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+      console.log('🔍 ПРОВЕРКА ЗАКАЗА:', {
+        orderId: existingOrder.id,
+        amoLeadId: amoLeadId || null,
+        status: 'Отказ',
+        serviceName: serviceName
+      });
+
+      if (!amoLeadId) {
+        console.warn('⚠️ У заказа НЕТ amoLeadId. Обновление статуса только в локальной БД. amoCRM не затронут.');
+      } else {
+        console.log('✅ Найден amoLeadId:', amoLeadId, 'Пытаемся обновить статус в amoCRM...');
         try {
-          const serviceName = existingOrder.service ? existingOrder.service.name : '';
           await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
-          await amoApi.addNoteToLead(amoLeadId, 'Отказ');
-          console.log('✅ Заказ переведен в отказ в amoCRM');
-        } catch (amoErr) {
-          console.error('⚠️ Ошибка перевода заказа в отказ в amoCRM:', amoErr.message);
+          await amoApi.addNoteToLead(amoLeadId, 'Отказ. Причина: отменено диспетчером');
+          console.log('🟢 УСПЕХ: Статус в amoCRM обновлен на Отказ для amoLeadId:', amoLeadId);
+        } catch (amoError) {
+          console.error('🔴 ОШИБКА AMOCRM:', amoError.message);
+          console.error('Детали ошибки:', amoError);
         }
       }
     }

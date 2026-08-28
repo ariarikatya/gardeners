@@ -1130,6 +1130,17 @@ export default function AdminDashboard() {
                                           {order.clientName}
                                           <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
                                           <div className="text-xs opacity-90">{order.description}</div>
+                                          <div className="mt-1">
+                                            {order.amoDealId ? (
+                                              <span className="inline-block text-[10px] font-semibold bg-emerald-900/40 text-emerald-100 border border-emerald-400/40 px-1.5 py-0.5 rounded">
+                                                ✅ ID: {order.amoDealId}
+                                              </span>
+                                            ) : (
+                                              <span className="inline-block text-[10px] font-semibold bg-slate-800/40 text-slate-200 border border-slate-400/30 px-1.5 py-0.5 rounded">
+                                                ❌ Нет ID (не синхронизировано)
+                                              </span>
+                                            )}
+                                          </div>
                                           {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
                                           {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
                                         </div>
@@ -1624,9 +1635,24 @@ export default function AdminDashboard() {
       {showOrderModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-xl">
-            <h3 className="text-xl font-bold text-slate-800 mb-4">
-              {selectedOrder ? 'Редактировать / переместить заказ' : `Новая запись на ${selectedSlot.date}`}
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-slate-800">
+                {selectedOrder ? 'Редактировать / переместить заказ' : `Новая запись на ${selectedSlot.date}`}
+              </h3>
+              {selectedOrder && (
+                <div>
+                  {selectedOrder.amoDealId ? (
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      ✅ amoCRM ID: {selectedOrder.amoDealId}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                      ❌ Нет amoCRM ID (не синхронизировано)
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
             {selectedOrder && selectedOrder.status === 'Перенос' && selectedOrder.transferRequestedDate && (
               <div className="mb-4 text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-100">
                 🗓 Садовник запросил перенос на <b>{new Date(selectedOrder.transferRequestedDate).toLocaleDateString('ru-RU')}</b>. Смените дату/садовника ниже и статус на «Новый заказ», либо назначьте другого свободного садовника.

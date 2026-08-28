@@ -5,8 +5,18 @@ import Link from 'next/link';
 export default function AmoConnectPage() {
   const [siteOrigin, setSiteOrigin] = useState('https://gardeners-agro.netlify.app');
   const [connected, setConnected] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(true);
 
   useEffect(() => {
+    // Проверка статуса подключения при загрузке
+    fetch('/api/admin/amo-status')
+      .then(res => res.json())
+      .then(data => {
+        if (data.connected) setConnected(true);
+      })
+      .catch(err => console.error('Failed to fetch amo status:', err))
+      .finally(() => setLoadingStatus(false));
+
     if (typeof window !== 'undefined') {
       const origin = window.location.origin;
       setSiteOrigin(origin);
@@ -63,23 +73,30 @@ export default function AmoConnectPage() {
         </div>
 
         <div className="space-y-6">
-          {connected ? (
+          {loadingStatus ? (
+            <div className="p-4 text-center text-slate-500 text-sm">Проверка статуса подключения...</div>
+          ) : connected ? (
             <div className="bg-emerald-100 border border-emerald-300 rounded-2xl p-6 text-center text-emerald-900 shadow-sm">
               <div className="text-4xl mb-2">✅</div>
-              <h2 className="text-xl font-bold mb-1">amoCRM успешно подключена!</h2>
+              <h2 className="text-xl font-bold mb-1">✅ amoCRM ПОДКЛЮЧЕНА (Токены сохранены в БД)</h2>
               <p className="text-sm text-emerald-800">
                 Авторизационные токены получены и сохранены в базе данных. Статусы заказов и примечания будут автоматически синхронизироваться.
               </p>
             </div>
           ) : (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-900">
-              <h2 className="font-bold text-lg mb-2">Инструкция по автоподключению:</h2>
-              <ol className="list-decimal list-inside space-y-1.5 text-sm">
-                <li>Убедитесь, что вы авторизованы в вашей учетной записи amoCRM в этом же браузере.</li>
-                <li>Нажмите синюю кнопку <strong>«Подключить amoCRM»</strong> ниже.</li>
-                <li>В появившемся окне amoCRM выберите ваш аккаунт и подтвердите права доступа.</li>
-                <li>Окно автоматически закроется, а токены сохранения будут занесены в базу данных.</li>
-              </ol>
+            <div className="space-y-4">
+              <div className="bg-rose-100 border border-rose-300 rounded-2xl p-4 text-center text-rose-900 shadow-sm">
+                <h2 className="text-lg font-bold">❌ НЕ ПОДКЛЮЧЕНА. Нажмите кнопку ниже для авторизации</h2>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-900">
+                <h2 className="font-bold text-lg mb-2">Инструкция по автоподключению:</h2>
+                <ol className="list-decimal list-inside space-y-1.5 text-sm">
+                  <li>Убедитесь, что вы авторизованы в вашей учетной записи amoCRM в этом же браузере.</li>
+                  <li>Нажмите синюю кнопку <strong>«Подключить amoCRM»</strong> ниже.</li>
+                  <li>В появившемся окне amoCRM выберите ваш аккаунт и подтвердите права доступа.</li>
+                  <li>Окно автоматически закроется, а токены сохранения будут занесены в базу данных.</li>
+                </ol>
+              </div>
             </div>
           )}
 
