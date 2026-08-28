@@ -26,6 +26,14 @@ export async function middleware(request) {
     return response;
   }
 
+  // LEADER разрешено посещать /admin (и /admin/users) и /leader
+  if (payload.role === 'LEADER') {
+    if (isGardenerPage) {
+      return NextResponse.redirect(new URL('/leader', request.url));
+    }
+    return NextResponse.next();
+  }
+
   if (isAdminPage && payload.role !== 'ADMIN') {
     return NextResponse.redirect(new URL('/gardener', request.url));
   }

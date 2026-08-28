@@ -131,9 +131,18 @@ export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
+  console.log('========== НАЧАЛО ОБРАБОТКИ ЗАКАЗА ==========');
+  console.log('1. Метод: PUT');
+  console.log('2. Тело запроса:', JSON.stringify(body, null, 2));
+
   const { id, ...updateData } = body;
 
-  const existing = await prisma.order.findUnique({ where: { id } });
+  console.log('3. Ищу заказ в базе...');
+  const existing = await prisma.order.findUnique({ where: { id }, include: { service: true } });
+  console.log('4. Найденный заказ:', JSON.stringify(existing, null, 2));
+  console.log('5. amoDealId из базы:', existing?.amoDealId);
+  console.log('6. serviceName:', existing?.service?.name);
+
   const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 
   if (updateData.date) {
@@ -207,7 +216,8 @@ export async function PUT(req) {
     });
 
     try {
-      if (order.amoDealId && updateData.status && existing && existing.status !== updateData.status) {
+      const amoLeadId = order.amoDealId || existing?.amoDealId;
+      if (amoLeadId && updateData.status && existing && existing.status !== updateData.status) {
         let action = null;
         if (updateData.status === 'Отказ') action = 'refusal';
         else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') action = 'complete';
@@ -215,23 +225,26 @@ export async function PUT(req) {
 
         if (action) {
           const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
-          const serviceName = svc ? svc.name : '';
-          console.log('🔄 updateLeadStage:', { amoLeadId: order.amoDealId, status: order.status, serviceName });
+          const serviceName = svc ? svc.name : existing?.service?.name || '';
+          console.log('7. Проверяю подключение amoCRM...');
+          console.log('8. Вызываю updateLeadStage с параметрами:', { amoLeadId, serviceName, status: action });
           try {
-            await amoApi.updateLeadStage(order.amoDealId, serviceName, action);
-            console.log('✅ Статус обновлен в amoCRM');
+            await amoApi.updateLeadStage(amoLeadId, serviceName, action);
+            console.log('9. Результат updateLeadStage: успех');
             if (action === 'refusal') {
               const reason = updateData.refusalReason || order.refusalReason || '';
-              if (reason) await amoApi.addNoteToLead(order.amoDealId, 'Отказ: ' + reason);
+              if (reason) await amoApi.addNoteToLead(amoLeadId, 'Отказ: ' + reason);
             }
           } catch (e) {
-            console.error('❌ Ошибка updateLeadStage:', e.message);
+            console.log('9. ОШИБКА updateLeadStage:', e.message);
           }
         }
       }
     } catch (e) {
       console.error('Failed updating amo lead stage on admin PUT:', e.message);
     }
+
+    console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА ==========');
 
     // Уведомление садовника во ВКонтакте (fire-and-forget)
     (async () => {
@@ -297,6 +310,7 @@ export async function PUT(req) {
 
     return NextResponse.json({ order });
   } catch (e) {
+    console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА (ОШИБКА) ==========');
     return NextResponse.json({ error: 'Не удалось обновить заказ' }, { status: 400 });
   }
 }
@@ -304,27 +318,34 @@ export async function PUT(req) {
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id } = await req.json();
+  const body = await req.json();
+  const { id } = body;
+  console.log('========== НАЧАЛО ОБРАБОТКИ ЗАКАЗА ==========');
+  console.log('1. Метод: DELETE');
+  console.log('2. Тело запроса:', JSON.stringify(body, null, 2));
+
   try {
+    console.log('3. Ищу заказ в базе...');
     const existingOrder = await prisma.order.findUnique({
       where: { id },
       include: { service: true }
     });
+    console.log('4. Найденный заказ:', JSON.stringify(existingOrder, null, 2));
+    console.log('5. amoDealId из базы:', existingOrder?.amoDealId);
+    console.log('6. serviceName:', existingOrder?.service?.name);
 
     if (existingOrder) {
       const amoLeadId = existingOrder.amoDealId;
-      console.log(' Перевод заказа в отказ:', id);
-      console.log('📋 amoLeadId:', amoLeadId);
-
       if (amoLeadId) {
         const serviceName = existingOrder.service ? existingOrder.service.name : '';
-        console.log('🔄 updateLeadStage:', { amoLeadId, status: 'Отказ', serviceName });
+        console.log('7. Проверяю подключение amoCRM...');
+        console.log('8. Вызываю updateLeadStage с параметрами:', { amoLeadId, serviceName, status: 'refusal' });
         try {
           await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
-          console.log('✅ Статус обновлен в amoCRM');
+          console.log('9. Результат updateLeadStage: успех');
           await amoApi.addNoteToLead(amoLeadId, 'Отказ');
         } catch (e) {
-          console.error('❌ Ошибка updateLeadStage:', e.message);
+          console.log('9. ОШИБКА updateLeadStage:', e.message);
         }
       }
     }
@@ -333,9 +354,11 @@ export async function DELETE(req) {
       where: { id },
       data: { status: 'Отказ', refusalReason: 'Отменен диспетчером' }
     });
+    console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА ==========');
     return NextResponse.json({ success: true });
   } catch (e) {
     console.error('Ошибка удаления заказа:', e);
+    console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА (ОШИБКА) ==========');
     return NextResponse.json({ error: 'Не удалось удалить заказ' }, { status: 400 });
   }
 }
