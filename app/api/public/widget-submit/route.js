@@ -20,6 +20,11 @@ export async function OPTIONS() {
 export async function POST(req) {
   try {
     const body = await req.json();
+    console.log('========== НАЧАЛО ОТПРАВКИ ЗАЯВКИ ==========');
+    console.log('1. Полученные данные:', JSON.stringify(body, null, 2));
+    console.log('2. serviceName из body:', body.serviceName);
+    console.log('3. serviceId из body:', body.serviceId);
+
     const {
       name, phone, address, comment, serviceId, serviceName, preferredDate,
       gardenerId, masterName, preferredGardenerId, preferredGardenerName,
@@ -54,7 +59,8 @@ export async function POST(req) {
     }
 
     if (existingLead) {
-      // Если заявка уже есть — возвращаем её id и не шлём повторно в amo
+      console.log('Найден дубликат заявки, пропуск отправки в amoCRM:', existingLead.id);
+      console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ ==========');
       return NextResponse.json({ success: true, id: existingLead.id, duplicate: true }, { headers: CORS_HEADERS });
     }
 
@@ -90,7 +96,7 @@ export async function POST(req) {
     noteParts.push('Заявка с виджета онлайн-записи сайта');
     noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-    await forwardToAmo({
+    const result = await forwardToAmo({
       clientName: name,
       clientPhone: phone,
       note: noteParts.join(' | '),
@@ -101,43 +107,79 @@ export async function POST(req) {
       approxWhere: body.district || undefined,
     });
 
-    console.log('✅ Заявка успешно отправлена в amoCRM через веб-форму. ServiceName:', serviceName);
+    console.log('4. forwardToAmo результат:', JSON.stringify(result));
 
     // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId
     try {
-      const tokenSetting = await prisma.systemSetting.findUnique({ where: { key: 'AMO_ACCESS_TOKEN' } });
-      const accessToken = tokenSetting ? tokenSetting.value : null;
+      console.log('⏳ Жду 3 секунды перед поиском сделки в amoCRM...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      const subSetting = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
-      const amoSubdomain = subSetting?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+      const clientIdDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
+      const clientSecretDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
+      const refreshTokenDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_REFRESH_TOKEN' } });
+      const subDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
 
-      if (accessToken) {
+      const clientId = clientIdDb?.value || process.env.AMO_CLIENT_ID;
+      const clientSecret = clientSecretDb?.value || process.env.AMO_CLIENT_SECRET;
+      const refreshToken = refreshTokenDb?.value || process.env.AMO_REFRESH_TOKEN;
+      const subdomain = subDb?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+
+      console.log('🔍 Запрашиваю свежий токен amoCRM через refresh_token...');
+      const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
+        })
+      });
+
+      const tokenData = await tokenRes.json().catch(() => ({}));
+      console.log('🔍 ОБМЕН ТОКЕНА: статус', tokenRes.status);
+      console.log('🔍 НОВЫЙ ТОКЕН:', tokenData.access_token ? 'получен' : 'ОШИБКА ' + JSON.stringify(tokenData));
+
+      if (tokenRes.ok && tokenData.access_token) {
+        await prisma.systemSetting.upsert({ where: { key: 'AMO_ACCESS_TOKEN' }, update: { value: tokenData.access_token }, create: { key: 'AMO_ACCESS_TOKEN', value: tokenData.access_token } });
+        if (tokenData.refresh_token) {
+          await prisma.systemSetting.upsert({ where: { key: 'AMO_REFRESH_TOKEN' }, update: { value: tokenData.refresh_token }, create: { key: 'AMO_REFRESH_TOKEN', value: tokenData.refresh_token } });
+          console.log('✅ Новый refresh_token обновлен в БД');
+        }
+
         const queryPhone = phoneClean.replace(/\D/g, '');
-        const searchRes = await fetch(`https://${amoSubdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
+        console.log('🔍 ПОИСК СДЕЛКИ: делаю запрос GET /api/v4/leads?query=' + queryPhone);
+        const searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${accessToken}`,
+            'Authorization': `Bearer ${tokenData.access_token}`,
             'Content-Type': 'application/json',
           },
         });
 
-        if (searchRes.ok) {
-          const searchData = await searchRes.json().catch(() => null);
+        const searchData = await searchRes.json().catch(() => null);
+        console.log('🔍 ПОИСК СДЕЛКИ: статус', searchRes.status, 'тело:', JSON.stringify(searchData));
+
+        if (searchRes.ok && searchData) {
           const leads = searchData?._embedded?.leads || [];
           if (leads.length > 0) {
-            // Находим наиболее свежую сделку
             const foundLeadId = String(leads[0].id);
+            console.log('9. Сохраняю amoDealId:', foundLeadId);
             await prisma.webLead.update({
               where: { id: lead.id },
               data: { amoDealId: foundLeadId },
             });
-            console.log('✅ Сохранен amoDealId для webLead:', foundLeadId);
+          } else {
+            console.log('9. Сделка по запросу не найдена в amoCRM.');
           }
         }
       }
     } catch (amoSearchErr) {
       console.error('⚠️ Ошибка поиска/сохранения amoDealId в widget-submit:', amoSearchErr.message);
     }
+
+    console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ ==========');
 
     // Уведомление диспетчера во ВКонтакте (fire-and-forget)
     (async () => {
@@ -153,6 +195,7 @@ export async function POST(req) {
     return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
   } catch (e) {
     console.error('widget-submit error:', e);
+    console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ (ОШИБКА) ==========');
     return NextResponse.json({ error: 'Не удалось отправить заявку' }, { status: 500, headers: CORS_HEADERS });
   }
 }
