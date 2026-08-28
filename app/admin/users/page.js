@@ -7,14 +7,13 @@ export default function AdminUsersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
-  const [userInputs, setUserInputs] = useState({}); // userId => { name, phone }
+  const [userInputs, setUserInputs] = useState({}); // userId => { name, phone, vkId }
   const [savingId, setSavingId] = useState(null);
   const [warnings, setWarnings] = useState({}); // userId => warning text
 
   // Форма добавления нового диспетчера
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState('');
 
@@ -47,7 +46,7 @@ export default function AdminUsersPage() {
       setUsers(data.users || []);
       const inputs = {};
       (data.users || []).forEach(u => {
-        inputs[u.id] = { name: u.name || '', phone: u.phone || '' };
+        inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
       });
       setUserInputs(inputs);
     } catch (e) {
@@ -70,7 +69,7 @@ export default function AdminUsersPage() {
         setUsers(data.users || []);
         const inputs = {};
         (data.users || []).forEach(u => {
-          inputs[u.id] = { name: u.name || '', phone: u.phone || '' };
+          inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
         });
         setUserInputs(inputs);
       }
@@ -107,7 +106,12 @@ export default function AdminUsersPage() {
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, name: input.name || user.name, phone: input.phone }),
+        body: JSON.stringify({
+          userId: user.id,
+          name: input.name || user.name,
+          phone: input.phone,
+          vkId: input.vkId ? String(input.vkId).trim() : null
+        }),
       });
       const data = await res.json();
 
@@ -133,8 +137,8 @@ export default function AdminUsersPage() {
 
   const handleCreateDispatcher = async (e) => {
     e.preventDefault();
-    if (!newName || !newPhone || !newPassword) {
-      alert('Укажите имя, телефон и пароль для нового диспетчера');
+    if (!newName || !newPhone) {
+      alert('Укажите имя и телефон для нового диспетчера');
       return;
     }
 
@@ -145,7 +149,7 @@ export default function AdminUsersPage() {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, phone: newPhone, password: newPassword })
+        body: JSON.stringify({ name: newName, phone: newPhone })
       });
       const data = await res.json();
 
@@ -157,7 +161,6 @@ export default function AdminUsersPage() {
       setCreateMsg(`✅ Диспетчер ${data.user.name} успешно создан!`);
       setNewName('');
       setNewPhone('');
-      setNewPassword('');
       await fetchUsers();
     } catch (err) {
       alert('Ошибка при вызове сервера');
@@ -194,7 +197,7 @@ export default function AdminUsersPage() {
           <h2 className="text-lg font-bold text-emerald-900 mb-3 flex items-center gap-2">
             ➕ Добавить диспетчера
           </h2>
-          <form onSubmit={handleCreateDispatcher} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <form onSubmit={handleCreateDispatcher} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Имя</label>
               <input
@@ -214,17 +217,6 @@ export default function AdminUsersPage() {
                 placeholder="79085535311"
                 value={newPhone}
                 onChange={e => setNewPhone(e.target.value)}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Пароль</label>
-              <input
-                type="password"
-                required
-                placeholder="Пароль"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm bg-white"
               />
             </div>
@@ -263,16 +255,11 @@ export default function AdminUsersPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {users.map((u) => {
-                const input = userInputs[u.id] || { name: u.name, phone: u.phone };
+                const input = userInputs[u.id] || { name: u.name, phone: u.phone, vkId: u.vkId || '' };
                 return (
                   <tr key={u.id} className="hover:bg-slate-50">
                     <td className="p-3 font-medium text-slate-800">
-                      <input
-                        type="text"
-                        value={input.name}
-                        onChange={(e) => handleInputChange(u.id, 'name', e.target.value)}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[150px]"
-                      />
+                      {u.name}
                     </td>
                     <td className="p-3 font-medium">
                       <input
@@ -292,8 +279,14 @@ export default function AdminUsersPage() {
                         {u.role === 'LEADER' ? 'LEADER' : 'ADMIN'}
                       </span>
                     </td>
-                    <td className="p-3 text-xs text-slate-600">
-                      {u.vkId ? u.vkId : <span className="text-slate-400">null</span>}
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        placeholder="Не привязан"
+                        value={input.vkId}
+                        onChange={(e) => handleInputChange(u.id, 'vkId', e.target.value)}
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[130px]"
+                      />
                     </td>
                     <td className="p-3">
                       <button

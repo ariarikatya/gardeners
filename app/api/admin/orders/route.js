@@ -207,21 +207,26 @@ export async function PUT(req) {
     });
 
     try {
-      if (order.amoDealId && updateData.status && existing && existing.status !== updateData.status && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-        if (updateData.status === 'Отказ') {
+      if (order.amoDealId && updateData.status && existing && existing.status !== updateData.status) {
+        let action = null;
+        if (updateData.status === 'Отказ') action = 'refusal';
+        else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') action = 'complete';
+        else if (updateData.status === 'Новый заказ') action = 'reset';
+
+        if (action) {
           const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
           const serviceName = svc ? svc.name : '';
-          await amoApi.updateLeadStage(order.amoDealId, serviceName, 'refusal');
-          const reason = updateData.refusalReason || order.refusalReason || '';
-          if (reason) await amoApi.addNoteToLead(order.amoDealId, 'Отказ: ' + reason);
-        } else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') {
-          const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
-          const serviceName = svc ? svc.name : '';
-          await amoApi.updateLeadStage(order.amoDealId, serviceName, 'complete');
-        } else if (updateData.status === 'Новый заказ') {
-          const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
-          const serviceName = svc ? svc.name : '';
-          await amoApi.updateLeadStage(order.amoDealId, serviceName, 'reset');
+          console.log('🔄 updateLeadStage:', { amoLeadId: order.amoDealId, status: order.status, serviceName });
+          try {
+            await amoApi.updateLeadStage(order.amoDealId, serviceName, action);
+            console.log('✅ Статус обновлен в amoCRM');
+            if (action === 'refusal') {
+              const reason = updateData.refusalReason || order.refusalReason || '';
+              if (reason) await amoApi.addNoteToLead(order.amoDealId, 'Отказ: ' + reason);
+            }
+          } catch (e) {
+            console.error('❌ Ошибка updateLeadStage:', e.message);
+          }
         }
       }
     } catch (e) {
@@ -311,14 +316,15 @@ export async function DELETE(req) {
       console.log(' Перевод заказа в отказ:', id);
       console.log('📋 amoLeadId:', amoLeadId);
 
-      if (amoLeadId && process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
+      if (amoLeadId) {
+        const serviceName = existingOrder.service ? existingOrder.service.name : '';
+        console.log('🔄 updateLeadStage:', { amoLeadId, status: 'Отказ', serviceName });
         try {
-          const serviceName = existingOrder.service ? existingOrder.service.name : '';
           await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
+          console.log('✅ Статус обновлен в amoCRM');
           await amoApi.addNoteToLead(amoLeadId, 'Отказ');
-          console.log('✅ Заказ переведен в отказ в amoCRM');
-        } catch (amoErr) {
-          console.error('⚠️ Ошибка перевода заказа в отказ в amoCRM:', amoErr.message);
+        } catch (e) {
+          console.error('❌ Ошибка updateLeadStage:', e.message);
         }
       }
     }
