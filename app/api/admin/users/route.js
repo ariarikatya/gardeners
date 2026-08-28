@@ -48,7 +48,7 @@ export async function PUT(req) {
   }
 
   try {
-    const { userId, phone, name } = await req.json();
+    const { userId, phone, name, vkId } = await req.json();
     if (!userId || !phone) {
       return NextResponse.json({ error: 'Укажите userId и номер телефона' }, { status: 400 });
     }
@@ -66,7 +66,7 @@ export async function PUT(req) {
     const phoneChanged = existingUser.phone !== cleanPhone;
 
     // Если телефон изменился — сбрасываем vkId в null
-    const newVkId = phoneChanged ? null : existingUser.vkId;
+    const newVkId = phoneChanged ? null : (vkId !== undefined ? (vkId === null || vkId === '' ? null : String(vkId).trim()) : existingUser.vkId);
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },

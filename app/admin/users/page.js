@@ -7,7 +7,7 @@ export default function AdminUsersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
-  const [userInputs, setUserInputs] = useState({}); // userId => { name, phone }
+  const [userInputs, setUserInputs] = useState({}); // userId => { name, phone, vkId }
   const [savingId, setSavingId] = useState(null);
   const [warnings, setWarnings] = useState({}); // userId => warning text
 
@@ -46,7 +46,7 @@ export default function AdminUsersPage() {
       setUsers(data.users || []);
       const inputs = {};
       (data.users || []).forEach(u => {
-        inputs[u.id] = { name: u.name || '', phone: u.phone || '' };
+        inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
       });
       setUserInputs(inputs);
     } catch (e) {
@@ -69,7 +69,7 @@ export default function AdminUsersPage() {
         setUsers(data.users || []);
         const inputs = {};
         (data.users || []).forEach(u => {
-          inputs[u.id] = { name: u.name || '', phone: u.phone || '' };
+          inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
         });
         setUserInputs(inputs);
       }
@@ -106,7 +106,12 @@ export default function AdminUsersPage() {
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, name: input.name || user.name, phone: input.phone }),
+        body: JSON.stringify({
+          userId: user.id,
+          name: input.name || user.name,
+          phone: input.phone,
+          vkId: input.vkId ? String(input.vkId).trim() : null
+        }),
       });
       const data = await res.json();
 
@@ -244,12 +249,13 @@ export default function AdminUsersPage() {
                 <th className="p-3">Имя</th>
                 <th className="p-3">Телефон</th>
                 <th className="p-3">Роль</th>
+                <th className="p-3">VK ID</th>
                 <th className="p-3">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {users.map((u) => {
-                const input = userInputs[u.id] || { name: u.name, phone: u.phone };
+                const input = userInputs[u.id] || { name: u.name, phone: u.phone, vkId: u.vkId || '' };
                 return (
                   <tr key={u.id} className="hover:bg-slate-50">
                     <td className="p-3 font-medium text-slate-800">
@@ -260,7 +266,7 @@ export default function AdminUsersPage() {
                         type="text"
                         value={input.phone}
                         onChange={(e) => handleInputChange(u.id, 'phone', e.target.value)}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[170px]"
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[150px]"
                       />
                       {warnings[u.id] && (
                         <div className="mt-1 text-xs text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
@@ -272,6 +278,15 @@ export default function AdminUsersPage() {
                       <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${u.role === 'LEADER' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
                         {u.role === 'LEADER' ? 'LEADER' : 'ADMIN'}
                       </span>
+                    </td>
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        placeholder="Не привязан"
+                        value={input.vkId}
+                        onChange={(e) => handleInputChange(u.id, 'vkId', e.target.value)}
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[130px]"
+                      />
                     </td>
                     <td className="p-3">
                       <button

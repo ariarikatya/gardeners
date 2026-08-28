@@ -65,13 +65,15 @@ export async function PUT(req) {
     const dataToUpdate = {
       name,
       phone: cleanPhone,
-      services: { set: (serviceIds || []).map((sid) => ({ id: sid })) },
+      services: {
+        set: (serviceIds || []).map((id) => ({ id }))
+      },
       user: existing.user
         ? { update: { name, phone: cleanPhone } }
         : { create: { name, phone: cleanPhone, role: 'GARDENER' } },
     };
 
-    if (vkId !== undefined) dataToUpdate['vkId'] = vkId === null ? null : String(vkId);
+    if (vkId !== undefined) dataToUpdate['vkId'] = vkId === null || vkId === '' ? null : String(vkId);
 
     const gardener = await prisma.gardener.update({
       where: { id },
