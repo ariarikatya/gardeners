@@ -17,6 +17,7 @@ venv/
 # Build outputs
 dist/
 build/
+.next/
 *.egg-info/
 
 # Environment variables
