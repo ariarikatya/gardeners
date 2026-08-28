@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
 import { PrismaClient } from '@prisma/client';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
@@ -13,11 +14,9 @@ async function checkLeader(req) {
 }
 
 export async function GET(req) {
-  console.log('📥 GET /api/admin/users: проверка прав LEADER...');
   const payload = await checkLeader(req);
   if (!payload) {
-    console.warn('⛔ Доступ запрещён (не LEADER)');
-    return NextResponse.json({ error: 'Доступ разрешен только руководителю (LEADER)' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
@@ -36,26 +35,23 @@ export async function GET(req) {
       orderBy: { name: 'asc' }
     });
 
-    console.log(`✅ Найдено пользователей (ADMIN/LEADER): ${users.length}`);
     return NextResponse.json({ users });
   } catch (err) {
-    console.error('❌ Ошибка GET /api/admin/users:', err);
+    console.error('Ошибка GET /api/admin/users:', err);
     return NextResponse.json({ error: 'Ошибка получения пользователей' }, { status: 500 });
   }
 }
 
 export async function PUT(req) {
-  console.log('📥 PUT /api/admin/users: изменение пользователя...');
   const payload = await checkLeader(req);
   if (!payload) {
-    console.warn('⛔ Доступ запрещён (не LEADER)');
-    return NextResponse.json({ error: 'Доступ разрешен только руководителю (LEADER)' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
     const { userId, phone, name } = await req.json();
-    if (!userId || !phone || !name) {
-      return NextResponse.json({ error: 'Укажите userId, имя и номер телефона' }, { status: 400 });
+    if (!userId || !phone) {
+      return NextResponse.json({ error: 'Укажите userId и номер телефона' }, { status: 400 });
     }
 
     const cleanPhone = String(phone).replace(/\D/g, '');
@@ -69,44 +65,38 @@ export async function PUT(req) {
     }
 
     const phoneChanged = existingUser.phone !== cleanPhone;
-    const hadVk = Boolean(existingUser.vkId);
 
-    // Если изменился телефон, сбрасываем vkId в null
+    // Если телефон изменился — сбрасываем vkId в null
     const newVkId = phoneChanged ? null : existingUser.vkId;
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
-        name: String(name).trim(),
+        name: name ? String(name).trim() : existingUser.name,
         phone: cleanPhone,
         vkId: newVkId
       }
     });
 
-    console.log(`✅ Пользователь ${userId} обновлен: phone=${cleanPhone}, vkId=${newVkId}`);
-
     return NextResponse.json({
       success: true,
       user: updatedUser,
-      hadVkReset: phoneChanged && hadVk,
-      vkIdReset: phoneChanged && hadVk
+      vkIdReset: phoneChanged
     });
   } catch (err) {
-    console.error('❌ Ошибка PUT /api/admin/users:', err);
+    console.error('Ошибка PUT /api/admin/users:', err);
     return NextResponse.json({ error: 'Не удалось обновить пользователя' }, { status: 500 });
   }
 }
 
 export async function POST(req) {
-  console.log('📥 POST /api/admin/users: создание нового диспетчера (ADMIN)...');
   const payload = await checkLeader(req);
   if (!payload) {
-    console.warn('⛔ Доступ запрещён (не LEADER)');
-    return NextResponse.json({ error: 'Доступ разрешен только руководителю (LEADER)' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   try {
-    const { name, phone } = await req.json();
+    const { name, phone, password } = await req.json();
     if (!name || !phone) {
       return NextResponse.json({ error: 'Укажите имя и телефон' }, { status: 400 });
     }
@@ -121,6 +111,12 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Пользователь с таким номером уже существует' }, { status: 400 });
     }
 
+    // Хеширование пароля при наличии
+    let hashedPassword = null;
+    if (password) {
+      hashedPassword = crypto.createHash('sha256').update(String(password)).digest('hex');
+    }
+
     const newUser = await prisma.user.create({
       data: {
         name: String(name).trim(),
@@ -129,14 +125,12 @@ export async function POST(req) {
       }
     });
 
-    console.log(`✅ Новый диспетчер создан: ID ${newUser.id}, phone: ${newUser.phone}`);
-
     return NextResponse.json({
       success: true,
       user: newUser
     });
   } catch (err) {
-    console.error('❌ Ошибка POST /api/admin/users:', err);
+    console.error('Ошибка POST /api/admin/users:', err);
     return NextResponse.json({ error: err.message || 'Ошибка создания диспетчера' }, { status: 500 });
   }
 }

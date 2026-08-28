@@ -90,18 +90,6 @@ export async function POST(req) {
         executor: gardenerName || undefined,
         approxWhere: district || undefined,
       });
-
-      try {
-        if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-          const amoId = await amoApi.createLead({ name: clientName, phone: clientPhone, note: noteParts.join(' | '), serviceName });
-          if (amoId) {
-            await prisma.order.update({ where: { id: order.id }, data: { amoDealId: String(amoId) } });
-            order.amoDealId = String(amoId);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to create amo lead (API) for order:', e.message);
-      }
     }
 
     // Уведомление садовника во ВКонтакте (fire-and-forget)
@@ -196,13 +184,6 @@ export async function PUT(req) {
 
       await amoApi.addNoteToLead(existing.amoDealId, `Заказ перенесён диспетчером на ${updateData.date.toISOString().split('T')[0]}`);
       await amoApi.updateLeadStage(existing.amoDealId, serviceName, 'refusal');
-
-      if (process.env.AMO_REFRESH_TOKEN && process.env.AMO_SUBDOMAIN) {
-        const clientName = updateData.clientName !== undefined ? updateData.clientName : existing.clientName;
-        const clientPhone = updateData.clientPhone !== undefined ? updateData.clientPhone : existing.clientPhone;
-        const newAmoId = await amoApi.createLead({ name: clientName, phone: clientPhone, note: `Перенесён заказ: ${updateData.date.toISOString().split('T')[0]}`, serviceName });
-        if (newAmoId) updateData.amoDealId = String(newAmoId);
-      }
     } catch (e) {
       console.error('Failed to handle amo transfer for date change:', e.message);
     }

@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -744,12 +745,12 @@ export default function AdminDashboard() {
             🔌 amoCRM
           </a>
           {currentUser?.role === 'LEADER' && (
-            <a
+            <Link
               href="/admin/users"
               className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
             >
               👥 Пользователи
-            </a>
+            </Link>
           )}
           <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
             <span className="text-xs font-medium text-emerald-100">Скачать Excel:</span>
@@ -1127,7 +1128,14 @@ export default function AdminDashboard() {
                                             activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
                                           }`}
                                         >
-                                          {order.clientName}
+                                          <div className="flex items-center justify-between gap-1 mb-0.5">
+                                            <span>{order.clientName}</span>
+                                            {order.amoDealId ? (
+                                              <span className="text-[10px] bg-emerald-800 text-emerald-100 px-1.5 py-0.5 rounded font-normal whitespace-nowrap">✅ ID: {order.amoDealId}</span>
+                                            ) : (
+                                              <span className="text-[10px] bg-rose-800 text-rose-100 px-1.5 py-0.5 rounded font-normal whitespace-nowrap">❌ Нет ID</span>
+                                            )}
+                                          </div>
                                           <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
                                           <div className="text-xs opacity-90">{order.description}</div>
                                           {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}

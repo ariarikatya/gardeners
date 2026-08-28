@@ -5,8 +5,11 @@ import Link from 'next/link';
 export default function AmoConnectPage() {
   const [siteOrigin, setSiteOrigin] = useState('https://gardeners-agro.netlify.app');
   const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    checkAmoStatus();
+
     if (typeof window !== 'undefined') {
       const origin = window.location.origin;
       setSiteOrigin(origin);
@@ -14,8 +17,8 @@ export default function AmoConnectPage() {
       const handleMessage = (event) => {
         if (event.data && (event.data.type === 'AMO_AUTH_SUCCESS' || event.data.type === 'amocrm_connected' || event.data.success)) {
           console.log('✅ Получено сообщение об успешном подключении amoCRM:', event.data);
-          setConnected(true);
-          alert('✅ amoCRM успешно подключена!');
+          alert('✅ amoCRM подключена!');
+          window.location.reload();
         }
       };
 
@@ -47,6 +50,23 @@ export default function AmoConnectPage() {
     }
   }, []);
 
+  const checkAmoStatus = async () => {
+    try {
+      const res = await fetch('/api/admin/amo-status');
+      const data = await res.json();
+      if (data && data.connected) {
+        setConnected(true);
+      } else {
+        setConnected(false);
+      }
+    } catch (e) {
+      console.error(e);
+      setConnected(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow border border-slate-200 p-6">
@@ -62,9 +82,26 @@ export default function AmoConnectPage() {
           </Link>
         </div>
 
+        {/* Индикатор подключения */}
+        <div className="mb-6">
+          {loading ? (
+            <div className="p-4 bg-slate-100 rounded-xl text-slate-500 text-center text-sm font-medium">
+              Проверка статуса подключения...
+            </div>
+          ) : connected ? (
+            <div className="p-4 bg-emerald-100 border border-emerald-300 rounded-xl text-emerald-900 font-bold text-base flex items-center justify-center gap-2">
+              ✅ amoCRM ПОДКЛЮЧЕНА
+            </div>
+          ) : (
+            <div className="p-4 bg-rose-100 border border-rose-300 rounded-xl text-rose-900 font-bold text-base flex items-center justify-center gap-2">
+              ❌ НЕ ПОДКЛЮЧЕНА
+            </div>
+          )}
+        </div>
+
         <div className="space-y-6">
           {connected ? (
-            <div className="bg-emerald-100 border border-emerald-300 rounded-2xl p-6 text-center text-emerald-900 shadow-sm">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center text-emerald-900 shadow-sm">
               <div className="text-4xl mb-2">✅</div>
               <h2 className="text-xl font-bold mb-1">amoCRM успешно подключена!</h2>
               <p className="text-sm text-emerald-800">
