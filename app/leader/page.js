@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -311,7 +312,10 @@ export default function LeaderDashboard() {
           <p className="text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handleLogout} className="bg-emerald-700 px-3 py-2 rounded-lg text-sm">Выйти</button>
+          <Link href="/admin/users" className="bg-amber-600 hover:bg-amber-500 text-white font-medium px-3 py-2 rounded-lg text-sm transition-all">
+            👥 Пользователи
+          </Link>
+          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-3 py-2 rounded-lg text-sm">Выйти</button>
         </div>
       </header>
 
