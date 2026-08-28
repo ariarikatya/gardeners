@@ -22,22 +22,19 @@ export async function GET(req) {
     const amoSubdomain = process.env.AMO_SUBDOMAIN || (referer ? referer.split('.')[0] : 'ivanbahtin03');
     const tokenUrl = `https://${amoSubdomain}.amocrm.ru/oauth2/access_token`;
 
-    // Читаем client_id / client_secret из env или БД
-    let clientId = process.env.AMO_CLIENT_ID;
-    let clientSecret = process.env.AMO_CLIENT_SECRET;
+    // Берем client_id / client_secret из SystemSetting (с фоллбэком на env)
+    let clientId = null;
+    let clientSecret = null;
 
-    if (!clientId) {
-      const dbId = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
-      if (dbId) clientId = dbId.value;
-    }
-    if (!clientSecret) {
-      const dbSecret = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
-      if (dbSecret) clientSecret = dbSecret.value;
-    }
+    const dbId = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
+    if (dbId && dbId.value) clientId = dbId.value;
+    else clientId = process.env.AMO_CLIENT_ID;
 
-    const host = req.headers.get('host') || 'gardeners-agro.netlify.app';
-    const protocol = req.headers.get('x-forwarded-proto') || 'https';
-    const redirectUri = `${protocol}://${host}/api/amo/callback`;
+    const dbSecret = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
+    if (dbSecret && dbSecret.value) clientSecret = dbSecret.value;
+    else clientSecret = process.env.AMO_CLIENT_SECRET;
+
+    const redirectUri = 'https://gardeners-agro.netlify.app/api/amo/callback';
 
     const tokenPayload = {
       client_id: clientId,
@@ -80,29 +77,19 @@ export async function GET(req) {
   <head>
     <meta charset="utf-8"/>
     <title>amoCRM Подключение</title>
-    <style>
-      body { font-family: sans-serif; text-align: center; padding: 40px; background: #f8fafc; color: #0f172a; }
-      .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); display: inline-block; }
-      h2 { color: #059669; margin-bottom: 10px; }
-    </style>
   </head>
   <body>
-    <div class="card">
-      <h2>✅ amoCRM подключена!</h2>
-      <p>Окно автоматически закроется через пару секунд...</p>
-    </div>
     <script>
       if (window.opener) {
         try {
-          window.opener.postMessage({ success: true, type: 'amocrm_connected' }, '*');
+          window.opener.postMessage({ type: 'AMO_AUTH_SUCCESS' }, '*');
         } catch (e) {
           console.error(e);
         }
       }
-      setTimeout(function() {
-        window.close();
-      }, 1000);
+      window.close();
     </script>
+    <p>Подключение успешно! Окно можно закрыть.</p>
   </body>
 </html>`;
 
