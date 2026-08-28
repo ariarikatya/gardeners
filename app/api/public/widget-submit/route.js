@@ -111,29 +111,57 @@ export async function POST(req) {
 
     // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId
     try {
-      console.log('5. Получаю accessToken из SystemSetting...');
-      const tokenSetting = await prisma.systemSetting.findUnique({ where: { key: 'AMO_ACCESS_TOKEN' } });
-      const accessToken = tokenSetting ? tokenSetting.value : null;
-      console.log('6. accessToken:', accessToken ? 'найден' : 'НЕ НАЙДЕН');
+      console.log('⏳ Жду 3 секунды перед поиском сделки в amoCRM...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      const subSetting = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
-      const amoSubdomain = subSetting?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+      const clientIdDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
+      const clientSecretDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
+      const refreshTokenDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_REFRESH_TOKEN' } });
+      const subDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
 
-      if (accessToken) {
+      const clientId = clientIdDb?.value || process.env.AMO_CLIENT_ID;
+      const clientSecret = clientSecretDb?.value || process.env.AMO_CLIENT_SECRET;
+      const refreshToken = refreshTokenDb?.value || process.env.AMO_REFRESH_TOKEN;
+      const subdomain = subDb?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+
+      console.log('🔍 Запрашиваю свежий токен amoCRM через refresh_token...');
+      const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
+        })
+      });
+
+      const tokenData = await tokenRes.json().catch(() => ({}));
+      console.log('🔍 ОБМЕН ТОКЕНА: статус', tokenRes.status);
+      console.log('🔍 НОВЫЙ ТОКЕН:', tokenData.access_token ? 'получен' : 'ОШИБКА ' + JSON.stringify(tokenData));
+
+      if (tokenRes.ok && tokenData.access_token) {
+        await prisma.systemSetting.upsert({ where: { key: 'AMO_ACCESS_TOKEN' }, update: { value: tokenData.access_token }, create: { key: 'AMO_ACCESS_TOKEN', value: tokenData.access_token } });
+        if (tokenData.refresh_token) {
+          await prisma.systemSetting.upsert({ where: { key: 'AMO_REFRESH_TOKEN' }, update: { value: tokenData.refresh_token }, create: { key: 'AMO_REFRESH_TOKEN', value: tokenData.refresh_token } });
+          console.log('✅ Новый refresh_token обновлен в БД');
+        }
+
         const queryPhone = phoneClean.replace(/\D/g, '');
-        console.log('7. Делаю запрос к amoCRM: GET /api/v4/leads?query=' + queryPhone);
-        const searchRes = await fetch(`https://${amoSubdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
+        console.log('🔍 ПОИСК СДЕЛКИ: делаю запрос GET /api/v4/leads?query=' + queryPhone);
+        const searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${accessToken}`,
+            'Authorization': `Bearer ${tokenData.access_token}`,
             'Content-Type': 'application/json',
           },
         });
 
-        console.log('8. Статус ответа amoCRM:', searchRes.status);
+        const searchData = await searchRes.json().catch(() => null);
+        console.log('🔍 ПОИСК СДЕЛКИ: статус', searchRes.status, 'тело:', JSON.stringify(searchData));
 
-        if (searchRes.ok) {
-          const searchData = await searchRes.json().catch(() => null);
+        if (searchRes.ok && searchData) {
           const leads = searchData?._embedded?.leads || [];
           if (leads.length > 0) {
             const foundLeadId = String(leads[0].id);
