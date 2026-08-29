@@ -1075,7 +1075,7 @@ export default function AdminDashboard() {
                   <table style={{ zoom: tableScale }} className="w-full border-collapse text-xs relative">
                     <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
                       <tr className="bg-slate-100 border-b border-slate-200">
-                        <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 z-20 bg-slate-100 shadow-sm">Дата</th>
+                        <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
                         {visibleGardeners.map(g => (
                           <th key={g.id} className="p-2 text-xs font-semibold text-slate-600 border-r border-slate-200 min-w-[160px] sticky top-0 z-20 bg-slate-100 shadow-sm">
                             {g.name}
@@ -1091,7 +1091,7 @@ export default function AdminDashboard() {
 
                         return (
                           <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
-                            <td className={`p-2 font-medium border-r border-slate-200 bg-slate-50 align-top ${holiday ? 'text-red-700' : 'text-slate-700'}`}>
+                            <td className={`p-2 font-medium border-r border-slate-200 align-top sticky left-0 z-10 bg-slate-50 shadow-sm ${holiday ? 'text-red-700 bg-red-50' : 'text-slate-700 bg-slate-50'}`}>
                               <span className="flex flex-col gap-0.5">
                                 <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
                                 {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
