@@ -53,8 +53,8 @@ export async function POST(req) {
 export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, name, phone, serviceIds, vkId } = await req.json();
-  const cleanPhone = phone.replace(/\D/g, '');
+  const body = await req.json();
+  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, photo } = body;
 
   try {
     const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });
@@ -62,18 +62,48 @@ export async function PUT(req) {
       return NextResponse.json({ error: 'Садовник не найден' }, { status: 404 });
     }
 
+    const updatedName = name !== undefined ? name : existing.name;
+    const cleanPhone = phone !== undefined ? String(phone).replace(/\D/g, '') : existing.phone;
+
     const dataToUpdate = {
-      name,
+      name: updatedName,
       phone: cleanPhone,
-      services: {
-        set: (serviceIds || []).map((id) => ({ id }))
-      },
-      user: existing.user
-        ? { update: { name, phone: cleanPhone } }
-        : { create: { name, phone: cleanPhone, role: 'GARDENER' } },
     };
 
-    if (vkId !== undefined) dataToUpdate['vkId'] = vkId === null || vkId === '' ? null : String(vkId);
+    if (serviceIds !== undefined) {
+      dataToUpdate.services = {
+        set: (serviceIds || []).map((id) => ({ id }))
+      };
+    }
+
+    if (existing.user) {
+      dataToUpdate.user = { update: { name: updatedName, phone: cleanPhone } };
+    } else if (cleanPhone) {
+      dataToUpdate.user = { create: { name: updatedName, phone: cleanPhone, role: 'GARDENER' } };
+    }
+
+    if (vkId !== undefined) dataToUpdate.vkId = vkId === null || vkId === '' ? null : String(vkId);
+    if (rating !== undefined) dataToUpdate.rating = rating !== null && rating !== '' ? parseFloat(rating) : null;
+    if (reviewsCount !== undefined) dataToUpdate.reviewsCount = reviewsCount !== null && reviewsCount !== '' ? parseInt(reviewsCount, 10) : null;
+    if (photo !== undefined) dataToUpdate.photo = photo;
+
+    const parseJsonField = (val) => {
+      if (val === undefined) return undefined;
+      if (val === null || val === '') return null;
+      if (typeof val === 'string') {
+        try {
+          return JSON.parse(val);
+        } catch (e) {
+          return val;
+        }
+      }
+      return val;
+    };
+
+    if (skills !== undefined) dataToUpdate.skills = parseJsonField(skills);
+    if (inventory !== undefined) dataToUpdate.inventory = parseJsonField(inventory);
+    if (preparations !== undefined) dataToUpdate.preparations = parseJsonField(preparations);
+    if (works !== undefined) dataToUpdate.works = parseJsonField(works);
 
     const gardener = await prisma.gardener.update({
       where: { id },
@@ -83,7 +113,8 @@ export async function PUT(req) {
 
     return NextResponse.json({ gardener });
   } catch (e) {
-    return NextResponse.json({ error: 'Не удалось обновить садовника (возможно, такой телефон уже занят)' }, { status: 400 });
+    console.error('Gardener PUT error:', e);
+    return NextResponse.json({ error: 'Не удалось обновить садовника' }, { status: 400 });
   }
 }
 

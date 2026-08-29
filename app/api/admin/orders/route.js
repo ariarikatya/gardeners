@@ -236,6 +236,7 @@ export async function PUT(req) {
     const order = await prisma.order.update({
       where: { id },
       data: updateData,
+      include: { service: true }
     });
 
     try {
@@ -261,6 +262,17 @@ export async function PUT(req) {
           } catch (e) {
             console.log('9. ОШИБКА updateLeadStage:', e.message);
           }
+        }
+      }
+
+      if (updateData.status === 'Отменен' && order.amoDealId) {
+        const s = (order.service?.name || '').toLowerCase();
+        const isObrezka = s.includes('обрез') || s.includes('выкорч');
+        const isService = s.includes('сервис') || s.includes('консервац') || s.includes('стрижк');
+        await amoApi.updateLeadStage(order.amoDealId, order.service?.name, 'refusal');
+        if (!isObrezka && !isService) {
+          const reason = updateData.refusalReason || 'Не указана';
+          await amoApi.addNoteToLead(order.amoDealId, `Отказ: ${reason}`);
         }
       }
     } catch (e) {
