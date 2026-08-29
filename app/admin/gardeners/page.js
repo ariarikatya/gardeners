@@ -79,8 +79,8 @@ export default function AdminGardenersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow border border-slate-200 p-6">
+    <div className="min-h-screen bg-slate-50 p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto bg-white rounded-2xl shadow border border-slate-200 p-4 sm:p-6">
         <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             🧑‍🌾 Управление садовниками
@@ -93,19 +93,19 @@ export default function AdminGardenersPage() {
           </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
+        <div className="overflow-x-auto relative">
+          <table className="w-full text-left text-xs sm:text-sm border-collapse">
             <thead>
               <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-semibold">
-                <th className="p-3">Имя</th>
-                <th className="p-3">Телефон</th>
-                <th className="p-3">Фото</th>
-                <th className="p-3">Рейтинг</th>
-                <th className="p-3">Отзывы</th>
-                <th className="p-3">Навыки</th>
-                <th className="p-3">Инвентарь</th>
-                <th className="p-3">Препараты</th>
-                <th className="p-3">Примеры работ</th>
+                <th className="p-2 sticky left-0 z-30 bg-slate-100 min-w-[130px] border-r border-slate-200">Имя</th>
+                <th className="p-2 sticky left-[130px] z-30 bg-slate-100 min-w-[140px] border-r border-slate-200">Телефон</th>
+                <th className="p-2">Фото</th>
+                <th className="p-2">Рейтинг</th>
+                <th className="p-2">Отзывы</th>
+                <th className="p-2">Навыки</th>
+                <th className="p-2">Инвентарь</th>
+                <th className="p-2">Препараты</th>
+                <th className="p-2">Примеры работ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -122,72 +122,72 @@ export default function AdminGardenersPage() {
 
                 return (
                   <tr key={g.id} className="hover:bg-slate-50 align-middle">
-                    <td className="p-3 font-medium text-slate-800">
+                    <td className="p-2 font-medium text-slate-800 sticky left-0 z-20 bg-white border-r border-slate-200">
                       <input
                         type="text"
                         defaultValue={g.name}
                         onBlur={(e) => handleGardenerUpdate(g.id, { name: e.target.value })}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[120px]"
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs sm:text-sm bg-white w-full max-w-[120px]"
                       />
                     </td>
-                    <td className="p-3 font-medium">
+                    <td className="p-2 font-medium sticky left-[130px] z-20 bg-white border-r border-slate-200">
                       <input
                         type="text"
                         defaultValue={g.phone}
                         onBlur={(e) => handleGardenerUpdate(g.id, { phone: e.target.value })}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[130px]"
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs sm:text-sm bg-white w-full max-w-[130px]"
                       />
                     </td>
-                    <td className="p-3">
+                    <td className="p-2">
                       {photo ? (
-                        <img src={photo} alt={g.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200 mb-1" />
+                        <img src={photo} alt={g.name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 mb-1" />
                       ) : null}
                       <input
                         type="file"
                         accept="image/*"
                         onChange={(e) => handleGardenerPhotoUpload(g.id, e.target.files?.[0])}
-                        className="text-xs text-slate-500 file:mr-1 file:py-0.5 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700"
+                        className="text-[10px] sm:text-xs text-slate-500 file:mr-1 file:py-0.5 file:px-1.5 file:rounded file:border-0 file:text-[10px] file:bg-emerald-50 file:text-emerald-700"
                       />
                     </td>
-                    <td className="p-3 font-semibold text-amber-600">
+                    <td className="p-2 font-semibold text-amber-600 whitespace-nowrap">
                       ★ {g.rating ?? 4.5}
                     </td>
-                    <td className="p-3">
+                    <td className="p-2">
                       <button
                         onClick={() => setActiveModal({ gardener: g, type: 'reviews' })}
-                        className="py-1 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs border border-amber-200"
+                        className="py-1 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs border border-amber-200 whitespace-nowrap"
                       >
                         ★ {g.reviewsCount ?? parseLen(g.reviews)} отзывов
                       </button>
                     </td>
-                    <td className="p-3">
+                    <td className="p-2">
                       <button
                         onClick={() => setActiveModal({ gardener: g, type: 'skills' })}
-                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
+                        className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
                         Навыки ({parseLen(g.skills)})
                       </button>
                     </td>
-                    <td className="p-3">
+                    <td className="p-2">
                       <button
                         onClick={() => setActiveModal({ gardener: g, type: 'inventory' })}
-                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
+                        className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
                         Инвентарь ({parseLen(g.inventory)})
                       </button>
                     </td>
-                    <td className="p-3">
+                    <td className="p-2">
                       <button
                         onClick={() => setActiveModal({ gardener: g, type: 'preparations' })}
-                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
+                        className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
                         Препараты ({parseLen(g.preparations)})
                       </button>
                     </td>
-                    <td className="p-3">
+                    <td className="p-2">
                       <button
                         onClick={() => setActiveModal({ gardener: g, type: 'works' })}
-                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
+                        className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
                         Работы ({parseLen(g.works)})
                       </button>

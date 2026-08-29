@@ -369,19 +369,13 @@ export async function DELETE(req) {
     console.log('5. amoDealId из базы:', existingOrder?.amoDealId);
     console.log('6. serviceName:', existingOrder?.service?.name);
 
-    if (existingOrder) {
+    if (existingOrder && existingOrder.amoDealId) {
       const amoLeadId = existingOrder.amoDealId;
-      if (amoLeadId) {
-        const serviceName = existingOrder.service ? existingOrder.service.name : '';
-        console.log('7. Проверяю подключение amoCRM...');
-        console.log('8. Вызываю updateLeadStage с параметрами:', { amoLeadId, serviceName, status: 'refusal' });
-        try {
-          await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
-          console.log('9. Результат updateLeadStage: успех');
-          await amoApi.addNoteToLead(amoLeadId, 'Заказ удален диспетчером');
-        } catch (e) {
-          console.log('9. ОШИБКА updateLeadStage:', e.message);
-        }
+      try {
+        await amoApi.apiRequest(`/api/v4/leads/${amoLeadId}`, { method: 'DELETE' });
+        console.log(`🗑️ Удалено из amoCRM: ${amoLeadId}`);
+      } catch (e) {
+        console.log('Ошибка при удалении сделки из amoCRM:', e.message);
       }
     }
 

@@ -39,7 +39,13 @@ export async function GET() {
           updates.push({ orderId: order.id, oldStatus: order.status, newStatus });
         }
       } catch (err) {
-        console.error(`Error syncing lead ${order.amoDealId}:`, err.message);
+        if (err.status === 404 || (err.message && err.message.includes('404'))) {
+          await prisma.order.delete({ where: { id: order.id } });
+          console.log(`🗑️ Удалено из БД (удалено в amoCRM): ${order.amoDealId}`);
+          updates.push({ orderId: order.id, oldStatus: order.status, newStatus: 'Удалён из БД' });
+        } else {
+          console.error(`Error syncing lead ${order.amoDealId}:`, err.message);
+        }
       }
     }
 

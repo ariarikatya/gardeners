@@ -757,7 +757,7 @@ export default function AdminDashboard() {
             }}
             className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
           >
-            🔄 Синхронизировать с amoCRM
+            🔄 Синхронизация
           </button>
           {currentUser?.role === 'LEADER' && (
             <Link
@@ -767,16 +767,22 @@ export default function AdminDashboard() {
               👥 Пользователи
             </Link>
           )}
-          <div className="flex items-center gap-1.5 bg-emerald-800/50 rounded-lg px-2 py-1">
-            <span className="text-xs font-medium text-emerald-100">Скачать Excel:</span>
+          <div className="flex items-center gap-1 bg-emerald-800/50 rounded-lg px-2 py-1">
+            <span className="text-xs font-medium text-emerald-100">📊 Экспорт:</span>
             <select
               value={exportPeriod}
-              onChange={e => setExportPeriod(e.target.value)}
-              className="bg-emerald-600 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 sm:py-2 border border-emerald-500"
+              onChange={e => {
+                const val = e.target.value;
+                setExportPeriod(val);
+                if (val !== 'custom') {
+                  window.location.href = getExportUrl(val);
+                }
+              }}
+              className="bg-emerald-600 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-emerald-500 font-semibold cursor-pointer"
             >
               <option value="all">За всё время</option>
-              <option value="year">Этот год</option>
               <option value="month">Этот месяц</option>
+              <option value="year">Этот год</option>
               <option value="custom">Свой диапазон</option>
             </select>
             {exportPeriod === 'custom' && (
@@ -784,16 +790,15 @@ export default function AdminDashboard() {
                 <input type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600" />
                 <span className="text-emerald-200">—</span>
                 <input type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600" />
+                <a
+                  href={getExportUrl('custom')}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded text-xs font-bold"
+                >
+                  Скачать
+                </a>
               </div>
             )}
           </div>
-          <a
-            href={getExportUrl(exportPeriod)}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap flex items-center gap-1"
-            title={`Скачать Excel за выбранный период: ${exportPeriod === 'all' ? 'всё время' : exportPeriod === 'year' ? 'год' : exportPeriod === 'month' ? 'месяц' : `с ${exportCustomStart} по ${exportCustomEnd}`}`}
-          >
-            📊 <span className="hidden sm:inline">Экспорт в </span>Excel
-          </a>
           <button
             onClick={handleSyncSheets}
             disabled={syncing}
