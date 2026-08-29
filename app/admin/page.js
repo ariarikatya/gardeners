@@ -1131,7 +1131,7 @@ export default function AdminDashboard() {
                                           <div className="flex items-center justify-between gap-1 mb-0.5">
                                             <span>{order.clientName}</span>
                                             {!order.amoDealId && (
-                                              <span className="text-[10px] bg-rose-800 text-rose-100 px-1.5 py-0.5 rounded font-normal whitespace-nowrap">❌ Нет ID</span>
+                                              <span className="text-xs" title="Нет ID amoCRM">❌</span>
                                             )}
                                           </div>
                                           <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
