@@ -29,11 +29,23 @@ export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash } = body;
+  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash, leadId, webLeadId } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
   const dayOfWeek = days[orderDate.getDay()];
+
+  let leadAmoDealId = null;
+  const targetLeadId = leadId || webLeadId;
+  if (targetLeadId) {
+    const lead = await prisma.webLead.findUnique({
+      where: { id: targetLeadId },
+    });
+    if (lead && lead.amoDealId) {
+      leadAmoDealId = lead.amoDealId;
+      console.log('✅ Копирую amoDealId из WebLead в Order:', leadAmoDealId);
+    }
+  }
 
   try {
     const order = await prisma.order.create({
@@ -56,10 +68,11 @@ export async function POST(req) {
         serviceId: serviceId || null,
         serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
         isCash: typeof isCash === 'boolean' ? isCash : true,
+        amoDealId: leadAmoDealId,
       },
     });
 
-    if (fromLead) {
+    if (fromLead && !leadAmoDealId) {
       let serviceName = '';
       if (serviceId) {
         const service = await prisma.service.findUnique({ where: { id: serviceId } });
