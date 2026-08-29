@@ -744,6 +744,21 @@ export default function AdminDashboard() {
           >
             🔌 amoCRM
           </a>
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch('/api/sync-amo');
+                const data = await res.json();
+                alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
+                window.location.reload();
+              } catch (e) {
+                alert('Ошибка при синхронизации с amoCRM');
+              }
+            }}
+            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
+          >
+            🔄 Синхронизировать с amoCRM
+          </button>
           {currentUser?.role === 'LEADER' && (
             <Link
               href="/admin/users"

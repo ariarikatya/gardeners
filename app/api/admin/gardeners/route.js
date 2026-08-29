@@ -54,7 +54,7 @@ export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, photo } = body;
+  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo } = body;
 
   try {
     const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });
@@ -104,6 +104,7 @@ export async function PUT(req) {
     if (inventory !== undefined) dataToUpdate.inventory = parseJsonField(inventory);
     if (preparations !== undefined) dataToUpdate.preparations = parseJsonField(preparations);
     if (works !== undefined) dataToUpdate.works = parseJsonField(works);
+    if (reviews !== undefined) dataToUpdate.reviews = parseJsonField(reviews);
 
     const gardener = await prisma.gardener.update({
       where: { id },
