@@ -22,25 +22,38 @@ export async function GET() {
     });
 
     const mappedGardeners = gardeners.map((g, index) => {
-      const photoUrl = g.videoUrl || g.photoUrl || 'https://placehold.co/200x200/16213e/afcd3c?text=Фото';
-      const skills = g.services ? g.services.map((s) => s.name) : [];
-      const special = skills.join(', ') || 'Обрезание, уход за садом';
+      const photoUrl = g.photo || g.videoUrl || g.photoUrl || 'https://placehold.co/200x200/16213e/afcd3c?text=Фото';
+      const serviceSkills = g.services ? g.services.map((s) => s.name) : [];
+      const special = serviceSkills.join(', ') || 'Обрезание, уход за садом';
+
+      const parseJson = (v, fallback = []) => {
+        if (!v) return fallback;
+        if (Array.isArray(v) || typeof v === 'object') return v;
+        if (typeof v === 'string') {
+          try { return JSON.parse(v); } catch (e) { return fallback; }
+        }
+        return fallback;
+      };
+
+      const parsedReviews = parseJson(g.reviews);
+      const skillsList = g.skills ? parseJson(g.skills, serviceSkills) : serviceSkills;
 
       return {
         id: index + 1,
         gardenerId: g.id,
         name: g.name,
+        phone: g.phone,
         photo: photoUrl,
         experience: 'Более 3 лет',
         status: 'Свободен',
         special: special,
-        rating: 5.0,
-        reviewsCount: 0,
-        skills: skills,
-        inventory: [],
-        preparations: [],
-        reviews: [],
-        works: [],
+        rating: g.rating ?? 4.5,
+        reviewsCount: g.reviewsCount ?? (Array.isArray(parsedReviews) ? parsedReviews.length : 0),
+        skills: skillsList,
+        inventory: parseJson(g.inventory),
+        preparations: parseJson(g.preparations),
+        reviews: parsedReviews,
+        works: parseJson(g.works),
         companyExperience: '',
       };
     });

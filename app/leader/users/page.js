@@ -358,7 +358,7 @@ export default function LeaderUsersPage() {
             <thead>
               <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-semibold">
                 <th className="p-2 sticky left-0 z-30 bg-slate-100 min-w-[130px] border-r border-slate-200">Имя</th>
-                <th className="p-2 sticky left-[130px] z-30 bg-slate-100 min-w-[140px] border-r border-slate-200">Телефон</th>
+                <th className="p-2 min-w-[140px]">Телефон</th>
                 <th className="p-2">Фото</th>
                 <th className="p-2">Рейтинг</th>
                 <th className="p-2">Отзывы</th>
@@ -390,7 +390,7 @@ export default function LeaderUsersPage() {
                         className="border border-slate-300 rounded-lg px-2 py-1 text-xs sm:text-sm bg-white w-full max-w-[120px]"
                       />
                     </td>
-                    <td className="p-2 font-medium sticky left-[130px] z-20 bg-white border-r border-slate-200">
+                    <td className="p-2 font-medium">
                       <input
                         type="text"
                         defaultValue={g.phone}
