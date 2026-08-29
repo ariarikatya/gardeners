@@ -37,6 +37,7 @@ model Gardener {
   inventory       Json?
   preparations    Json?
   works           Json?
+  reviews         Json?
   photo           String?
   user            User?
   orders          Order[]

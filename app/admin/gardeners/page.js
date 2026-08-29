@@ -1,11 +1,13 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import GardenerModalEditor from '@/components/GardenerModalEditor';
 
 export default function AdminGardenersPage() {
   const router = useRouter();
   const [gardeners, setGardeners] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeModal, setActiveModal] = useState(null); // { gardener, type }
 
   useEffect(() => {
     fetchGardeners();
@@ -55,15 +57,14 @@ export default function AdminGardenersPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleGardenerUpdate = async (gardenerId, field, value) => {
+  const handleGardenerUpdate = async (gardenerId, dataObj) => {
     try {
       const res = await fetch('/api/admin/gardeners', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: gardenerId, [field]: value })
+        body: JSON.stringify({ id: gardenerId, ...dataObj })
       });
       if (res.ok) {
-        alert('Сохранено');
         fetchGardeners();
       } else {
         alert('Ошибка сохранения');
@@ -110,154 +111,85 @@ export default function AdminGardenersPage() {
             <tbody className="divide-y divide-slate-100">
               {gardeners.map((g) => {
                 const photo = g.photo || g.videoUrl || g.photoUrl;
+                const parseLen = (v) => {
+                  if (!v) return 0;
+                  if (Array.isArray(v)) return v.length;
+                  if (typeof v === 'string') {
+                    try { return JSON.parse(v).length; } catch (e) { return 0; }
+                  }
+                  return 0;
+                };
+
                 return (
-                  <tr key={g.id} className="hover:bg-slate-50 align-top">
+                  <tr key={g.id} className="hover:bg-slate-50 align-middle">
                     <td className="p-3 font-medium text-slate-800">
                       <input
                         type="text"
                         defaultValue={g.name}
+                        onBlur={(e) => handleGardenerUpdate(g.id, { name: e.target.value })}
                         className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[120px]"
                       />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          const input = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'name', input.value);
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
-                      >
-                        Сохранить
-                      </button>
                     </td>
                     <td className="p-3 font-medium">
                       <input
                         type="text"
                         defaultValue={g.phone}
+                        onBlur={(e) => handleGardenerUpdate(g.id, { phone: e.target.value })}
                         className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[130px]"
                       />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          const input = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'phone', input.value);
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
-                      >
-                        Сохранить
-                      </button>
                     </td>
                     <td className="p-3">
                       {photo ? (
-                        <img src={photo} alt={g.name} className="w-12 h-12 object-cover rounded-lg border border-slate-200 mb-2" />
+                        <img src={photo} alt={g.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200 mb-1" />
                       ) : null}
                       <input
                         type="file"
                         accept="image/*"
                         onChange={(e) => handleGardenerPhotoUpload(g.id, e.target.files?.[0])}
-                        className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                        className="text-xs text-slate-500 file:mr-1 file:py-0.5 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700"
                       />
                     </td>
+                    <td className="p-3 font-semibold text-amber-600">
+                      ★ {g.rating ?? 4.5}
+                    </td>
                     <td className="p-3">
-                      <input
-                        type="number"
-                        step="0.1"
-                        defaultValue={g.rating ?? 4.5}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-20"
-                      />
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          const input = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'rating', parseFloat(input.value));
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
+                        onClick={() => setActiveModal({ gardener: g, type: 'reviews' })}
+                        className="py-1 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs border border-amber-200"
                       >
-                        Сохранить
+                        ★ {g.reviewsCount ?? parseLen(g.reviews)} отзывов
                       </button>
                     </td>
                     <td className="p-3">
-                      <input
-                        type="number"
-                        defaultValue={g.reviewsCount ?? 0}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-20"
-                      />
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          const input = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'reviewsCount', parseInt(input.value, 10));
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
+                        onClick={() => setActiveModal({ gardener: g, type: 'skills' })}
+                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
                       >
-                        Сохранить
+                        Навыки ({parseLen(g.skills)})
                       </button>
                     </td>
                     <td className="p-3">
-                      <textarea
-                        defaultValue={typeof g.skills === 'object' ? JSON.stringify(g.skills, null, 2) : g.skills || ''}
-                        rows={3}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white w-32 font-mono"
-                      />
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          const textarea = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'skills', textarea.value);
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
+                        onClick={() => setActiveModal({ gardener: g, type: 'inventory' })}
+                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
                       >
-                        Сохранить
+                        Инвентарь ({parseLen(g.inventory)})
                       </button>
                     </td>
                     <td className="p-3">
-                      <textarea
-                        defaultValue={typeof g.inventory === 'object' ? JSON.stringify(g.inventory, null, 2) : g.inventory || ''}
-                        rows={3}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white w-32 font-mono"
-                      />
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          const textarea = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'inventory', textarea.value);
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
+                        onClick={() => setActiveModal({ gardener: g, type: 'preparations' })}
+                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
                       >
-                        Сохранить
+                        Препараты ({parseLen(g.preparations)})
                       </button>
                     </td>
                     <td className="p-3">
-                      <textarea
-                        defaultValue={typeof g.preparations === 'object' ? JSON.stringify(g.preparations, null, 2) : g.preparations || ''}
-                        rows={3}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white w-32 font-mono"
-                      />
                       <button
-                        type="button"
-                        onClick={(e) => {
-                          const textarea = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'preparations', textarea.value);
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
+                        onClick={() => setActiveModal({ gardener: g, type: 'works' })}
+                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs"
                       >
-                        Сохранить
-                      </button>
-                    </td>
-                    <td className="p-3">
-                      <textarea
-                        defaultValue={typeof g.works === 'object' ? JSON.stringify(g.works, null, 2) : g.works || ''}
-                        rows={3}
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white w-32 font-mono"
-                      />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          const textarea = e.currentTarget.previousElementSibling;
-                          handleGardenerUpdate(g.id, 'works', textarea.value);
-                        }}
-                        className="mt-1 block py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg"
-                      >
-                        Сохранить
+                        Работы ({parseLen(g.works)})
                       </button>
                     </td>
                   </tr>
@@ -267,6 +199,17 @@ export default function AdminGardenersPage() {
           </table>
         </div>
       </div>
+
+      {activeModal && (
+        <GardenerModalEditor
+          gardener={activeModal.gardener}
+          type={activeModal.type}
+          onClose={() => setActiveModal(null)}
+          onSave={async (gardenerId, dataObj) => {
+            await handleGardenerUpdate(gardenerId, dataObj);
+          }}
+        />
+      )}
     </div>
   );
 }
