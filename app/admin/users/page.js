@@ -10,9 +10,11 @@ export default function AdminUsersPage() {
   const [gardeners, setGardeners] = useState([]);
   const [services, setServices] = useState([]);
   const [userInputs, setUserInputs] = useState({}); // userId => { name, phone, vkId }
+  const [gardenerInputs, setGardenerInputs] = useState({}); // gardenerId => { name, phone, vkId }
   const [editingGardener, setEditingGardener] = useState(null);
   const [savingId, setSavingId] = useState(null);
-  const [warnings, setWarnings] = useState({}); // userId => warning text
+  const [savingGardenerId, setSavingGardenerId] = useState(null);
+  const [warnings, setWarnings] = useState({}); // id => warning text
 
   // Форма добавления нового диспетчера
   const [newName, setNewName] = useState('');
@@ -73,6 +75,12 @@ export default function AdminUsersPage() {
         inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
       });
       setUserInputs(inputs);
+
+      const gInputs = {};
+      (dataGardeners.gardeners || []).forEach(g => {
+        gInputs[g.id] = { name: g.name || '', phone: g.phone || '', vkId: g.vkId || '' };
+      });
+      setGardenerInputs(gInputs);
     } catch (e) {
       console.error(e);
     }
@@ -83,6 +91,16 @@ export default function AdminUsersPage() {
       ...prev,
       [userId]: {
         ...prev[userId],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleGardenerInputChange = (gardenerId, field, value) => {
+    setGardenerInputs(prev => ({
+      ...prev,
+      [gardenerId]: {
+        ...prev[gardenerId],
         [field]: value
       }
     }));
@@ -132,6 +150,42 @@ export default function AdminUsersPage() {
       alert('Ошибка соединения с сервером');
     } finally {
       setSavingId(null);
+    }
+  };
+
+  const handleSaveGardenerQuick = async (gardener) => {
+    const input = gardenerInputs[gardener.id];
+    if (!input || !input.phone) {
+      alert('Заполните номер телефона');
+      return;
+    }
+
+    setSavingGardenerId(gardener.id);
+    try {
+      const res = await fetch('/api/admin/gardeners', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: gardener.id,
+          name: input.name || gardener.name,
+          phone: input.phone,
+          serviceIds: (gardener.services || []).map(s => s.id),
+          vkId: input.vkId ? String(input.vkId).trim() : null,
+          videoUrl: gardener.videoUrl || gardener.photoUrl || null
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Не удалось обновить садовника');
+        return;
+      }
+
+      await fetchUsersAndGardeners();
+    } catch (err) {
+      alert('Ошибка сохранения садовника');
+    } finally {
+      setSavingGardenerId(null);
     }
   };
 
@@ -399,127 +453,152 @@ export default function AdminUsersPage() {
           <span>🧑‍🌾 Список садовников ({gardeners.length})</span>
         </h2>
 
-        <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-          {gardeners.map((g) => (
-            <div key={g.id} className="p-4 bg-white hover:bg-slate-50">
-              {editingGardener && editingGardener.id === g.id ? (
-                <form onSubmit={handleUpdateGardener} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Имя садовника</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingGardener.name}
-                        onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Телефон</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingGardener.phone}
-                        onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Умеет делать (услуги)</label>
-                    <div className="flex flex-wrap gap-2">
-                      {services.map(s => (
-                        <label key={s.id} className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-all ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
-                          <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
-                          {s.name}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">VK ID</label>
-                      <input
-                        type="text"
-                        value={editingGardener.vkId ?? ''}
-                        onChange={e => setEditingGardener({ ...editingGardener, vkId: e.target.value })}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                        placeholder="peer id или user id"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1">Фото садовника (ImgBB)</label>
+        <div className="overflow-x-auto mb-6">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-semibold">
+                <th className="p-3">Имя</th>
+                <th className="p-3">Телефон</th>
+                <th className="p-3">Роль</th>
+                <th className="p-3">VK ID</th>
+                <th className="p-3">Действия</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {gardeners.map((g) => {
+                const input = gardenerInputs[g.id] || { name: g.name, phone: g.phone, vkId: g.vkId || '' };
+                return (
+                  <tr key={g.id} className="hover:bg-slate-50">
+                    <td className="p-3 font-medium text-slate-800">
                       <div className="flex items-center gap-2">
-                        {editingGardener.photoUrl && (
-                          <img src={editingGardener.photoUrl} alt={editingGardener.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
-                        )}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleFileUpload}
-                          className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 pt-2 border-t border-slate-200 justify-end">
-                    <button type="button" onClick={() => setEditingGardener(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 text-sm">
-                      Отмена
-                    </button>
-                    <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm">
-                      Сохранить
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-3">
-                    {g.videoUrl || g.photoUrl ? (
-                      <img src={g.videoUrl || g.photoUrl} alt={g.name} className="w-12 h-12 object-cover rounded-xl border border-slate-200" />
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-xl">
-                        🧑‍🌾
-                      </div>
-                    )}
-                    <div>
-                      <div className="font-semibold text-slate-800 flex items-center gap-2">
+                        {g.videoUrl || g.photoUrl ? (
+                          <img src={g.videoUrl || g.photoUrl} alt={g.name} className="w-8 h-8 object-cover rounded-lg border" />
+                        ) : null}
                         <span>{g.name}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                          {translateRole('GARDENER')}
-                        </span>
                       </div>
-                      <div className="text-slate-500 text-sm">Телефон: {g.phone}</div>
-                      {g.services && g.services.length > 0 && (
-                        <div className="text-xs text-emerald-700 mt-1">{g.services.map(s => s.name).join(', ')}</div>
-                      )}
-                      {g.vkId && (
-                        <div className="text-xs text-slate-400 mt-1">VK ID: {g.vkId}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <button
-                      onClick={() => openEditGardener(g)}
-                      className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg transition-all"
-                    >
-                      Редактировать
-                    </button>
-                    <button
-                      onClick={() => handleDeleteGardener(g.id)}
-                      className="text-xs text-red-600 hover:bg-red-50 font-medium px-3 py-1.5 rounded-lg transition-all"
-                    >
-                      Удалить
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+                    </td>
+                    <td className="p-3 font-medium">
+                      <input
+                        type="text"
+                        value={input.phone}
+                        onChange={(e) => handleGardenerInputChange(g.id, 'phone', e.target.value)}
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[150px]"
+                      />
+                    </td>
+                    <td className="p-3">
+                      <span className="text-xs px-2.5 py-1 rounded-full font-bold bg-emerald-100 text-emerald-900">
+                        {translateRole('GARDENER')}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        placeholder="Не привязан"
+                        value={input.vkId}
+                        onChange={(e) => handleGardenerInputChange(g.id, 'vkId', e.target.value)}
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-sm bg-white w-full max-w-[130px]"
+                      />
+                    </td>
+                    <td className="p-3 flex items-center gap-2">
+                      <button
+                        disabled={savingGardenerId === g.id}
+                        onClick={() => handleSaveGardenerQuick(g)}
+                        className="py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg transition-all disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {savingGardenerId === g.id ? 'Сохранение...' : 'Сохранить'}
+                      </button>
+                      <button
+                        onClick={() => openEditGardener(g)}
+                        className="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-all"
+                      >
+                        Редактировать
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+
+        {/* Форма редактирования садовника с загрузкой фото */}
+        {editingGardener && (
+          <form onSubmit={handleUpdateGardener} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4 mt-4">
+            <h3 className="text-md font-bold text-slate-800">
+              Редактирование профиля садовника: {editingGardener.name}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">Имя садовника</label>
+                <input
+                  type="text"
+                  required
+                  value={editingGardener.name}
+                  onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">Телефон</label>
+                <input
+                  type="text"
+                  required
+                  value={editingGardener.phone}
+                  onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Умеет делать (услуги)</label>
+              <div className="flex flex-wrap gap-2">
+                {services.map(s => (
+                  <label key={s.id} className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-all ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
+                    <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
+                    {s.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">VK ID</label>
+                <input
+                  type="text"
+                  value={editingGardener.vkId ?? ''}
+                  onChange={e => setEditingGardener({ ...editingGardener, vkId: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                  placeholder="peer id или user id"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">Фото садовника (ImgBB)</label>
+                <div className="flex items-center gap-2">
+                  {editingGardener.photoUrl && (
+                    <img src={editingGardener.photoUrl} alt={editingGardener.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-200 justify-end">
+              <button type="button" onClick={() => setEditingGardener(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 text-sm">
+                Отмена
+              </button>
+              <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm">
+                Сохранить
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
