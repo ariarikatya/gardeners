@@ -356,19 +356,18 @@ export async function DELETE(req) {
         try {
           await amoApi.updateLeadStage(amoLeadId, serviceName, 'refusal');
           console.log('9. Результат updateLeadStage: успех');
-          await amoApi.addNoteToLead(amoLeadId, 'Отказ');
+          await amoApi.addNoteToLead(amoLeadId, 'Заказ удален диспетчером');
         } catch (e) {
           console.log('9. ОШИБКА updateLeadStage:', e.message);
         }
       }
     }
 
-    await prisma.order.update({
-      where: { id },
-      data: { status: 'Отказ', refusalReason: 'Отменен диспетчером' }
+    await prisma.order.delete({
+      where: { id }
     });
     console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА ==========');
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, deleted: true });
   } catch (e) {
     console.error('Ошибка удаления заказа:', e);
     console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА (ОШИБКА) ==========');

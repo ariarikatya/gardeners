@@ -22,7 +22,7 @@ export async function GET() {
     });
 
     const mappedGardeners = gardeners.map((g, index) => {
-      const photoUrl = g.videoUrl || g.photoUrl || '/placeholder-gardener.jpg';
+      const photoUrl = g.videoUrl || g.photoUrl || 'https://placehold.co/200x200/16213e/afcd3c?text=Фото';
       const skills = g.services ? g.services.map((s) => s.name) : [];
       const special = skills.join(', ') || 'Обрезание, уход за садом';
 
