@@ -31,6 +31,13 @@ model Gardener {
   bonusPercent    Float       @default(0)
   finePercent     Float       @default(0)
   writeoffPercent Float       @default(0)
+  rating          Float?      @default(4.5)
+  reviewsCount    Int?        @default(0)
+  skills          Json?
+  inventory       Json?
+  preparations    Json?
+  works           Json?
+  photo           String?
   user            User?
   orders          Order[]
   dayOffs         DayOff[]
