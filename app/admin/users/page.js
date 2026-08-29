@@ -1,14 +1,16 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 
 export default function AdminUsersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState(null);
   const [users, setUsers] = useState([]);
+  const [gardeners, setGardeners] = useState([]);
+  const [services, setServices] = useState([]);
   const [userInputs, setUserInputs] = useState({}); // userId => { name, phone, vkId }
+  const [editingGardener, setEditingGardener] = useState(null);
   const [savingId, setSavingId] = useState(null);
   const [warnings, setWarnings] = useState({}); // userId => warning text
 
@@ -36,21 +38,7 @@ export default function AdminUsersPage() {
       }
       setCurrentUserRole(meData.user.role);
 
-      const res = await fetch('/api/admin/users');
-      if (res.status === 403) {
-        router.push('/admin');
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Ошибка загрузки пользователей');
-      }
-      setUsers(data.users || []);
-      const inputs = {};
-      (data.users || []).forEach(u => {
-        inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
-      });
-      setUserInputs(inputs);
+      await fetchUsersAndGardeners();
     } catch (e) {
       console.error(e);
       router.push('/admin');
@@ -59,22 +47,32 @@ export default function AdminUsersPage() {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchUsersAndGardeners = async () => {
     try {
-      const res = await fetch('/api/admin/users');
-      if (res.status === 403) {
+      const [resUsers, resGardeners, resServices] = await Promise.all([
+        fetch('/api/admin/users'),
+        fetch('/api/admin/gardeners'),
+        fetch('/api/admin/services'),
+      ]);
+
+      if (resUsers.status === 403) {
         router.push('/admin');
         return;
       }
-      const data = await res.json();
-      if (res.ok) {
-        setUsers(data.users || []);
-        const inputs = {};
-        (data.users || []).forEach(u => {
-          inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
-        });
-        setUserInputs(inputs);
-      }
+
+      const dataUsers = await resUsers.json();
+      const dataGardeners = await resGardeners.json();
+      const dataServices = await resServices.json();
+
+      setUsers(dataUsers.users || []);
+      setGardeners(dataGardeners.gardeners || []);
+      setServices(dataServices.services || []);
+
+      const inputs = {};
+      (dataUsers.users || []).forEach(u => {
+        inputs[u.id] = { name: u.name || '', phone: u.phone || '', vkId: u.vkId || '' };
+      });
+      setUserInputs(inputs);
     } catch (e) {
       console.error(e);
     }
@@ -129,7 +127,7 @@ export default function AdminUsersPage() {
         }));
       }
 
-      await fetchUsers();
+      await fetchUsersAndGardeners();
     } catch (err) {
       alert('Ошибка соединения с сервером');
     } finally {
@@ -163,12 +161,102 @@ export default function AdminUsersPage() {
       setCreateMsg(`✅ Диспетчер ${data.user.name} успешно создан!`);
       setNewName('');
       setNewPhone('');
-      await fetchUsers();
+      await fetchUsersAndGardeners();
     } catch (err) {
       alert('Ошибка при вызове сервера');
     } finally {
       setCreating(false);
     }
+  };
+
+  const openEditGardener = (g) => {
+    setEditingGardener({
+      id: g.id,
+      name: g.name,
+      phone: g.phone,
+      serviceIds: (g.services || []).map(s => s.id),
+      vkId: g.vkId || '',
+      photoUrl: g.videoUrl || g.photoUrl || ''
+    });
+  };
+
+  const toggleEditGardenerService = (serviceId) => {
+    setEditingGardener(prev => ({
+      ...prev,
+      serviceIds: prev.serviceIds.includes(serviceId)
+        ? prev.serviceIds.filter(id => id !== serviceId)
+        : [...prev.serviceIds, serviceId]
+    }));
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const base64 = evt.target.result;
+      try {
+        const res = await fetch('/api/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64 }),
+        });
+        const data = await res.json();
+        if (res.ok && data.url) {
+          setEditingGardener(prev => ({ ...prev, photoUrl: data.url }));
+        } else {
+          alert(data.error || 'Не удалось загрузить изображение');
+        }
+      } catch (err) {
+        alert('Ошибка при загрузке фото');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpdateGardener = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/admin/gardeners', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingGardener.id,
+          name: editingGardener.name,
+          phone: editingGardener.phone,
+          serviceIds: editingGardener.serviceIds,
+          vkId: editingGardener.vkId ? String(editingGardener.vkId).trim() : null,
+          videoUrl: editingGardener.photoUrl
+        })
+      });
+      if (res.ok) {
+        setEditingGardener(null);
+        await fetchUsersAndGardeners();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Ошибка при сохранении садовника');
+      }
+    } catch (err) {
+      alert('Ошибка при сохранении садовника');
+    }
+  };
+
+  const handleDeleteGardener = async (id) => {
+    if (!confirm('Удалить этого садовника и его личный кабинет?')) return;
+    const res = await fetch('/api/admin/gardeners', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (res.ok) await fetchUsersAndGardeners();
+  };
+
+  const translateRole = (role) => {
+    if (role === 'LEADER') return 'Руководитель';
+    if (role === 'ADMIN') return 'Диспетчер';
+    if (role === 'GARDENER') return 'Садовник';
+    return role;
   };
 
   if (loading) {
@@ -186,12 +274,12 @@ export default function AdminUsersPage() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             👥 Управление пользователями
           </h1>
-          <Link
-            href={currentUserRole === 'LEADER' ? '/leader' : '/admin'}
+          <button
+            onClick={() => router.back()}
             className="text-sm px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-all"
           >
-            ← В Панель Администратора
-          </Link>
+            ← Назад
+          </button>
         </div>
 
         {/* Секция: Добавить диспетчера */}
@@ -241,10 +329,10 @@ export default function AdminUsersPage() {
 
         {/* Секция: Список пользователей */}
         <h2 className="text-lg font-bold text-slate-900 mb-4">
-          Список пользователей
+          Список пользователей (Администраторы / Диспетчеры)
         </h2>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto mb-10">
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-semibold">
@@ -278,7 +366,7 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="p-3">
                       <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${u.role === 'LEADER' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
-                        {u.role === 'LEADER' ? 'LEADER' : 'ADMIN'}
+                        {translateRole(u.role)}
                       </span>
                     </td>
                     <td className="p-3">
@@ -304,6 +392,133 @@ export default function AdminUsersPage() {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Секция: Список садовников */}
+        <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center justify-between">
+          <span>🧑‍🌾 Список садовников ({gardeners.length})</span>
+        </h2>
+
+        <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+          {gardeners.map((g) => (
+            <div key={g.id} className="p-4 bg-white hover:bg-slate-50">
+              {editingGardener && editingGardener.id === g.id ? (
+                <form onSubmit={handleUpdateGardener} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Имя садовника</label>
+                      <input
+                        type="text"
+                        required
+                        value={editingGardener.name}
+                        onChange={e => setEditingGardener({ ...editingGardener, name: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Телефон</label>
+                      <input
+                        type="text"
+                        required
+                        value={editingGardener.phone}
+                        onChange={e => setEditingGardener({ ...editingGardener, phone: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Умеет делать (услуги)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {services.map(s => (
+                        <label key={s.id} className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-all ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
+                          <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
+                          {s.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">VK ID</label>
+                      <input
+                        type="text"
+                        value={editingGardener.vkId ?? ''}
+                        onChange={e => setEditingGardener({ ...editingGardener, vkId: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                        placeholder="peer id или user id"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Фото садовника (ImgBB)</label>
+                      <div className="flex items-center gap-2">
+                        {editingGardener.photoUrl && (
+                          <img src={editingGardener.photoUrl} alt={editingGardener.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleFileUpload}
+                          className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2 border-t border-slate-200 justify-end">
+                    <button type="button" onClick={() => setEditingGardener(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 text-sm">
+                      Отмена
+                    </button>
+                    <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium text-sm">
+                      Сохранить
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    {g.videoUrl || g.photoUrl ? (
+                      <img src={g.videoUrl || g.photoUrl} alt={g.name} className="w-12 h-12 object-cover rounded-xl border border-slate-200" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-xl">
+                        🧑‍🌾
+                      </div>
+                    )}
+                    <div>
+                      <div className="font-semibold text-slate-800 flex items-center gap-2">
+                        <span>{g.name}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                          {translateRole('GARDENER')}
+                        </span>
+                      </div>
+                      <div className="text-slate-500 text-sm">Телефон: {g.phone}</div>
+                      {g.services && g.services.length > 0 && (
+                        <div className="text-xs text-emerald-700 mt-1">{g.services.map(s => s.name).join(', ')}</div>
+                      )}
+                      {g.vkId && (
+                        <div className="text-xs text-slate-400 mt-1">VK ID: {g.vkId}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => openEditGardener(g)}
+                      className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg transition-all"
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      onClick={() => handleDeleteGardener(g.id)}
+                      className="text-xs text-red-600 hover:bg-red-50 font-medium px-3 py-1.5 rounded-lg transition-all"
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>

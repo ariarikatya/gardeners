@@ -1130,9 +1130,7 @@ export default function AdminDashboard() {
                                         >
                                           <div className="flex items-center justify-between gap-1 mb-0.5">
                                             <span>{order.clientName}</span>
-                                            {order.amoDealId ? (
-                                              <span className="text-[10px] bg-emerald-800 text-emerald-100 px-1.5 py-0.5 rounded font-normal whitespace-nowrap">✅ ID: {order.amoDealId}</span>
-                                            ) : (
+                                            {!order.amoDealId && (
                                               <span className="text-[10px] bg-rose-800 text-rose-100 px-1.5 py-0.5 rounded font-normal whitespace-nowrap">❌ Нет ID</span>
                                             )}
                                           </div>
