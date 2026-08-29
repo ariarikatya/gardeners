@@ -43,7 +43,17 @@ export async function POST(req) {
     });
     if (lead && lead.amoDealId) {
       leadAmoDealId = lead.amoDealId;
-      console.log('✅ Копирую amoDealId из WebLead в Order:', leadAmoDealId);
+      console.log('Копирую amoDealId из WebLead:', leadAmoDealId);
+    }
+  } else if (fromLead && clientPhone) {
+    const phoneClean = String(clientPhone).trim();
+    const lead = await prisma.webLead.findFirst({
+      where: { phone: phoneClean },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (lead && lead.amoDealId) {
+      leadAmoDealId = lead.amoDealId;
+      console.log('Копирую amoDealId из WebLead:', leadAmoDealId);
     }
   }
 

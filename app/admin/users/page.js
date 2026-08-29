@@ -6,6 +6,7 @@ import Link from 'next/link';
 export default function AdminUsersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [currentUserRole, setCurrentUserRole] = useState(null);
   const [users, setUsers] = useState([]);
   const [userInputs, setUserInputs] = useState({}); // userId => { name, phone, vkId }
   const [savingId, setSavingId] = useState(null);
@@ -33,6 +34,7 @@ export default function AdminUsersPage() {
         router.push('/admin');
         return;
       }
+      setCurrentUserRole(meData.user.role);
 
       const res = await fetch('/api/admin/users');
       if (res.status === 403) {
@@ -185,7 +187,7 @@ export default function AdminUsersPage() {
             👥 Управление пользователями
           </h1>
           <Link
-            href="/admin"
+            href={currentUserRole === 'LEADER' ? '/leader' : '/admin'}
             className="text-sm px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-all"
           >
             ← В Панель Администратора
