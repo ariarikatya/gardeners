@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 async function isAdmin(req) {
   const token = req.cookies.get('token')?.value;
   const payload = token ? await verifyToken(token) : null;
-  return payload?.role === 'ADMIN';
+  return payload && (payload.role === 'ADMIN' || payload.role === 'LEADER');
 }
 
 export async function GET(req) {

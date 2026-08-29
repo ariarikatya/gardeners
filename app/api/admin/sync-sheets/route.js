@@ -9,7 +9,7 @@ async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
   if (!token) return false;
   const payload = await verifyToken(token);
-  return payload && payload.role === 'ADMIN';
+  return payload && (payload.role === 'ADMIN' || payload.role === 'LEADER');
 }
 
 export async function POST(req) {
