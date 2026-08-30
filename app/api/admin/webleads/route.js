@@ -67,13 +67,14 @@ export async function DELETE(req) {
     console.log('🗑️ [DELETE WEBLEAD] Найденная заявка, amoDealId:', webLead.amoDealId || 'НЕ УКАЗАН');
 
     // Если есть amoDealId, удаляем сделку из amoCRM
-        // Если есть amoDealId, удаляем сделку из amoCRM
     if (webLead.amoDealId) {
       console.log('🗑️ [DELETE WEBLEAD] Отправляю DELETE в amoCRM для сделки:', webLead.amoDealId);
       try {
-        // В amoCRM v4 удаление происходит через query-параметр ?id=..., а НЕ через body!
-        await amoApi.apiRequest(`/api/v4/leads?id=${webLead.amoDealId}`, {
-          method: 'DELETE'
+        // ✅ ПРАВИЛЬНЫЙ СПОСОБ для amoCRM v4: 
+        // Метод DELETE на /api/v4/leads с массивом ID в ТЕЛЕ (body) запроса
+        await amoApi.apiRequest('/api/v4/leads', {
+          method: 'DELETE',
+          body: JSON.stringify([{ id: Number(webLead.amoDealId) }])
         });
         console.log('✅ [DELETE WEBLEAD] Успешно удалено из amoCRM');
       } catch (err) {
