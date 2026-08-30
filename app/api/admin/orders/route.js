@@ -396,12 +396,13 @@ export async function DELETE(req) {
     if (order.amoDealId) {
       console.log('🗑️ [DELETE] Отправляю DELETE в amoCRM для сделки:', order.amoDealId);
       try {
-        await amoApi.apiRequest(`/api/v4/leads/${order.amoDealId}`, {
-          method: 'DELETE'
+        await amoApi.apiRequest('/api/v4/leads', {
+          method: 'DELETE',
+          body: JSON.stringify([{ id: Number(order.amoDealId) }])
         });
         console.log('✅ [DELETE] Успешно удалено из amoCRM');
       } catch (err) {
-        console.error('❌ [DELETE] Ошибка при удалении из amoCRM:', err.message, err.body);
+        console.error('❌ [DELETE] Ошибка при удалении из amoCRM:', err.message, err.body || err);
       }
     } else {
       console.log('⚠️ [DELETE] amoDealId не указан, пропускаем удаление из amoCRM');
