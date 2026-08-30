@@ -26,7 +26,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
   const [prepDesc, setPrepDesc] = useState('');
 
   const [workTitle, setWorkTitle] = useState('');
-  const [workImage, setWorkImage] = useState('');
+  const [workImages, setWorkImages] = useState([]); // array of URLs
 
   const [revAuthor, setRevAuthor] = useState('');
   const [revText, setRevText] = useState('');
@@ -41,14 +41,20 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
   };
 
   const handleFileUpload = async (e, setImageCallback) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setUploading(true);
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result.split(',')[1];
+      const uploadedUrls = [];
+      for (const file of files) {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
         const res = await fetch('/api/upload-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -56,16 +62,19 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
         });
         const data = await res.json();
         if (res.ok && data.url) {
-          setImageCallback(data.url);
+          uploadedUrls.push(data.url);
         } else {
           alert(data.error || 'Ошибка загрузки фото');
         }
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
+      }
+
+      if (uploadedUrls.length > 0) {
+        setImageCallback(uploadedUrls);
+      }
     } catch (err) {
       console.error(err);
       alert('Ошибка при загрузке изображения');
+    } finally {
       setUploading(false);
     }
   };
@@ -88,8 +97,8 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
       setPrepName(''); setPrepDesc('');
     } else if (type === 'works') {
       if (!workTitle.trim()) return;
-      newItem = { title: workTitle.trim(), image: workImage };
-      setWorkTitle(''); setWorkImage('');
+      newItem = { title: workTitle.trim(), images: workImages.length > 0 ? workImages : [], image: workImages[0] || '' };
+      setWorkTitle(''); setWorkImages([]);
     } else if (type === 'reviews') {
       if (!revAuthor.trim() || !revText.trim()) return;
       newItem = { author: revAuthor.trim(), text: revText.trim(), rating: parseFloat(revRating) || 5 };
@@ -129,10 +138,10 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-          <h3 className="text-lg font-bold text-slate-900">
+          <h3 className="text-lg font-bold text-slate-900 truncate pr-2">
             Редактирование {titles[type]} ({gardener.name})
           </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-lg">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-lg flex-shrink-0">
             ✕
           </button>
         </div>
@@ -142,61 +151,62 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
           {items.length === 0 ? (
             <div className="text-xs text-slate-400 italic">Список пуст</div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-100 text-slate-600 font-semibold border-b">
-                  <th className="p-2">Содержимое</th>
-                  <th className="p-2 w-16 text-right">Действие</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {items.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50">
-                    <td className="p-2">
-                      {type === 'skills' && <span>{item}</span>}
+            <div className="space-y-2 max-h-60 overflow-y-auto border border-slate-100 rounded-lg p-2">
+              {items.map((item, idx) => {
+                const workImgList = item.images && Array.isArray(item.images) ? item.images : item.image ? [item.image] : [];
+                return (
+                  <div key={idx} className="flex items-center justify-between gap-3 p-2 bg-slate-50 rounded-lg border border-slate-100 min-w-0">
+                    <div className="flex-1 min-w-0">
+                      {type === 'skills' && <span className="text-xs text-slate-800 font-medium truncate block">{item}</span>}
                       {type === 'inventory' && (
                         <div className="flex items-center gap-3">
-                          {item.image && <img src={item.image} alt={item.name} className="w-10 h-10 object-cover rounded border" />}
-                          <div>
-                            <div className="font-bold text-slate-800">{item.name}</div>
-                            {item.desc && <div className="text-slate-500">{item.desc}</div>}
+                          {item.image && (
+                            <img src={item.image} alt={item.name} className="w-20 h-20 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-xs text-slate-800 truncate">{item.name}</div>
+                            {item.desc && <div className="text-slate-500 text-xs truncate">{item.desc}</div>}
                           </div>
                         </div>
                       )}
                       {type === 'preparations' && (
-                        <div>
-                          <div className="font-bold text-slate-800">{item.name}</div>
-                          {item.desc && <div className="text-slate-500">{item.desc}</div>}
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs text-slate-800 truncate">{item.name}</div>
+                          {item.desc && <div className="text-slate-500 text-xs truncate">{item.desc}</div>}
                         </div>
                       )}
                       {type === 'works' && (
-                        <div className="flex items-center gap-3">
-                          {item.image && <img src={item.image} alt={item.title} className="w-12 h-12 object-cover rounded border" />}
-                          <div className="font-bold text-slate-800">{item.title}</div>
+                        <div className="space-y-1 min-w-0">
+                          <div className="font-bold text-xs text-slate-800 truncate">{item.title}</div>
+                          {workImgList.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-1">
+                              {workImgList.map((img, i) => (
+                                <img key={i} src={img} alt={`${item.title} ${i+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                       {type === 'reviews' && (
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-slate-800">{item.author}</span>
-                            <span className="text-amber-600 font-bold">★ {item.rating}</span>
+                        <div className="min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-xs text-slate-800 truncate">{item.author}</span>
+                            <span className="text-amber-600 font-bold text-xs flex-shrink-0">★ {item.rating}</span>
                           </div>
-                          <div className="text-slate-600 mt-1">{item.text}</div>
+                          <div className="text-slate-600 text-xs mt-0.5 line-clamp-2">{item.text}</div>
                         </div>
                       )}
-                    </td>
-                    <td className="p-2 text-right">
-                      <button
-                        onClick={() => handleDeleteItem(idx)}
-                        className="py-1 px-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded font-semibold text-xs"
-                      >
-                        Удалить
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteItem(idx)}
+                      className="py-1 px-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg font-semibold text-xs flex-shrink-0 transition-colors"
+                    >
+                      Удалить
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
@@ -210,7 +220,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
               placeholder="Название навыка (например: Обрезка яблонь)"
               value={skillText}
               onChange={(e) => setSkillText(e.target.value)}
-              className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+              className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
             />
           )}
 
@@ -221,22 +231,22 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 placeholder="Название инструмента (например: Кусторез)"
                 value={invName}
                 onChange={(e) => setInvName(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <input
                 type="text"
                 placeholder="Описание (опционально)"
                 value={invDesc}
                 onChange={(e) => setInvDesc(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <div className="flex items-center gap-2">
-                {invImage && <img src={invImage} alt="Превью" className="w-8 h-8 object-cover rounded border" />}
+                {invImage && <img src={invImage} alt="Превью" className="w-20 h-20 object-cover rounded-lg border border-slate-200" />}
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => handleFileUpload(e, setInvImage)}
-                  className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700"
+                  onChange={(e) => handleFileUpload(e, (urls) => setInvImage(urls[0]))}
+                  className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
                 />
               </div>
             </div>
@@ -249,14 +259,14 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 placeholder="Название препарата (например: Бордоская смесь)"
                 value={prepName}
                 onChange={(e) => setPrepName(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <input
                 type="text"
                 placeholder="Описание / Назначение"
                 value={prepDesc}
                 onChange={(e) => setPrepDesc(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
           )}
@@ -268,15 +278,22 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 placeholder="Название/Заголовок работы"
                 value={workTitle}
                 onChange={(e) => setWorkTitle(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
-              <div className="flex items-center gap-2">
-                {workImage && <img src={workImage} alt="Превью" className="w-8 h-8 object-cover rounded border" />}
+              <div className="space-y-2">
+                {workImages.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {workImages.map((img, i) => (
+                      <img key={i} src={img} alt={`Предпросмотр ${i+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                    ))}
+                  </div>
+                )}
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => handleFileUpload(e, setWorkImage)}
-                  className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700"
+                  multiple
+                  onChange={(e) => handleFileUpload(e, (urls) => setWorkImages([...workImages, ...urls]))}
+                  className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
                 />
               </div>
             </div>
@@ -290,7 +307,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                   placeholder="Автор (например: Мария В.)"
                   value={revAuthor}
                   onChange={(e) => setRevAuthor(e.target.value)}
-                  className="border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                  className="border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
                 <input
                   type="number"
@@ -300,7 +317,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                   placeholder="Оценка (1-5)"
                   value={revRating}
                   onChange={(e) => setRevRating(e.target.value)}
-                  className="border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                  className="border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
               <textarea
@@ -308,7 +325,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 value={revText}
                 onChange={(e) => setRevText(e.target.value)}
                 rows={2}
-                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
           )}
@@ -316,9 +333,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
           <button
             type="submit"
             disabled={uploading}
-            className="py-1.5 px-3 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg transition-all"
+            className="py-1.5 px-3 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-lg transition-all disabled:opacity-50"
           >
-            + Добавить
+            {uploading ? 'Загрузка...' : '+ Добавить'}
           </button>
         </form>
 
@@ -331,7 +348,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
           </button>
           <button
             onClick={handleSaveAll}
-            className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold"
+            className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm"
           >
             Сохранить всё
           </button>
