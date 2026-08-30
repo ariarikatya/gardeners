@@ -70,7 +70,7 @@ export async function DELETE(req) {
     if (webLead.amoDealId) {
       console.log('🗑️ [DELETE WEBLEAD] Отправляю DELETE в amoCRM для сделки:', webLead.amoDealId);
       try {
-        // ✅ ПРАВИЛЬНЫЙ СПОСОБ для amoCRM v4: 
+        // ✅ ЕДИНСТВЕННЫЙ ПРАВИЛЬНЫЙ СПОСОБ для amoCRM v4: 
         // Метод DELETE на /api/v4/leads с массивом ID в ТЕЛЕ (body) запроса
         await amoApi.apiRequest('/api/v4/leads', {
           method: 'DELETE',
