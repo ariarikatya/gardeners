@@ -66,22 +66,26 @@ export async function DELETE(req) {
 
     console.log('🗑️ [DELETE WEBLEAD] Найденная заявка, amoDealId:', webLead.amoDealId || 'НЕ УКАЗАН');
 
-    // Если есть amoDealId, удаляем сделку из amoCRM
+    // Если есть amoDealId, мы НЕ можем удалить сделку из amoCRM (API возвращает 405, так как удаление запрещено).
+    // Вместо этого мы переводим её в отказной статус и добавляем примечание.
     if (webLead.amoDealId) {
-      console.log('🗑️ [DELETE WEBLEAD] Отправляю DELETE в amoCRM для сделки:', webLead.amoDealId);
+      console.log('🗑️ [DELETE WEBLEAD] amoCRM API не поддерживает удаление сделок. Переводим в отказной статус...');
       try {
-        // ✅ ЕДИНСТВЕННЫЙ ПРАВИЛЬНЫЙ СПОСОБ для amoCRM v4: 
-        // Метод DELETE на /api/v4/leads с массивом ID в ТЕЛЕ (body) запроса
-        await amoApi.apiRequest('/api/v4/leads', {
-          method: 'DELETE',
-          body: JSON.stringify([{ id: Number(webLead.amoDealId) }])
-        });
-        console.log('✅ [DELETE WEBLEAD] Успешно удалено из amoCRM');
+        // Используем нашу функцию updateLeadStage с action='refusal'
+        // Она автоматически переведет сделку в нужный этап (например, "На проверку" или "Отказные") 
+        // и добавит примечание об удалении.
+        await amoApi.updateLeadStage(
+          webLead.amoDealId, 
+          webLead.serviceName || 'Удаленная заявка', 
+          'refusal', 
+          'Заявка удалена диспетчером из системы'
+        );
+        console.log('✅ [DELETE WEBLEAD] Статус сделки в amoCRM успешно изменен на отказной');
       } catch (err) {
-        console.error('❌ [DELETE WEBLEAD] Ошибка при удалении из amoCRM:', err.message, err.body || err);
+        console.error('❌ [DELETE WEBLEAD] Ошибка при изменении статуса в amoCRM:', err.message, err.body || err);
       }
     } else {
-      console.log('⚠️ [DELETE WEBLEAD] amoDealId не указан, пропускаем удаление из amoCRM');
+      console.log('⚠️ [DELETE WEBLEAD] amoDealId не указан, пропускаем обновление в amoCRM');
     }
 
     // Удаляем из нашей БД
