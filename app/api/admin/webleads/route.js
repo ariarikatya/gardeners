@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verifyToken } from '@/lib/jwt';
+import amoApi from '@/lib/amoApi';
 
 const prisma = new PrismaClient();
 
@@ -51,7 +52,42 @@ export async function PUT(req) {
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id } = await req.json();
-  await prisma.webLead.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  try {
+    const { id } = await req.json();
+    console.log('🗑️ [DELETE WEBLEAD] Запрос на удаление заявки ID:', id);
+
+    // Ищем заявку, чтобы узнать amoDealId
+    const webLead = await prisma.webLead.findUnique({ where: { id } });
+
+    if (!webLead) {
+      console.log('⚠️ [DELETE WEBLEAD] Заявка не найдена в БД');
+      return NextResponse.json({ error: 'WebLead not found' }, { status: 404 });
+    }
+
+    console.log('🗑️ [DELETE WEBLEAD] Найденная заявка, amoDealId:', webLead.amoDealId || 'НЕ УКАЗАН');
+
+    // Если есть amoDealId, удаляем сделку из amoCRM
+    if (webLead.amoDealId) {
+      console.log('🗑️ [DELETE WEBLEAD] Отправляю DELETE в amoCRM для сделки:', webLead.amoDealId);
+      try {
+        await amoApi.apiRequest(`/api/v4/leads/${webLead.amoDealId}`, {
+          method: 'DELETE'
+        });
+        console.log('✅ [DELETE WEBLEAD] Успешно удалено из amoCRM');
+      } catch (err) {
+        console.error('❌ [DELETE WEBLEAD] Ошибка при удалении из amoCRM:', err.message, err.body);
+      }
+    } else {
+      console.log('⚠️ [DELETE WEBLEAD] amoDealId не указан, пропускаем удаление из amoCRM');
+    }
+
+    // Удаляем из нашей БД
+    await prisma.webLead.delete({ where: { id } });
+    console.log('✅ [DELETE WEBLEAD] Заявка удалена из базы данных');
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('💥 [DELETE WEBLEAD] Критическая ошибка:', error);
+    return NextResponse.json({ error: 'Failed to delete weblead' }, { status: 500 });
+  }
 }
