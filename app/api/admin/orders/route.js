@@ -353,40 +353,57 @@ export async function PUT(req) {
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const body = await req.json();
-  const { id } = body;
-  console.log('========== НАЧАЛО ОБРАБОТКИ ЗАКАЗА ==========');
-  console.log('1. Метод: DELETE');
-  console.log('2. Тело запроса:', JSON.stringify(body, null, 2));
-
   try {
-    console.log('3. Ищу заказ в базе...');
-    const existingOrder = await prisma.order.findUnique({
-      where: { id },
-      include: { service: true }
-    });
-    console.log('4. Найденный заказ:', JSON.stringify(existingOrder, null, 2));
-    console.log('5. amoDealId из базы:', existingOrder?.amoDealId);
-    console.log('6. serviceName:', existingOrder?.service?.name);
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
 
-    if (existingOrder && existingOrder.amoDealId) {
-      console.log('🗑️ УДАЛЯЮ ИЗ AMOCRM:', existingOrder.amoDealId);
+    if (!id) {
       try {
-        await amoApi.apiRequest(`/api/v4/leads/${existingOrder.amoDealId}`, { method: 'DELETE' });
-        console.log('✅ Удалено из amoCRM:', existingOrder.amoDealId);
-      } catch (error) {
-        console.error('❌ Ошибка удаления из amoCRM:', error.message);
+        const body = await req.json();
+        id = body.id;
+      } catch (e) {
+        // body might be empty
       }
+    }
+
+    if (!id) {
+      return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
+    }
+
+    const order = await prisma.order.findUnique({
+      where: { id }
+    });
+
+    if (!order) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    console.log(`🗑️ УДАЛЕНИЕ ЗАКАЗА ${id}`);
+    console.log(`amoDealId: ${order.amoDealId || 'не указан'}`);
+
+    if (order.amoDealId) {
+      try {
+        console.log(`🔄 Удаляю сделку ${order.amoDealId} из amoCRM...`);
+        await amoApi.apiRequest(`/api/v4/leads/${order.amoDealId}`, {
+          method: 'DELETE'
+        });
+        console.log(`✅ Сделка ${order.amoDealId} удалена из amoCRM`);
+      } catch (error) {
+        console.error(`❌ Ошибка удаления из amoCRM:`, error.message);
+      }
+    } else {
+      console.log('⚠️ amoDealId не указан, пропускаем удаление из amoCRM');
     }
 
     await prisma.order.delete({
       where: { id }
     });
-    console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА ==========');
-    return NextResponse.json({ success: true, deleted: true });
-  } catch (e) {
-    console.error('Ошибка удаления заказа:', e);
-    console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА (ОШИБКА) ==========');
-    return NextResponse.json({ error: 'Не удалось удалить заказ' }, { status: 400 });
+
+    console.log(`✅ Заказ ${id} удален из базы`);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('❌ Ошибка удаления заказа:', error);
+    return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 });
   }
 }
