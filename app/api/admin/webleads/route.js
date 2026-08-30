@@ -70,12 +70,14 @@ export async function DELETE(req) {
     if (webLead.amoDealId) {
       console.log('🗑️ [DELETE WEBLEAD] Отправляю DELETE в amoCRM для сделки:', webLead.amoDealId);
       try {
-        await amoApi.apiRequest(`/api/v4/leads/${webLead.amoDealId}`, {
-          method: 'DELETE'
+        // В amoCRM v4 удаление происходит через DELETE /api/v4/leads с телом [{ id: ... }]
+        await amoApi.apiRequest('/api/v4/leads', {
+          method: 'DELETE',
+          body: JSON.stringify([{ id: Number(webLead.amoDealId) }])
         });
         console.log('✅ [DELETE WEBLEAD] Успешно удалено из amoCRM');
       } catch (err) {
-        console.error('❌ [DELETE WEBLEAD] Ошибка при удалении из amoCRM:', err.message, err.body);
+        console.error('❌ [DELETE WEBLEAD] Ошибка при удалении из amoCRM:', err.message, err.body || err);
       }
     } else {
       console.log('⚠️ [DELETE WEBLEAD] amoDealId не указан, пропускаем удаление из amoCRM');
