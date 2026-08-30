@@ -447,18 +447,18 @@ export default function AdminDashboard() {
     if (!selectedOrder) return;
     if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
 
-    const res = await fetch('/api/admin/orders', {
+    console.log('🖱️ [FRONTEND] Вызываю удаление заказа ID:', selectedOrder.id);
+    const res = await fetch(`/api/admin/orders?id=${selectedOrder.id}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: selectedOrder.id })
     });
+    const responseText = await res.text();
+    console.log('🖱️ [FRONTEND] Ответ сервера:', res.status, responseText);
 
     if (res.ok) {
       setShowOrderModal(false);
       fetchData();
     } else {
-      const data = await res.json();
-      alert(data.error);
+      alert('Ошибка удаления: ' + responseText);
     }
   };
 
