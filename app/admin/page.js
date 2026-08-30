@@ -768,7 +768,7 @@ export default function AdminDashboard() {
             </Link>
           )}
           <div className="flex items-center gap-1 bg-emerald-800/50 rounded-lg px-2 py-1">
-            <span className="text-xs font-medium text-emerald-100">📊 Экспорт:</span>
+            <span className="text-xs font-medium text-emerald-100">📊 Экспорт в Excel:</span>
             <select
               value={exportPeriod}
               onChange={e => {
