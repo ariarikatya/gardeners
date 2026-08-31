@@ -27,12 +27,13 @@ export async function GET(req) {
   }
 
   try {
-    // 1. Получаем всех садовников
     let gardeners = await prisma.gardener.findMany({ include: { services: true } });
     console.log('👨‍🌾 [FREE-SLOTS] Всего садовников в БД:', gardeners.length);
 
-    // 2. Фильтрация (ИСПРАВЛЕНО: приведение к строке для надежного сравнения)
     if (gardenerId) {
+      console.log('🔍 [FREE-SLOTS] Ищем gardenerId:', gardenerId, 'Тип:', typeof gardenerId);
+      console.log('🔍 [FREE-SLOTS] Реальные ID садовников в БД:', gardeners.map(g => g.id));
+      
       gardeners = gardeners.filter((g) => String(g.id) === String(gardenerId));
       console.log('👨‍🌾 [FREE-SLOTS] Садовников после фильтра по gardenerId:', gardeners.length);
     } else if (serviceId) {
@@ -41,35 +42,24 @@ export async function GET(req) {
     }
 
     if (gardeners.length === 0) {
-      console.log('⚠️ [FREE-SLOTS] Не найдено ни одного садовника после фильтрации! Проверьте serviceId/gardenerId.');
+      console.log('⚠️ [FREE-SLOTS] Не найдено ни одного садовника после фильтрации!');
       return NextResponse.json({ freeSlots: [] }, { headers: CORS_HEADERS });
     }
 
-    // 3. Даты для запроса (безопасный способ, чтобы избежать сдвигов из-за часовых поясов в Prisma)
-    // Явно указываем UTC время начала и конца дня
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
-    console.log('🗓️ [FREE-SLOTS] Диапазон дат для поиска в БД:', { 
-      startDate: startDate.toISOString(), 
-      endDate: endDate.toISOString() 
-    });
 
-    // 4. Ищем заказы и выходные
     const orders = await prisma.order.findMany({
       where: {
         date: { gte: startDate, lte: endDate },
-        // ВАЖНО: Убедитесь, что в вашей базе данных статусы пишутся ИМЕННО так, без буквы 'ё' и лишних пробелов!
-        status: { notIn: ['Отменен', 'Отказ'] }, 
+        status: { notIn: ['Отменен', 'Отказ'] },
       },
     });
-    console.log('📦 [FREE-SLOTS] Найдено "занятых" заказов в этом диапазоне:', orders.length);
 
     const dayOffs = await prisma.dayOff.findMany({
       where: { date: { gte: startDate, lte: endDate } },
     });
-    console.log('🏖️ [FREE-SLOTS] Найдено записей "Выходной" в этом диапазоне:', dayOffs.length);
 
-    // 5. Генерация свободных слотов
     const freeSlots = [];
     let current = new Date(`${start}T00:00:00.000Z`);
     const stop = new Date(`${end}T00:00:00.000Z`);
@@ -90,8 +80,6 @@ export async function GET(req) {
     }
 
     console.log('✅ [FREE-SLOTS] Итоговое количество свободных слотов:', freeSlots.length);
-    // console.log('Сами слоты:', freeSlots); // Раскомментируйте, если нужно увидеть полный список в консоли
-
     return NextResponse.json({ freeSlots }, { headers: CORS_HEADERS });
   } catch (e) {
     console.error('❌ [FREE-SLOTS] Критическая ошибка сервера:', e);
