@@ -31,20 +31,16 @@ export async function GET(req) {
     console.log('👨‍🌾 [FREE-SLOTS] Всего садовников в БД:', gardeners.length);
 
     if (gardenerId) {
-      console.log('🔍 [FREE-SLOTS] Ищем gardenerId:', gardenerId, 'Тип:', typeof gardenerId);
-      console.log('🔍 [FREE-SLOTS] Реальные ID садовников в БД:', gardeners.map(g => g.id));
-      
       gardeners = gardeners.filter((g) => String(g.id) === String(gardenerId));
-      console.log('👨‍🌾 [FREE-SLOTS] Садовников после фильтра по gardenerId:', gardeners.length);
     } else if (serviceId) {
       gardeners = gardeners.filter((g) => g.services.some((s) => String(s.id) === String(serviceId)));
-      console.log('👨‍🌾 [FREE-SLOTS] Садовников после фильтра по serviceId:', gardeners.length);
     }
 
     if (gardeners.length === 0) {
-      console.log('⚠️ [FREE-SLOTS] Не найдено ни одного садовника после фильтрации!');
       return NextResponse.json({ freeSlots: [] }, { headers: CORS_HEADERS });
     }
+
+    console.log(' [FREE-SLOTS] Садовников для проверки:', gardeners.map(g => ({ name: g.name, id: g.id })));
 
     const startDate = new Date(`${start}T00:00:00.000Z`);
     const endDate = new Date(`${end}T23:59:59.999Z`);
@@ -60,6 +56,9 @@ export async function GET(req) {
       where: { date: { gte: startDate, lte: endDate } },
     });
 
+    console.log('📦 [FREE-SLOTS] Найдено заказов в диапазоне:', orders.length);
+    console.log('🏖️ [FREE-SLOTS] Найдено выходных в диапазоне:', dayOffs.length);
+
     const freeSlots = [];
     let current = new Date(`${start}T00:00:00.000Z`);
     const stop = new Date(`${end}T00:00:00.000Z`);
@@ -68,10 +67,33 @@ export async function GET(req) {
       const dateStr = current.toISOString().split('T')[0];
 
       gardeners.forEach((g) => {
-        const isBusy = orders.some((o) => o.gardenerId === g.id && o.date.toISOString().split('T')[0] === dateStr);
-        const isDayOff = dayOffs.some((d) => d.gardenerId === g.id && d.date.toISOString().split('T')[0] === dateStr);
+        const busyOrder = orders.find((o) => {
+          const matchGardener = o.gardenerId === g.id;
+          const orderDate = o.date.toISOString().split('T')[0];
+          const matchDate = orderDate === dateStr;
+          return matchGardener && matchDate;
+        });
 
-        if (!isBusy && !isDayOff) {
+        const dayOff = dayOffs.find((d) => {
+          const matchGardener = d.gardenerId === g.id;
+          const offDate = d.date.toISOString().split('T')[0];
+          const matchDate = offDate === dateStr;
+          return matchGardener && matchDate;
+        });
+
+        const isBusy = !!busyOrder;
+        const isDayOff = !!dayOff;
+
+        // 🚨 ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ ДЛЯ КАЖДОГО САДОВНИКА
+        if (isBusy || isDayOff) {
+          console.log(`❌ [FREE-SLOTS] ${g.name} (${g.id}) ЗАНЯТ на ${dateStr}:`, {
+            reason: isBusy ? 'ЗАКАЗ' : 'ВЫХОДНОЙ',
+            orderId: busyOrder?.id || null,
+            orderStatus: busyOrder?.status || null,
+            dayOffId: dayOff?.id || null
+          });
+        } else {
+          console.log(`✅ [FREE-SLOTS] ${g.name} (${g.id}) СВОБОДЕН на ${dateStr}`);
           freeSlots.push({ date: dateStr, gardenerId: g.id, gardenerName: g.name });
         }
       });
