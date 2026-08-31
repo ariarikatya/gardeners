@@ -31,12 +31,12 @@ export async function GET(req) {
     let gardeners = await prisma.gardener.findMany({ include: { services: true } });
     console.log('👨‍🌾 [FREE-SLOTS] Всего садовников в БД:', gardeners.length);
 
-    // 2. Фильтрация
+    // 2. Фильтрация (ИСПРАВЛЕНО: приведение к строке для надежного сравнения)
     if (gardenerId) {
-      gardeners = gardeners.filter((g) => g.id === gardenerId);
+      gardeners = gardeners.filter((g) => String(g.id) === String(gardenerId));
       console.log('👨‍🌾 [FREE-SLOTS] Садовников после фильтра по gardenerId:', gardeners.length);
     } else if (serviceId) {
-      gardeners = gardeners.filter((g) => g.services.some((s) => s.id === serviceId));
+      gardeners = gardeners.filter((g) => g.services.some((s) => String(s.id) === String(serviceId)));
       console.log('👨‍🌾 [FREE-SLOTS] Садовников после фильтра по serviceId:', gardeners.length);
     }
 
