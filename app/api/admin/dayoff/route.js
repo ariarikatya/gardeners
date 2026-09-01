@@ -14,7 +14,18 @@ async function checkAdmin(req) {
 export async function GET(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const dayOffs = await prisma.dayOff.findMany();
+  const { searchParams } = new URL(req.url);
+  const startParam = searchParams.get('start');
+  const endParam = searchParams.get('end');
+
+  const where = {};
+  if (startParam || endParam) {
+    where.date = {};
+    if (startParam) where.date.gte = new Date(startParam);
+    if (endParam) where.date.lte = new Date(endParam);
+  }
+
+  const dayOffs = await prisma.dayOff.findMany({ where });
   return NextResponse.json({ dayOffs });
 }
 
