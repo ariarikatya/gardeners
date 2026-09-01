@@ -96,7 +96,8 @@ export default function AdminDashboard() {
   const [exportPeriod, setExportPeriod] = useState('all');
   const [exportCustomStart, setExportCustomStart] = useState('');
   const [exportCustomEnd, setExportCustomEnd] = useState('');
-  const [calendarRange, setCalendarRange] = useState('today'); // 'today' | 'month' | 'year' | 'all'
+  const [currentMonth, setCurrentMonth] = useState(() => new Date());
+  const [monthLoading, setMonthLoading] = useState(false);
   const [tableScale, setTableScale] = useState(1);
 
   // Добавление / редактирование садовника
@@ -126,34 +127,33 @@ export default function AdminDashboard() {
   const [longPressInfo, setLongPressInfo] = useState(null);
   const [longPressTimer, setLongPressTimer] = useState(null);
 
-  // Генерация дат для сетки календаря по выбранному диапазону
+  // Генерация дат для сетки календаря на текущий выбранный месяц
   const dates = [];
-  const now = new Date();
-  if (calendarRange === 'today') {
-    for (let i = 0; i < 30; i++) {
-      const date = new Date(now);
-      date.setDate(now.getDate() + i);
-      dates.push(date);
-    }
-  } else {
-    const start = calendarRange === 'month'
-      ? new Date(now.getFullYear(), now.getMonth(), 1)
-      : calendarRange === 'year'
-        ? new Date(now.getFullYear(), 0, 1)
-        : orders.length > 0
-          ? new Date(Math.min(...orders.map(order => new Date(order.date).getTime()), now.getTime()))
-          : new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = calendarRange === 'month'
-      ? new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      : calendarRange === 'year'
-        ? new Date(now.getFullYear(), 11, 31)
-        : orders.length > 0
-          ? new Date(Math.max(...orders.map(order => new Date(order.date).getTime()), now.getTime()))
-          : now;
-    for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
-      dates.push(new Date(cursor));
-    }
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day++) {
+    dates.push(new Date(year, month, day, 12, 0, 0, 0));
   }
+
+  const monthName = currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }).replace(/\s*г\.?$/i, '').toUpperCase();
+
+  const handlePrevMonth = () => {
+    setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
+  const handleToday = () => {
+    setCurrentMonth(new Date());
+  };
+
+  const now = new Date();
+  const maxAllowedMonth = new Date(now.getFullYear(), now.getMonth() + 3, 1);
+  const nextMonthCandidate = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+  const isNextDisabled = nextMonthCandidate > maxAllowedMonth;
 
   // Более длинный горизонт для поиска окна (данные уже загружены целиком, доп. запросов не нужно)
   const searchDates = [];
@@ -165,15 +165,21 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [currentMonth]);
 
   const fetchData = async () => {
     setLoading(true);
+    setMonthLoading(true);
     try {
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+      const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
       const [resG, resO, resD, resS, resW, resMe] = await Promise.all([
         fetch('/api/admin/gardeners'),
-        fetch('/api/admin/orders'),
-        fetch('/api/admin/dayoff'),
+        fetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        fetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         fetch('/api/admin/services'),
         fetch('/api/admin/webleads'),
         fetch('/api/auth/me')
@@ -199,6 +205,7 @@ export default function AdminDashboard() {
       console.error(e);
     } finally {
       setLoading(false);
+      setMonthLoading(false);
     }
   };
 
@@ -807,19 +814,11 @@ export default function AdminDashboard() {
             {syncing ? '...' : <>🔄 <span className="hidden sm:inline">Google </span>Таблицы</>}
           </button>
 
-          {/* Быстрые настройки отображения календаря */}
-          <div className="flex items-center gap-2">
-            <select value={calendarRange} onChange={e => setCalendarRange(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-500 bg-emerald-600 text-white">
-              <option value="today">С сегодня</option>
-              <option value="month">За месяц</option>
-              <option value="year">За год</option>
-              <option value="all">Все даты</option>
-            </select>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">-</button>
-              <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
-              <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">+</button>
-            </div>
+          {/* Масштаб таблицы */}
+          <div className="flex items-center gap-1">
+            <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">-</button>
+            <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
+            <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">+</button>
           </div>
 
         </div>
@@ -886,6 +885,49 @@ export default function AdminDashboard() {
         <main className="p-3 sm:p-6">
           {activeTab === 'calendar' && (
             <>
+              {/* Блок навигации по месяцам */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-all text-sm sm:text-base border border-slate-200"
+                    title="Предыдущий месяц"
+                  >
+                    ←
+                  </button>
+                  <div className="text-base sm:text-lg font-extrabold text-slate-800 tracking-wide min-w-[160px] text-center">
+                    {monthName}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    disabled={isNextDisabled}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 font-bold rounded-lg transition-all text-sm sm:text-base border border-slate-200"
+                    title={isNextDisabled ? 'Максимум 3 месяца вперед' : 'Следующий месяц'}
+                  >
+                    →
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleToday}
+                    className="ml-1 sm:ml-2 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg text-xs sm:text-sm border border-emerald-200 transition-all"
+                  >
+                    Сегодня
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold px-2.5 py-1 rounded-full">
+                    Заказов: {orders.length}
+                  </span>
+                  {monthLoading && (
+                    <span className="text-xs text-slate-400 animate-pulse font-medium">
+                      Загрузка...
+                    </span>
+                  )}
+                </div>
+              </div>
+
               {/* Поиск ближайшего окна под запрос клиента */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
                 <button
