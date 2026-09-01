@@ -37,7 +37,7 @@ export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt, callStatus } = await req.json();
+  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt, callStatus, portfolioPhotos } = await req.json();
 
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order || order.gardenerId !== payload.gardenerId) {
@@ -79,6 +79,57 @@ export async function PUT(req) {
     }
 
     data = { status: 'Выполнен', priceFact: amount, photoBefore: beforeVal, photoAfter: afterVal, photoAct: actVal };
+
+    // Обработка портфолио
+    if (Array.isArray(portfolioPhotos) && portfolioPhotos.length > 0) {
+      try {
+        const gardener = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
+        if (gardener) {
+          let existingWorks = [];
+          if (gardener.works) {
+            if (Array.isArray(gardener.works)) {
+              existingWorks = gardener.works;
+            } else if (typeof gardener.works === 'string') {
+              try { existingWorks = JSON.parse(gardener.works); } catch (e) { existingWorks = []; }
+            }
+          }
+
+          const targetTitle = order.address || 'Работа по заказу';
+          const existingWorkIndex = existingWorks.findIndex(w => w.title && w.title.trim() === targetTitle.trim());
+
+          if (existingWorkIndex !== -1) {
+            const currentWork = existingWorks[existingWorkIndex];
+            const currentImages = currentWork.images && Array.isArray(currentWork.images) ? currentWork.images : currentWork.image ? [currentWork.image] : [];
+            const mergedImages = [...currentImages];
+
+            portfolioPhotos.forEach(pUrl => {
+              if (pUrl && !mergedImages.includes(pUrl)) {
+                mergedImages.push(pUrl);
+              }
+            });
+
+            existingWorks[existingWorkIndex] = {
+              ...currentWork,
+              images: mergedImages,
+              image: mergedImages[0] || ''
+            };
+          } else {
+            existingWorks.push({
+              title: targetTitle.trim(),
+              images: portfolioPhotos,
+              image: portfolioPhotos[0] || ''
+            });
+          }
+
+          await prisma.gardener.update({
+            where: { id: payload.gardenerId },
+            data: { works: existingWorks }
+          });
+        }
+      } catch (err) {
+        console.error('Failed to update gardener works portfolio on order complete:', err);
+      }
+    }
   } else if (action === 'mark_card') {
     // gardener marked that he filled card
     data = { cardFilledAt: cardFilledAt ? new Date(cardFilledAt) : new Date() };

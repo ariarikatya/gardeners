@@ -84,6 +84,13 @@ export default function GardenerDashboard() {
   const [loadingAuction, setLoadingAuction] = useState(false);
   const [claimingId, setClaimingId] = useState(null);
 
+  // Портфолио садовника
+  const [myWorks, setMyWorks] = useState([]);
+  const [loadingWorks, setLoadingWorks] = useState(false);
+  const [savingWorks, setSavingWorks] = useState(false);
+  const [newWorkTitle, setNewWorkTitle] = useState('');
+  const [newWorkImages, setNewWorkImages] = useState([]);
+
   const fetchAuction = async () => {
     setLoadingAuction(true);
     try {
@@ -94,6 +101,43 @@ export default function GardenerDashboard() {
       console.error(e);
     } finally {
       setLoadingAuction(false);
+    }
+  };
+
+  const fetchProfile = async () => {
+    setLoadingWorks(true);
+    try {
+      const res = await fetch('/api/gardener/profile');
+      const data = await res.json();
+      if (res.ok && data.gardener) {
+        setMyWorks(data.gardener.works || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingWorks(false);
+    }
+  };
+
+  const handleSaveWorks = async (updatedWorks) => {
+    setSavingWorks(true);
+    try {
+      const res = await fetch('/api/gardener/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ works: updatedWorks })
+      });
+      const data = await res.json();
+      if (res.ok && data.gardener) {
+        const works = Array.isArray(data.gardener.works) ? data.gardener.works : (typeof data.gardener.works === 'string' ? JSON.parse(data.gardener.works) : []);
+        setMyWorks(works);
+      } else {
+        alert(data.error || 'Не удалось сохранить портфолио');
+      }
+    } catch (e) {
+      alert('Ошибка при сохранении портфолио');
+    } finally {
+      setSavingWorks(false);
     }
   };
 
@@ -129,6 +173,7 @@ export default function GardenerDashboard() {
   const [photoBeforeUrls, setPhotoBeforeUrls] = useState([]);
   const [photoAfterUrls, setPhotoAfterUrls] = useState([]);
   const [photoActUrls, setPhotoActUrls] = useState([]);
+  const [portfolioCheckedUrls, setPortfolioCheckedUrls] = useState([]);
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [submitting, setSubmitting] = useState(false);
 
@@ -141,6 +186,7 @@ export default function GardenerDashboard() {
 
   useEffect(() => {
     fetchOrders();
+    fetchProfile();
   }, []);
 
   const fetchOrders = async () => {
@@ -210,6 +256,7 @@ export default function GardenerDashboard() {
     setTransferDate('');
     setRefusalText('');
     setFactAmount('');
+    setPortfolioCheckedUrls([]);
     // initialize photo arrays/act from order (handle stored JSON arrays)
     try {
       const before = order.photoBefore ? (String(order.photoBefore).trim().startsWith('[') ? JSON.parse(order.photoBefore) : [order.photoBefore]) : [];
@@ -274,6 +321,14 @@ export default function GardenerDashboard() {
     }
   };
 
+  const togglePortfolioCheck = (url) => {
+    if (portfolioCheckedUrls.includes(url)) {
+      setPortfolioCheckedUrls(portfolioCheckedUrls.filter(u => u !== url));
+    } else {
+      setPortfolioCheckedUrls([...portfolioCheckedUrls, url]);
+    }
+  };
+
   const submitAction = async (e) => {
     e.preventDefault();
     if (!actionOrder) return;
@@ -293,6 +348,7 @@ export default function GardenerDashboard() {
       payload.photoBefore = photoBeforeUrls;
       payload.photoAfter = photoAfterUrls;
       payload.photoAct = photoActUrls;
+      payload.portfolioPhotos = portfolioCheckedUrls;
     }
 
     try {
@@ -303,7 +359,7 @@ export default function GardenerDashboard() {
       });
       if (res.ok) {
         closeAction();
-        fetchOrders();
+        await Promise.all([fetchOrders(), fetchProfile()]);
       } else {
         const data = await res.json();
         alert(data.error);
@@ -586,9 +642,9 @@ export default function GardenerDashboard() {
       </header>
 
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
-        <div className="flex gap-2 mb-4">
-          <button onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
-          <button onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+          <button onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
+          <button onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
             🔔 Аукцион
             {auctionOrders.length > 0 && (
               <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full font-bold">
@@ -596,8 +652,221 @@ export default function GardenerDashboard() {
               </span>
             )}
           </button>
-          <button onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
+          <button onClick={() => setActiveSection('portfolio')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'portfolio' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>🖼️ Портфолио</button>
+          <button onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
         </div>
+
+        {activeSection === 'portfolio' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xl font-bold text-emerald-900">Мои работы (портфолио)</h2>
+                {savingWorks && <span className="text-xs text-amber-600 font-medium">Сохранение...</span>}
+              </div>
+              <p className="text-xs text-slate-500 mb-4">
+                Здесь отображаются примеры ваших работ. Фото из отчётов по заказам (если отмечена галочка «Добавить в портфолио») автоматически попадают сюда.
+              </p>
+
+              {loadingWorks ? (
+                <div className="text-center text-slate-500 py-6">Загрузка портфолио...</div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Список существующих работ */}
+                  {myWorks.length === 0 ? (
+                    <div className="text-center text-slate-400 py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-xs">
+                      Портфолио пока пустое. Добавьте работу ниже или отмечайте фото при завершении заказа.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {myWorks.map((work, wIdx) => {
+                        const imgList = work.images && Array.isArray(work.images) ? work.images : work.image ? [work.image] : [];
+                        return (
+                          <div key={wIdx} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <input
+                                type="text"
+                                value={work.title || ''}
+                                onChange={(e) => {
+                                  const updated = myWorks.map((item, i) => i === wIdx ? { ...item, title: e.target.value } : item);
+                                  setMyWorks(updated);
+                                }}
+                                onBlur={() => handleSaveWorks(myWorks)}
+                                className="font-bold text-sm text-slate-800 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 w-full focus:ring-2 focus:ring-emerald-500 outline-none"
+                                placeholder="Название работы / адрес"
+                              />
+                              <button
+                                onClick={() => {
+                                  if (confirm('Удалить этой работу из портфолио?')) {
+                                    const updated = myWorks.filter((_, i) => i !== wIdx);
+                                    handleSaveWorks(updated);
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-xs rounded-lg transition-colors flex-shrink-0"
+                              >
+                                Удалить работа
+                              </button>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {imgList.map((imgUrl, pIdx) => (
+                                <div key={pIdx} className="relative group">
+                                  <img src={imgUrl} alt={`${work.title} ${pIdx+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                                  <button
+                                    onClick={() => {
+                                      const newImgs = imgList.filter((_, i) => i !== pIdx);
+                                      const updated = myWorks.map((item, i) => i === wIdx ? { ...item, images: newImgs, image: newImgs[0] || '' } : item);
+                                      handleSaveWorks(updated);
+                                    }}
+                                    className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center shadow font-bold"
+                                    title="Удалить фото"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+
+                              <label className="relative cursor-pointer flex flex-col items-center justify-center w-20 h-20 rounded-lg border border-dashed border-slate-300 bg-white hover:bg-slate-100 text-xs text-slate-500 text-center p-1">
+                                <span className="font-bold text-lg text-emerald-600">+</span>
+                                <span className="text-[10px]">Фото</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  onChange={async (e) => {
+                                    const files = Array.from(e.target.files || []);
+                                    if (!files.length) return;
+                                    setSavingWorks(true);
+                                    try {
+                                      const uploaded = [];
+                                      for (const f of files) {
+                                        const base64 = await new Promise((res, rej) => {
+                                          const reader = new FileReader();
+                                          reader.onloadend = () => res(reader.result.split(',')[1]);
+                                          reader.onerror = rej;
+                                          reader.readAsDataURL(f);
+                                        });
+                                        const res = await fetch('/api/upload-image', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ image: base64 })
+                                        });
+                                        const data = await res.json();
+                                        if (res.ok && data.url) uploaded.push(data.url);
+                                      }
+                                      if (uploaded.length > 0) {
+                                        const newImgs = [...imgList, ...uploaded];
+                                        const updated = myWorks.map((item, i) => i === wIdx ? { ...item, images: newImgs, image: newImgs[0] || '' } : item);
+                                        await handleSaveWorks(updated);
+                                      }
+                                    } catch (err) {
+                                      alert('Ошибка загрузки фото');
+                                    } finally {
+                                      setSavingWorks(false);
+                                      e.target.value = '';
+                                    }
+                                  }}
+                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Добавление новой работы вручную */}
+                  <div className="bg-emerald-50/60 p-4 rounded-xl border border-emerald-100 space-y-3">
+                    <h3 className="text-xs font-bold text-emerald-900 uppercase">Добавить новую работу</h3>
+                    <input
+                      type="text"
+                      placeholder="Название работы (например: Обрезка сада в Энгельсе)"
+                      value={newWorkTitle}
+                      onChange={(e) => setNewWorkTitle(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+
+                    {newWorkImages.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {newWorkImages.map((img, i) => (
+                          <div key={i} className="relative">
+                            <img src={img} alt="Предпросмотр" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <button
+                              type="button"
+                              onClick={() => setNewWorkImages(newWorkImages.filter((_, idx) => idx !== i))}
+                              className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <label className="cursor-pointer px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1">
+                        📷 Выбрать фото
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={async (e) => {
+                            const files = Array.from(e.target.files || []);
+                            if (!files.length) return;
+                            try {
+                              const uploaded = [];
+                              for (const f of files) {
+                                const base64 = await new Promise((res, rej) => {
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => res(reader.result.split(',')[1]);
+                                  reader.onerror = rej;
+                                  reader.readAsDataURL(f);
+                                });
+                                const res = await fetch('/api/upload-image', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ image: base64 })
+                                });
+                                const data = await res.json();
+                                if (res.ok && data.url) uploaded.push(data.url);
+                              }
+                              setNewWorkImages([...newWorkImages, ...uploaded]);
+                            } catch (err) {
+                              alert('Ошибка при загрузке фото');
+                            } finally {
+                              e.target.value = '';
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={savingWorks || !newWorkTitle.trim()}
+                        onClick={() => {
+                          if (!newWorkTitle.trim()) return;
+                          const newItem = {
+                            title: newWorkTitle.trim(),
+                            images: newWorkImages,
+                            image: newWorkImages[0] || ''
+                          };
+                          const updated = [...myWorks, newItem];
+                          handleSaveWorks(updated);
+                          setNewWorkTitle('');
+                          setNewWorkImages([]);
+                        }}
+                        className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                      >
+                        + Создать работу
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {activeSection === 'auction' && (
           <div className="space-y-4">
@@ -852,7 +1121,7 @@ export default function GardenerDashboard() {
       {/* Модалка действия: перенос / отказ / выполнено */}
       {actionOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-sm p-5 shadow-xl">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5 shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-bold text-slate-800 mb-3">
               {actionType === 'transfer' && 'Запросить перенос'}
               {actionType === 'refuse' && 'Отказаться от заказа'}
@@ -890,37 +1159,55 @@ export default function GardenerDashboard() {
                 <>
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «До»</label>
-                    <div className="flex gap-2 items-center mb-2">
+                    <div className="flex flex-wrap gap-2 items-center mb-2">
                       {photoBeforeUrls.map((u, idx) => (
-                        <div key={u} className="relative">
-                          <img src={u} alt={`До ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <button type="button" onClick={() => setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
+                        <div key={u} className="relative group">
+                          <img src={u} alt={`До ${idx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                          <button type="button" onClick={() => { setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx)); setPortfolioCheckedUrls(prev => prev.filter(x => x !== u)); }} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
+                          <label className="flex items-center gap-1 mt-1 bg-white/90 px-1 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={portfolioCheckedUrls.includes(u)}
+                              onChange={() => togglePortfolioCheck(u)}
+                              className="rounded text-emerald-600 focus:ring-0 w-3 h-3"
+                            />
+                            <span>В портфолио</span>
+                          </label>
                         </div>
                       ))}
-                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
                         {uploadingWhich === 'before' ? 'Загружаю...' : '📷 Добавить фото До'}
                         <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'before')} disabled={uploadingWhich === 'before'} />
                       </label>
                     </div>
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «После»</label>
-                    <div className="flex gap-2 items-center mb-2">
+                    <div className="flex flex-wrap gap-2 items-center mb-2">
                       {photoAfterUrls.map((u, idx) => (
-                        <div key={u} className="relative">
-                          <img src={u} alt={`После ${idx+1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" />
-                          <button type="button" onClick={() => setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
+                        <div key={u} className="relative group">
+                          <img src={u} alt={`После ${idx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                          <button type="button" onClick={() => { setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx)); setPortfolioCheckedUrls(prev => prev.filter(x => x !== u)); }} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
+                          <label className="flex items-center gap-1 mt-1 bg-white/90 px-1 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={portfolioCheckedUrls.includes(u)}
+                              onChange={() => togglePortfolioCheck(u)}
+                              className="rounded text-emerald-600 focus:ring-0 w-3 h-3"
+                            />
+                            <span>В портфолио</span>
+                          </label>
                         </div>
                       ))}
-                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
                         {uploadingWhich === 'after' ? 'Загружаю...' : '📷 Добавить фото После'}
                         <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'after')} disabled={uploadingWhich === 'after'} />
                       </label>
                     </div>
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
-                    <div className="flex gap-2 items-center mb-2">
-                      {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-14 h-14 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
-                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
+                    <div className="flex flex-wrap gap-2 items-center mb-2">
+                      {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
+                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
                         {uploadingWhich === 'act' ? 'Загружаю...' : '📷 Добавить фото акта'}
                         <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
                       </label>
