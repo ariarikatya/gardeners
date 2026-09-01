@@ -116,27 +116,26 @@ export async function POST(req) {
     }
 
     const newReview = {
+      id: 'rev_' + Math.random().toString(36).substr(2, 9),
       author: authorTrimmed,
       rating: ratingNum,
       text: textTrimmed,
+      status: 'pending',
       date: new Date().toISOString()
     };
 
     const updatedReviews = [...existingReviews, newReview];
-    const totalRatingSum = updatedReviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0);
-    const avgRating = Number((totalRatingSum / updatedReviews.length).toFixed(1));
 
+    // При добавлении статус pending — рейтинг и reviewsCount НЕ пересчитываются!
     await prisma.gardener.update({
       where: { id: gardenerId },
       data: {
-        reviews: updatedReviews,
-        rating: avgRating,
-        reviewsCount: updatedReviews.length
+        reviews: updatedReviews
       }
     });
 
     return NextResponse.json(
-      { success: true, message: 'Отзыв добавлен' },
+      { success: true, message: 'Спасибо! Ваш отзыв отправлен и появится после модерации.' },
       { headers: CORS_HEADERS }
     );
 

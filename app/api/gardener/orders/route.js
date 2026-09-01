@@ -114,10 +114,12 @@ export async function PUT(req) {
               image: mergedImages[0] || ''
             };
           } else {
+            // Исключить дубликаты из portfolioPhotos
+            const uniquePortfolioPhotos = Array.from(new Set(portfolioPhotos));
             existingWorks.push({
               title: targetTitle.trim(),
-              images: portfolioPhotos,
-              image: portfolioPhotos[0] || ''
+              images: uniquePortfolioPhotos,
+              image: uniquePortfolioPhotos[0] || ''
             });
           }
 
