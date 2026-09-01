@@ -84,6 +84,8 @@ export default function AdminDashboard() {
   const [webLeads, setWebLeads] = useState([]);
   const [hasAdminVk, setHasAdminVk] = useState(false);
   const [showAllLeads, setShowAllLeads] = useState(false);
+  const [lastLeadsUpdated, setLastLeadsUpdated] = useState(null);
+  const [newLeadIds, setNewLeadIds] = useState(new Set());
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -163,9 +165,62 @@ export default function AdminDashboard() {
     searchDates.push(d);
   }
 
+  const loadWebLeads = async (silent = false) => {
+    try {
+      const resW = await fetch('/api/admin/webleads');
+      if (resW.ok) {
+        const dataW = await resW.json();
+        const incomingLeads = dataW.webLeads || [];
+
+        setWebLeads(prevLeads => {
+          if (prevLeads.length > 0) {
+            const existingIds = new Set(prevLeads.map(l => l.id));
+            const newlyDiscovered = incomingLeads.filter(l => !existingIds.has(l.id)).map(l => l.id);
+            if (newlyDiscovered.length > 0) {
+              setNewLeadIds(prev => new Set([...prev, ...newlyDiscovered]));
+              setTimeout(() => {
+                setNewLeadIds(prev => {
+                  const next = new Set(prev);
+                  newlyDiscovered.forEach(id => next.delete(id));
+                  return next;
+                });
+              }, 6000);
+            }
+          }
+          return incomingLeads;
+        });
+
+        setHasAdminVk(Boolean(dataW.hasAdminVk));
+        setLastLeadsUpdated(new Date().toLocaleTimeString('ru-RU'));
+      }
+    } catch (e) {
+      console.error('Failed to load webLeads:', e);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [currentMonth]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadWebLeads(true);
+    }, 15000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        loadWebLeads(true);
+      }
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -176,12 +231,11 @@ export default function AdminDashboard() {
       const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
       const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
-      const [resG, resO, resD, resS, resW, resMe] = await Promise.all([
+      const [resG, resO, resD, resS, resMe] = await Promise.all([
         fetch('/api/admin/gardeners'),
         fetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         fetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         fetch('/api/admin/services'),
-        fetch('/api/admin/webleads'),
         fetch('/api/auth/me')
       ]);
       if (resMe.ok) {
@@ -192,15 +246,13 @@ export default function AdminDashboard() {
       const dataO = await resO.json();
       const dataD = await resD.json();
       const dataS = await resS.json();
-      const dataW = await resW.json();
       const allOrd = dataO.orders || [];
       setGardeners(dataG.gardeners || []);
       setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
       setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(dataD.dayOffs || []);
       setServices(dataS.services || []);
-      setWebLeads(dataW.webLeads || []);
-      setHasAdminVk(Boolean(dataW.hasAdminVk));
+      await loadWebLeads(true);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1576,7 +1628,14 @@ export default function AdminDashboard() {
                 </div>
               )}
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <h3 className="text-lg font-bold text-slate-700">Заявки с сайта</h3>
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-bold text-slate-700">Заявки с сайта</h3>
+                  {lastLeadsUpdated && (
+                    <span className="text-xs text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full font-medium">
+                      Обновлено: {lastLeadsUpdated}
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowAllLeads(v => !v)}
@@ -1597,7 +1656,7 @@ export default function AdminDashboard() {
                 ) : (
                 <div className="space-y-3">
                   {visibleLeads.map(lead => (
-                    <div key={lead.id} className={`p-4 rounded-lg border ${lead.status === 'Новая' ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50'}`}>
+                    <div key={lead.id} className={`p-4 rounded-lg border transition-all duration-500 ${newLeadIds.has(lead.id) ? 'border-emerald-400 bg-emerald-100 ring-2 ring-emerald-300 shadow-md' : lead.status === 'Новая' ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50'}`}>
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <div className="flex items-center gap-2">
