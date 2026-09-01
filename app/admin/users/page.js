@@ -526,14 +526,17 @@ export default function AdminUsersPage() {
             <tbody className="divide-y divide-slate-100">
               {gardeners.map((g) => {
                 const photo = g.photo || g.videoUrl || g.photoUrl;
-                const parseLen = (v) => {
-                  if (!v) return 0;
-                  if (Array.isArray(v)) return v.length;
+                const parseArray = (v) => {
+                  if (!v) return [];
+                  if (Array.isArray(v)) return v;
                   if (typeof v === 'string') {
-                    try { return JSON.parse(v).length; } catch (e) { return 0; }
+                    try { return JSON.parse(v); } catch (e) { return []; }
                   }
-                  return 0;
+                  return [];
                 };
+
+                const revs = parseArray(g.reviews);
+                const pendingCount = revs.filter(r => r && r.status === 'pending').length;
 
                 return (
                   <tr key={g.id} className="hover:bg-slate-50 align-middle">
@@ -570,9 +573,14 @@ export default function AdminUsersPage() {
                     <td className="p-2">
                       <button
                         onClick={() => setActiveModal({ gardener: g, type: 'reviews' })}
-                        className="py-1 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs border border-amber-200 whitespace-nowrap"
+                        className={`py-1 px-2 rounded-lg font-semibold text-xs border whitespace-nowrap flex items-center gap-1 ${pendingCount > 0 ? 'bg-amber-100 text-amber-900 border-amber-300 animate-pulse' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'}`}
                       >
-                        ★ {g.reviewsCount ?? parseLen(g.reviews)} отзывов
+                        <span>★ {g.reviewsCount ?? revs.filter(r => r && (r.status === 'approved' || !r.status)).length} отзывов</span>
+                        {pendingCount > 0 && (
+                          <span className="bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                            ⏳ {pendingCount}
+                          </span>
+                        )}
                       </button>
                     </td>
                     <td className="p-2">
@@ -580,7 +588,7 @@ export default function AdminUsersPage() {
                         onClick={() => setActiveModal({ gardener: g, type: 'skills' })}
                         className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
-                        Навыки ({parseLen(g.skills)})
+                        Навыки ({parseArray(g.skills).length})
                       </button>
                     </td>
                     <td className="p-2">
@@ -588,7 +596,7 @@ export default function AdminUsersPage() {
                         onClick={() => setActiveModal({ gardener: g, type: 'inventory' })}
                         className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
-                        Инвентарь ({parseLen(g.inventory)})
+                        Инвентарь ({parseArray(g.inventory).length})
                       </button>
                     </td>
                     <td className="p-2">
@@ -596,7 +604,7 @@ export default function AdminUsersPage() {
                         onClick={() => setActiveModal({ gardener: g, type: 'preparations' })}
                         className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
-                        Препараты ({parseLen(g.preparations)})
+                        Препараты ({parseArray(g.preparations).length})
                       </button>
                     </td>
                     <td className="p-2">
@@ -604,7 +612,7 @@ export default function AdminUsersPage() {
                         onClick={() => setActiveModal({ gardener: g, type: 'works' })}
                         className="py-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs whitespace-nowrap"
                       >
-                        Работы ({parseLen(g.works)})
+                        Работы ({parseArray(g.works).length})
                       </button>
                     </td>
                   </tr>

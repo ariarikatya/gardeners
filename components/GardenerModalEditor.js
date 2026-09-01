@@ -102,7 +102,14 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
       setWorkTitle(''); setWorkImages([]);
     } else if (type === 'reviews') {
       if (!revAuthor.trim() || !revText.trim()) return;
-      newItem = { author: revAuthor.trim(), text: revText.trim(), rating: parseFloat(revRating) || 5 };
+      newItem = {
+        id: 'rev_' + Math.random().toString(36).substr(2, 9),
+        author: revAuthor.trim(),
+        text: revText.trim(),
+        rating: parseFloat(revRating) || 5,
+        status: 'approved',
+        date: new Date().toISOString()
+      };
       setRevAuthor(''); setRevText(''); setRevRating(5);
     }
 
@@ -113,6 +120,14 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
 
   const handleDeleteItem = (index) => {
     setItems(items.filter((_, i) => i !== index));
+  };
+
+  const handleApproveReview = (index) => {
+    setItems(items.map((it, i) => i === index ? { ...it, status: 'approved' } : it));
+  };
+
+  const handleRejectReview = (index) => {
+    setItems(items.map((it, i) => i === index ? { ...it, status: 'rejected' } : it));
   };
 
   const handleUpdateWorkTitle = (index, newTitle) => {
@@ -148,19 +163,24 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
     }));
   };
 
-  const calculateRating = (revs) => {
-    if (!revs || revs.length === 0) return 4.5;
-    const sum = revs.reduce((acc, r) => acc + (parseFloat(r.rating) || 0), 0);
-    return Number((sum / revs.length).toFixed(1));
+  const calculateApprovedRating = (revs) => {
+    if (!revs || !Array.isArray(revs)) return { avgRating: 4.5, count: 0 };
+    const approved = revs.filter(r => r && (r.status === 'approved' || !r.status));
+    if (approved.length === 0) return { avgRating: 4.5, count: 0 };
+    const sum = approved.reduce((acc, r) => acc + (parseFloat(r.rating) || 0), 0);
+    return {
+      avgRating: Number((sum / approved.length).toFixed(1)),
+      count: approved.length
+    };
   };
 
   const handleSaveAll = async () => {
     if (type === 'reviews') {
-      const newRating = calculateRating(items);
+      const { avgRating, count } = calculateApprovedRating(items);
       await onSave(gardener.id, {
         reviews: items,
-        rating: newRating,
-        reviewsCount: items.length
+        rating: avgRating,
+        reviewsCount: count
       });
     } else {
       await onSave(gardener.id, { [type]: items });
@@ -285,18 +305,60 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                         <div className="min-w-0">
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-bold text-xs text-slate-800 truncate">{item.author}</span>
-                            <span className="text-amber-600 font-bold text-xs flex-shrink-0">★ {item.rating}</span>
+                            <div className="flex items-center gap-2">
+                              {item.status === 'pending' && (
+                                <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                  ⏳ ожидает модерации
+                                </span>
+                              )}
+                              {item.status === 'approved' && (
+                                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                                  ✓ одобрен
+                                </span>
+                              )}
+                              {item.status === 'rejected' && (
+                                <span className="text-[10px] font-semibold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                                  ✕ отклонён
+                                </span>
+                              )}
+                              <span className="text-amber-600 font-bold text-xs flex-shrink-0">★ {item.rating}</span>
+                            </div>
                           </div>
-                          <div className="text-slate-600 text-xs mt-0.5 line-clamp-2">{item.text}</div>
+                          <div className="text-slate-600 text-xs mt-1 leading-relaxed">{item.text}</div>
+                          {item.date && (
+                            <div className="text-[10px] text-slate-400 mt-1">
+                              {new Date(item.date).toLocaleDateString('ru-RU')}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleDeleteItem(idx)}
-                      className="py-1 px-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg font-semibold text-xs flex-shrink-0 transition-colors mt-0.5"
-                    >
-                      Удалить
-                    </button>
+
+                    <div className="flex flex-col gap-1 flex-shrink-0">
+                      {type === 'reviews' && item.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApproveReview(idx)}
+                            className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-xs transition-colors"
+                          >
+                            Одобрить
+                          </button>
+                          <button
+                            onClick={() => handleRejectReview(idx)}
+                            className="py-1 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs transition-colors"
+                          >
+                            Отклонить
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        onClick={() => handleDeleteItem(idx)}
+                        className="py-1 px-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg font-semibold text-xs transition-colors"
+                      >
+                        Удалить
+                      </button>
+                    </div>
                   </div>
                 );
               })}

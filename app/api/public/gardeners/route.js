@@ -35,7 +35,18 @@ export async function GET() {
         return fallback;
       };
 
-      const parsedReviews = parseJson(g.reviews);
+      const rawReviews = parseJson(g.reviews);
+      // Фильтруем: показываем ТОЛЬКО отзывы со status === 'approved' либо БЕЗ поля status (старые)
+      const approvedReviews = Array.isArray(rawReviews)
+        ? rawReviews.filter(r => r && (r.status === 'approved' || !r.status))
+        : [];
+
+      // Пересчитываем rating и reviewsCount исключительно по одобренным отзывам
+      const totalRatingSum = approvedReviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0);
+      const calculatedRating = approvedReviews.length > 0
+        ? Number((totalRatingSum / approvedReviews.length).toFixed(1))
+        : (g.rating ?? 4.5);
+
       const skillsList = g.skills ? parseJson(g.skills, serviceSkills) : serviceSkills;
 
       return {
@@ -47,12 +58,12 @@ export async function GET() {
         experience: 'Более 3 лет',
         status: 'Свободен',
         special: special,
-        rating: g.rating ?? 4.5,
-        reviewsCount: g.reviewsCount ?? (Array.isArray(parsedReviews) ? parsedReviews.length : 0),
+        rating: calculatedRating,
+        reviewsCount: approvedReviews.length,
         skills: skillsList,
         inventory: parseJson(g.inventory),
         preparations: parseJson(g.preparations),
-        reviews: parsedReviews,
+        reviews: approvedReviews,
         works: parseJson(g.works),
         companyExperience: '',
       };

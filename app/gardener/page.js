@@ -170,10 +170,12 @@ export default function GardenerDashboard() {
   const [transferDate, setTransferDate] = useState('');
   const [refusalText, setRefusalText] = useState('');
   const [factAmount, setFactAmount] = useState('');
-  const [photoBeforeUrls, setPhotoBeforeUrls] = useState([]);
-  const [photoAfterUrls, setPhotoAfterUrls] = useState([]);
+
+  // Храним объекты { id, url, inPortfolio } для независтмости
+  const [photoBeforeItems, setPhotoBeforeItems] = useState([]);
+  const [photoAfterItems, setPhotoAfterItems] = useState([]);
   const [photoActUrls, setPhotoActUrls] = useState([]);
-  const [portfolioCheckedUrls, setPortfolioCheckedUrls] = useState([]);
+
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [submitting, setSubmitting] = useState(false);
 
@@ -256,18 +258,42 @@ export default function GardenerDashboard() {
     setTransferDate('');
     setRefusalText('');
     setFactAmount('');
-    setPortfolioCheckedUrls([]);
-    // initialize photo arrays/act from order (handle stored JSON arrays)
+
+    // Инициализируем независимые массивы объектов с уникальными id
     try {
-      const before = order.photoBefore ? (String(order.photoBefore).trim().startsWith('[') ? JSON.parse(order.photoBefore) : [order.photoBefore]) : [];
-      const after = order.photoAfter ? (String(order.photoAfter).trim().startsWith('[') ? JSON.parse(order.photoAfter) : [order.photoAfter]) : [];
-      setPhotoBeforeUrls(before);
-      setPhotoAfterUrls(after);
-      const act = order.photoAct ? (String(order.photoAct).trim().startsWith('[') ? JSON.parse(order.photoAct) : [order.photoAct]) : [];
-      setPhotoActUrls(act);
+      const parseUrls = (val) => {
+        if (!val) return [];
+        if (Array.isArray(val)) return val;
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          if (trimmed.startsWith('[')) {
+            try { return JSON.parse(trimmed); } catch (e) { return [val]; }
+          }
+          return [val];
+        }
+        return [];
+      };
+
+      const beforeUrls = parseUrls(order.photoBefore);
+      const afterUrls = parseUrls(order.photoAfter);
+      const actUrls = parseUrls(order.photoAct);
+
+      setPhotoBeforeItems(beforeUrls.map(url => ({
+        id: 'before_' + Math.random().toString(36).substr(2, 9),
+        url,
+        inPortfolio: false
+      })));
+
+      setPhotoAfterItems(afterUrls.map(url => ({
+        id: 'after_' + Math.random().toString(36).substr(2, 9),
+        url,
+        inPortfolio: false
+      })));
+
+      setPhotoActUrls(actUrls);
     } catch (e) {
-      setPhotoBeforeUrls([]);
-      setPhotoAfterUrls([]);
+      setPhotoBeforeItems([]);
+      setPhotoAfterItems([]);
       setPhotoActUrls(order.photoAct ? [order.photoAct] : []);
     }
   };
@@ -310,9 +336,23 @@ export default function GardenerDashboard() {
         else alert('Ошибка при загрузке одного из файлов: ' + (data.error || ''));
       }
 
-      if (which === 'before') setPhotoBeforeUrls(prev => [...prev, ...uploaded]);
-      if (which === 'after') setPhotoAfterUrls(prev => [...prev, ...uploaded]);
-      if (which === 'act') setPhotoActUrls(prev => [...prev, ...uploaded]);
+      if (which === 'before') {
+        const newItems = uploaded.map(url => ({
+          id: 'before_' + Math.random().toString(36).substr(2, 9),
+          url,
+          inPortfolio: false
+        }));
+        setPhotoBeforeItems(prev => [...prev, ...newItems]);
+      } else if (which === 'after') {
+        const newItems = uploaded.map(url => ({
+          id: 'after_' + Math.random().toString(36).substr(2, 9),
+          url,
+          inPortfolio: false
+        }));
+        setPhotoAfterItems(prev => [...prev, ...newItems]);
+      } else if (which === 'act') {
+        setPhotoActUrls(prev => [...prev, ...uploaded]);
+      }
     } catch (err) {
       alert('Не удалось загрузить фото: ' + err.message);
     } finally {
@@ -321,19 +361,19 @@ export default function GardenerDashboard() {
     }
   };
 
-  const togglePortfolioCheck = (url) => {
-    if (portfolioCheckedUrls.includes(url)) {
-      setPortfolioCheckedUrls(portfolioCheckedUrls.filter(u => u !== url));
-    } else {
-      setPortfolioCheckedUrls([...portfolioCheckedUrls, url]);
-    }
+  const toggleBeforePortfolio = (id) => {
+    setPhotoBeforeItems(prev => prev.map(item => item.id === id ? { ...item, inPortfolio: !item.inPortfolio } : item));
+  };
+
+  const toggleAfterPortfolio = (id) => {
+    setPhotoAfterItems(prev => prev.map(item => item.id === id ? { ...item, inPortfolio: !item.inPortfolio } : item));
   };
 
   const submitAction = async (e) => {
     e.preventDefault();
     if (!actionOrder) return;
 
-    if (actionType === 'complete' && (photoBeforeUrls.length === 0 || photoAfterUrls.length === 0 || photoActUrls.length === 0)) {
+    if (actionType === 'complete' && (photoBeforeItems.length === 0 || photoAfterItems.length === 0 || photoActUrls.length === 0)) {
       alert('Прикрепите фото: минимум одно "до", одно "после" и акт/документ');
       return;
     }
@@ -344,11 +384,19 @@ export default function GardenerDashboard() {
     if (actionType === 'transfer') payload.transferRequestedDate = transferDate;
     if (actionType === 'refuse') payload.refusalReason = refusalText;
     if (actionType === 'complete') {
+      const beforeUrls = photoBeforeItems.map(item => item.url);
+      const afterUrls = photoAfterItems.map(item => item.url);
+
+      const selectedPortfolioUrls = [
+        ...photoBeforeItems.filter(item => item.inPortfolio).map(item => item.url),
+        ...photoAfterItems.filter(item => item.inPortfolio).map(item => item.url)
+      ];
+
       payload.priceFact = factAmount;
-      payload.photoBefore = photoBeforeUrls;
-      payload.photoAfter = photoAfterUrls;
+      payload.photoBefore = beforeUrls;
+      payload.photoAfter = afterUrls;
       payload.photoAct = photoActUrls;
-      payload.portfolioPhotos = portfolioCheckedUrls;
+      payload.portfolioPhotos = selectedPortfolioUrls;
     }
 
     try {
@@ -1160,15 +1208,23 @@ export default function GardenerDashboard() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «До»</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoBeforeUrls.map((u, idx) => (
-                        <div key={u} className="relative group">
-                          <img src={u} alt={`До ${idx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                          <button type="button" onClick={() => { setPhotoBeforeUrls(prev => prev.filter((x,i) => i !== idx)); setPortfolioCheckedUrls(prev => prev.filter(x => x !== u)); }} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
+                      {photoBeforeItems.map((item) => (
+                        <div key={item.id} className="relative group flex flex-col items-center">
+                          <div className="relative">
+                            <img src={item.url} alt="До" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <button
+                              type="button"
+                              onClick={() => setPhotoBeforeItems(prev => prev.filter(x => x.id !== item.id))}
+                              className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow text-slate-600 hover:text-slate-900"
+                            >
+                              ×
+                            </button>
+                          </div>
                           <label className="flex items-center gap-1 mt-1 bg-white/90 px-1 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={portfolioCheckedUrls.includes(u)}
-                              onChange={() => togglePortfolioCheck(u)}
+                              checked={item.inPortfolio}
+                              onChange={() => toggleBeforePortfolio(item.id)}
                               className="rounded text-emerald-600 focus:ring-0 w-3 h-3"
                             />
                             <span>В портфолио</span>
@@ -1183,15 +1239,23 @@ export default function GardenerDashboard() {
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «После»</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoAfterUrls.map((u, idx) => (
-                        <div key={u} className="relative group">
-                          <img src={u} alt={`После ${idx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                          <button type="button" onClick={() => { setPhotoAfterUrls(prev => prev.filter((x,i) => i !== idx)); setPortfolioCheckedUrls(prev => prev.filter(x => x !== u)); }} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow">×</button>
+                      {photoAfterItems.map((item) => (
+                        <div key={item.id} className="relative group flex flex-col items-center">
+                          <div className="relative">
+                            <img src={item.url} alt="После" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <button
+                              type="button"
+                              onClick={() => setPhotoAfterItems(prev => prev.filter(x => x.id !== item.id))}
+                              className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border shadow text-slate-600 hover:text-slate-900"
+                            >
+                              ×
+                            </button>
+                          </div>
                           <label className="flex items-center gap-1 mt-1 bg-white/90 px-1 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={portfolioCheckedUrls.includes(u)}
-                              onChange={() => togglePortfolioCheck(u)}
+                              checked={item.inPortfolio}
+                              onChange={() => toggleAfterPortfolio(item.id)}
                               className="rounded text-emerald-600 focus:ring-0 w-3 h-3"
                             />
                             <span>В портфолио</span>
