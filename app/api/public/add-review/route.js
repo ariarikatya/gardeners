@@ -9,53 +9,17 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-// In-memory rate limiting map: ip -> array of timestamps (ms)
-const rateLimitMap = new Map();
-
-function isRateLimited(ip) {
-  const now = Date.now();
-  const windowMs = 60 * 60 * 1000; // 1 час
-  const maxRequests = 3;
-  const cooldownMs = 60 * 1000; // 1 минута
-
-  let timestamps = rateLimitMap.get(ip) || [];
-  // Отфильтровать старые записи (старше 1 часа)
-  timestamps = timestamps.filter(t => now - t < windowMs);
-
-  if (timestamps.length >= maxRequests) {
-    return 'Превышен лимит отзывов (не более 3 в час). Попробуйте позже.';
-  }
-
-  const lastRequest = timestamps[timestamps.length - 1];
-  if (lastRequest && now - lastRequest < cooldownMs) {
-    return 'Отправлять отзывы можно не чаще, чем раз в минуту.';
-  }
-
-  timestamps.push(now);
-  rateLimitMap.set(ip, timestamps);
-  return null;
-}
-
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: CORS_HEADERS });
 }
 
 export async function POST(req) {
   try {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
-
-    const rateLimitError = isRateLimited(ip);
-    if (rateLimitError) {
-      return NextResponse.json(
-        { success: false, error: rateLimitError },
-        { status: 429, headers: CORS_HEADERS }
-      );
-    }
-
     let body;
     try {
       body = await req.json();
     } catch (e) {
+      console.error('Failed to parse JSON in add-review:', e);
       return NextResponse.json(
         { success: false, error: 'Некорректный JSON запрос' },
         { status: 400, headers: CORS_HEADERS }
@@ -72,9 +36,9 @@ export async function POST(req) {
     }
 
     const authorTrimmed = typeof author === 'string' ? author.trim() : '';
-    if (!authorTrimmed || authorTrimmed.length < 2 || authorTrimmed.length > 50) {
+    if (!authorTrimmed || authorTrimmed.length < 2 || authorTrimmed.length > 100) {
       return NextResponse.json(
-        { success: false, error: 'Имя автора должно содержать от 2 до 50 символов' },
+        { success: false, error: 'Имя автора должно содержать от 2 до 100 символов' },
         { status: 400, headers: CORS_HEADERS }
       );
     }
@@ -88,9 +52,9 @@ export async function POST(req) {
     }
 
     const textTrimmed = typeof text === 'string' ? text.trim() : '';
-    if (!textTrimmed || textTrimmed.length < 10 || textTrimmed.length > 1000) {
+    if (!textTrimmed || textTrimmed.length < 3 || textTrimmed.length > 1000) {
       return NextResponse.json(
-        { success: false, error: 'Текст отзыва должен содержать от 10 до 1000 символов' },
+        { success: false, error: 'Текст отзыва должен содержать от 3 до 1000 символов' },
         { status: 400, headers: CORS_HEADERS }
       );
     }
@@ -135,7 +99,7 @@ export async function POST(req) {
     });
 
     return NextResponse.json(
-      { success: true, message: 'Спасибо! Ваш отзыв отправлен и появится после модерации.' },
+      { success: true, message: 'Отзыв отправлен на модерацию' },
       { headers: CORS_HEADERS }
     );
 
