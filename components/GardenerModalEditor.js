@@ -24,6 +24,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
 
   const [prepName, setPrepName] = useState('');
   const [prepDesc, setPrepDesc] = useState('');
+  const [prepImage, setPrepImage] = useState('');
 
   const [workTitle, setWorkTitle] = useState('');
   const [workImages, setWorkImages] = useState([]); // array of URLs
@@ -89,12 +90,12 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
       setSkillText('');
     } else if (type === 'inventory') {
       if (!invName.trim()) return;
-      newItem = { name: invName.trim(), desc: invDesc.trim(), image: invImage };
+      newItem = { name: invName.trim(), desc: invDesc.trim(), image: invImage || null };
       setInvName(''); setInvDesc(''); setInvImage('');
     } else if (type === 'preparations') {
       if (!prepName.trim()) return;
-      newItem = { name: prepName.trim(), desc: prepDesc.trim() };
-      setPrepName(''); setPrepDesc('');
+      newItem = { name: prepName.trim(), desc: prepDesc.trim(), image: prepImage || null };
+      setPrepName(''); setPrepDesc(''); setPrepImage('');
     } else if (type === 'works') {
       if (!workTitle.trim()) return;
       newItem = { title: workTitle.trim(), images: workImages.length > 0 ? workImages : [], image: workImages[0] || '' };
@@ -112,6 +113,39 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
 
   const handleDeleteItem = (index) => {
     setItems(items.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateWorkTitle = (index, newTitle) => {
+    setItems(items.map((item, i) => {
+      if (i !== index) return item;
+      return { ...item, title: newTitle };
+    }));
+  };
+
+  const handleDeleteWorkPhoto = (itemIndex, photoIndex) => {
+    setItems(items.map((item, i) => {
+      if (i !== itemIndex) return item;
+      const currentImages = item.images && Array.isArray(item.images) ? item.images : item.image ? [item.image] : [];
+      const updatedImages = currentImages.filter((_, pIdx) => pIdx !== photoIndex);
+      return {
+        ...item,
+        images: updatedImages,
+        image: updatedImages[0] || ''
+      };
+    }));
+  };
+
+  const handleAddPhotosToWork = (itemIndex, newUrls) => {
+    setItems(items.map((item, i) => {
+      if (i !== itemIndex) return item;
+      const currentImages = item.images && Array.isArray(item.images) ? item.images : item.image ? [item.image] : [];
+      const updatedImages = [...currentImages, ...newUrls];
+      return {
+        ...item,
+        images: updatedImages,
+        image: updatedImages[0] || ''
+      };
+    }));
   };
 
   const calculateRating = (revs) => {
@@ -155,13 +189,27 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
               {items.map((item, idx) => {
                 const workImgList = item.images && Array.isArray(item.images) ? item.images : item.image ? [item.image] : [];
                 return (
-                  <div key={idx} className="flex items-center justify-between gap-3 p-2 bg-slate-50 rounded-lg border border-slate-100 min-w-0">
+                  <div key={idx} className="flex items-start justify-between gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100 min-w-0">
                     <div className="flex-1 min-w-0">
                       {type === 'skills' && <span className="text-xs text-slate-800 font-medium truncate block">{item}</span>}
+
                       {type === 'inventory' && (
                         <div className="flex items-center gap-3">
-                          {item.image && (
-                            <img src={item.image} alt={item.name} className="w-20 h-20 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                          {item.image ? (
+                            <div className="relative group">
+                              <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                              <button
+                                onClick={() => setItems(items.map((it, i) => i === idx ? { ...it, image: null } : it))}
+                                className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
+                                title="Удалить фото"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 bg-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
+                              Без фото
+                            </div>
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="font-bold text-xs text-slate-800 truncate">{item.name}</div>
@@ -169,24 +217,70 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                           </div>
                         </div>
                       )}
+
                       {type === 'preparations' && (
-                        <div className="min-w-0">
-                          <div className="font-bold text-xs text-slate-800 truncate">{item.name}</div>
-                          {item.desc && <div className="text-slate-500 text-xs truncate">{item.desc}</div>}
-                        </div>
-                      )}
-                      {type === 'works' && (
-                        <div className="space-y-1 min-w-0">
-                          <div className="font-bold text-xs text-slate-800 truncate">{item.title}</div>
-                          {workImgList.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-1">
-                              {workImgList.map((img, i) => (
-                                <img key={i} src={img} alt={`${item.title} ${i+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
-                              ))}
+                        <div className="flex items-center gap-3">
+                          {item.image ? (
+                            <div className="relative group">
+                              <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                              <button
+                                onClick={() => setItems(items.map((it, i) => i === idx ? { ...it, image: null } : it))}
+                                className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
+                                title="Удалить фото"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 bg-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">
+                              Без фото
                             </div>
                           )}
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-xs text-slate-800 truncate">{item.name}</div>
+                            {item.desc && <div className="text-slate-500 text-xs truncate">{item.desc}</div>}
+                          </div>
                         </div>
                       )}
+
+                      {type === 'works' && (
+                        <div className="space-y-2 min-w-0">
+                          <input
+                            type="text"
+                            value={item.title || ''}
+                            onChange={(e) => handleUpdateWorkTitle(idx, e.target.value)}
+                            className="w-full font-bold text-xs text-slate-800 border border-slate-200 rounded px-2 py-1 bg-white focus:ring-1 focus:ring-emerald-500 outline-none"
+                            placeholder="Название работы / адрес"
+                          />
+                          <div className="flex flex-wrap gap-2 items-center">
+                            {workImgList.map((img, photoIdx) => (
+                              <div key={photoIdx} className="relative group">
+                                <img src={img} alt={`${item.title} ${photoIdx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteWorkPhoto(idx, photoIdx)}
+                                  className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
+                                  title="Удалить это фото"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+
+                            <label className="relative cursor-pointer flex items-center justify-center w-16 h-16 rounded-lg border border-dashed border-slate-300 bg-white hover:bg-slate-100 text-[10px] text-slate-500 text-center p-1">
+                              + Фото
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                onChange={(e) => handleFileUpload(e, (urls) => handleAddPhotosToWork(idx, urls))}
+                                className="absolute inset-0 opacity-0 cursor-pointer"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
                       {type === 'reviews' && (
                         <div className="min-w-0">
                           <div className="flex items-center justify-between gap-2">
@@ -199,7 +293,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                     </div>
                     <button
                       onClick={() => handleDeleteItem(idx)}
-                      className="py-1 px-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg font-semibold text-xs flex-shrink-0 transition-colors"
+                      className="py-1 px-2.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg font-semibold text-xs flex-shrink-0 transition-colors mt-0.5"
                     >
                       Удалить
                     </button>
@@ -241,7 +335,12 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <div className="flex items-center gap-2">
-                {invImage && <img src={invImage} alt="Превью" className="w-20 h-20 object-cover rounded-lg border border-slate-200" />}
+                {invImage && (
+                  <div className="relative">
+                    <img src={invImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                    <button type="button" onClick={() => setInvImage('')} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
+                  </div>
+                )}
                 <input
                   type="file"
                   accept="image/*"
@@ -268,6 +367,20 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 onChange={(e) => setPrepDesc(e.target.value)}
                 className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
               />
+              <div className="flex items-center gap-2">
+                {prepImage && (
+                  <div className="relative">
+                    <img src={prepImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                    <button type="button" onClick={() => setPrepImage('')} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
+                  </div>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleFileUpload(e, (urls) => setPrepImage(urls[0]))}
+                  className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                />
+              </div>
             </div>
           )}
 
@@ -284,7 +397,10 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 {workImages.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {workImages.map((img, i) => (
-                      <img key={i} src={img} alt={`Предпросмотр ${i+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                      <div key={i} className="relative">
+                        <img src={img} alt={`Предпросмотр ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                        <button type="button" onClick={() => setWorkImages(workImages.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
+                      </div>
                     ))}
                   </div>
                 )}
