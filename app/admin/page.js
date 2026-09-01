@@ -99,6 +99,7 @@ export default function AdminDashboard() {
   const [exportCustomStart, setExportCustomStart] = useState('');
   const [exportCustomEnd, setExportCustomEnd] = useState('');
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
+  const [startFromToday, setStartFromToday] = useState(true);
   const [monthLoading, setMonthLoading] = useState(false);
   const [tableScale, setTableScale] = useState(1);
 
@@ -129,33 +130,52 @@ export default function AdminDashboard() {
   const [longPressInfo, setLongPressInfo] = useState(null);
   const [longPressTimer, setLongPressTimer] = useState(null);
 
-  // Генерация дат для сетки календаря на текущий выбранный месяц
+  // Генерация дат для сетки календаря
   const dates = [];
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  for (let day = 1; day <= daysInMonth; day++) {
+  const now = new Date();
+
+  let startDay = 1;
+  if (startFromToday && now.getFullYear() === year && now.getMonth() === month) {
+    startDay = now.getDate();
+  }
+
+  for (let day = startDay; day <= daysInMonth; day++) {
     dates.push(new Date(year, month, day, 12, 0, 0, 0));
   }
 
-  const monthName = currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }).replace(/\s*г\.?$/i, '').toUpperCase();
+  const handlePrevYear = () => {
+    setCurrentMonth(prev => new Date(prev.getFullYear() - 1, prev.getMonth(), 1));
+    setStartFromToday(false);
+  };
 
   const handlePrevMonth = () => {
     setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    setStartFromToday(false);
   };
 
   const handleNextMonth = () => {
     setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    setStartFromToday(false);
+  };
+
+  const handleNextYear = () => {
+    setCurrentMonth(prev => new Date(prev.getFullYear() + 1, prev.getMonth(), 1));
+    setStartFromToday(false);
   };
 
   const handleToday = () => {
     setCurrentMonth(new Date());
+    setStartFromToday(true);
   };
 
-  const now = new Date();
-  const maxAllowedMonth = new Date(now.getFullYear(), now.getMonth() + 3, 1);
+  const maxAllowedMonth = new Date(now.getFullYear(), now.getMonth() + 12, 1);
   const nextMonthCandidate = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
   const isNextDisabled = nextMonthCandidate > maxAllowedMonth;
+  const nextYearCandidate = new Date(currentMonth.getFullYear() + 1, currentMonth.getMonth(), 1);
+  const isNextYearDisabled = nextYearCandidate > maxAllowedMonth;
 
   // Более длинный горизонт для поиска окна (данные уже загружены целиком, доп. запросов не нужно)
   const searchDates = [];
@@ -200,7 +220,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [currentMonth]);
+  }, [currentMonth, startFromToday]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -228,7 +248,14 @@ export default function AdminDashboard() {
     try {
       const year = currentMonth.getFullYear();
       const month = currentMonth.getMonth();
-      const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+      const now = new Date();
+
+      let startOfMonth;
+      if (startFromToday && now.getFullYear() === year && now.getMonth() === month) {
+        startOfMonth = new Date(year, month, now.getDate(), 0, 0, 0, 0);
+      } else {
+        startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+      }
       const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
       const [resG, resO, resD, resS, resMe] = await Promise.all([
@@ -938,38 +965,86 @@ export default function AdminDashboard() {
           {activeTab === 'calendar' && (
             <>
               {/* Блок навигации по месяцам */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 sm:gap-3">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2 sm:p-2.5 mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handlePrevYear}
+                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs border border-slate-200"
+                    title="-1 год"
+                  >
+                    «
+                  </button>
                   <button
                     type="button"
                     onClick={handlePrevMonth}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-all text-sm sm:text-base border border-slate-200"
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs border border-slate-200"
                     title="Предыдущий месяц"
                   >
                     ←
                   </button>
-                  <div className="text-base sm:text-lg font-extrabold text-slate-800 tracking-wide min-w-[160px] text-center">
-                    {monthName}
+
+                  <div className="flex items-center gap-1 font-extrabold text-slate-800 text-xs sm:text-sm px-1">
+                    <select
+                      value={currentMonth.getMonth()}
+                      onChange={e => {
+                        const m = parseInt(e.target.value, 10);
+                        setCurrentMonth(new Date(currentMonth.getFullYear(), m, 1));
+                        setStartFromToday(false);
+                      }}
+                      className="bg-transparent font-extrabold text-slate-800 cursor-pointer outline-none hover:text-emerald-700 text-xs sm:text-sm py-0.5"
+                    >
+                      {[
+                        'ЯНВАРЬ', 'ФЕВРАЛЬ', 'МАРТ', 'АПРЕЛЬ', 'МАЙ', 'ИЮНЬ',
+                        'ИЮЛЬ', 'АВГУСТ', 'СЕНТЯБРЬ', 'ОКТЯБРЬ', 'НОЯБРЬ', 'ДЕКАБРЬ'
+                      ].map((mName, idx) => (
+                        <option key={idx} value={idx}>{mName}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={currentMonth.getFullYear()}
+                      onChange={e => {
+                        const y = parseInt(e.target.value, 10);
+                        setCurrentMonth(new Date(y, currentMonth.getMonth(), 1));
+                        setStartFromToday(false);
+                      }}
+                      className="bg-transparent font-extrabold text-slate-800 cursor-pointer outline-none hover:text-emerald-700 text-xs sm:text-sm py-0.5"
+                    >
+                      {Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i).map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
                   </div>
+
                   <button
                     type="button"
                     onClick={handleNextMonth}
                     disabled={isNextDisabled}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 font-bold rounded-lg transition-all text-sm sm:text-base border border-slate-200"
-                    title={isNextDisabled ? 'Максимум 3 месяца вперед' : 'Следующий месяц'}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 font-bold rounded-lg text-xs border border-slate-200"
+                    title={isNextDisabled ? 'Максимум 12 месяцев вперед' : 'Следующий месяц'}
                   >
                     →
                   </button>
                   <button
                     type="button"
+                    onClick={handleNextYear}
+                    disabled={isNextYearDisabled}
+                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 font-bold rounded-lg text-xs border border-slate-200"
+                    title={isNextYearDisabled ? 'Максимум 12 месяцев вперед' : '+1 год'}
+                  >
+                    »
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleToday}
-                    className="ml-1 sm:ml-2 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg text-xs sm:text-sm border border-emerald-200 transition-all"
+                    className="ml-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg text-xs border border-emerald-200 transition-all"
                   >
                     Сегодня
                   </button>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <div className="flex items-center gap-2">
+                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold px-2 py-0.5 rounded-full">
                     Заказов: {orders.length}
                   </span>
                   {monthLoading && (
@@ -981,7 +1056,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Поиск ближайшего окна под запрос клиента */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 mb-2 text-xs">
                 <button
                   type="button"
                   onClick={() => setShowQuickSearch(v => !v)}
@@ -1102,7 +1177,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Фильтры отображения календаря */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-4 flex flex-wrap gap-6 items-end">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 mb-2 flex flex-wrap gap-4 items-end text-xs">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Садовник</label>
                   <select
@@ -1185,13 +1260,13 @@ export default function AdminDashboard() {
                   <p className="text-xs text-slate-400">Попробуйте изменить параметры фильтрации или сбросить их</p>
                 </div>
               ) : (
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto max-h-[75vh] relative">
-                  <table style={{ zoom: tableScale }} className="w-full border-collapse text-xs relative">
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-auto max-h-[78vh] relative">
+                  <table style={{ zoom: tableScale }} className="w-full border-collapse text-[12px] relative">
                     <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
                       <tr className="bg-slate-100 border-b border-slate-200">
-                        <th className="p-2 text-left text-xs font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
+                        <th className="px-1.5 py-1 text-left text-[12px] font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
                         {visibleGardeners.map(g => (
-                          <th key={g.id} className="p-2 text-xs font-semibold text-slate-600 border-r border-slate-200 min-w-[160px] sticky top-0 z-20 bg-slate-100 shadow-sm">
+                          <th key={g.id} className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm">
                             {g.name}
                           </th>
                         ))}
@@ -1205,7 +1280,7 @@ export default function AdminDashboard() {
 
                         return (
                           <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
-                            <td className={`p-2 font-medium border-r border-slate-200 align-top sticky left-0 z-10 bg-slate-50 shadow-sm ${holiday ? 'text-red-700 bg-red-50' : 'text-slate-700 bg-slate-50'}`}>
+                            <td className={`px-1.5 py-1 font-medium border-r border-slate-200 align-top sticky left-0 z-10 bg-slate-50 shadow-sm text-[12px] ${holiday ? 'text-red-700 bg-red-50' : 'text-slate-700 bg-slate-50'}`}>
                               <span className="flex flex-col gap-0.5">
                                 <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
                                 {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
@@ -1220,21 +1295,21 @@ export default function AdminDashboard() {
                               const activeCount = dayOrdersAll.filter(o => o.status === 'Новый заказ').length;
 
                               return (
-                                <td key={g.id} className="p-1.5 border-r border-slate-200 text-center text-xs align-top">
+                                <td key={g.id} className="p-1 border-r border-slate-200 text-center text-[12px] align-top">
                                   {dayOff && dayOrdersAll.length === 0 ? (
-                                    <div className="p-2 rounded-lg bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-1">
+                                    <div className="p-1 rounded bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-0.5 text-[11px]">
                                       🚫 Выходной
-                                      <button onClick={() => handleRemoveDayOff(dayOff.id)} className="text-xs underline hover:text-slate-900">
+                                      <button onClick={() => handleRemoveDayOff(dayOff.id)} className="text-[10px] underline hover:text-slate-900">
                                         Убрать
                                       </button>
                                     </div>
                                   ) : (
-                                    <div className="space-y-1">
+                                    <div className="space-y-0.5">
                                       {dayOrders.map(order => (
                                         <div
                                           key={order.id}
                                           onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
-                                          className={`p-2 rounded-lg text-white font-medium cursor-pointer transition-all text-left ${
+                                          className={`p-1.5 rounded text-white font-medium cursor-pointer transition-all text-left text-[11px] ${
                                             order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
                                             order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
                                             order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
@@ -1245,26 +1320,26 @@ export default function AdminDashboard() {
                                           <div className="flex items-center justify-between gap-1 mb-0.5">
                                             <span>{order.clientName}</span>
                                             {!order.amoDealId && (
-                                              <span className="text-xs" title="Нет ID amoCRM">❌</span>
+                                              <span className="text-[10px]" title="Нет ID amoCRM">❌</span>
                                             )}
                                           </div>
-                                          <div className="text-xs opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
-                                          <div className="text-xs opacity-90">{order.description}</div>
-                                          {order.status === 'Перенос' && <div className="text-[10px] opacity-90">⤴ запрошен перенос</div>}
-                                          {order.status === 'Отказ' && <div className="text-[10px] opacity-90">✕ отказ мастера</div>}
+                                          <div className="text-[10px] opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
+                                          <div className="text-[10px] opacity-90">{order.description}</div>
+                                          {order.status === 'Перенос' && <div className="text-[9px] opacity-90">⤴ запрошен перенос</div>}
+                                          {order.status === 'Отказ' && <div className="text-[9px] opacity-90">✕ отказ мастера</div>}
                                         </div>
                                       ))}
                                       <div className="flex gap-1">
                                         <button
                                           onClick={() => openNewOrderModal(dateStr, g.id)}
-                                          className="flex-1 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-medium border border-dashed border-emerald-300 transition-all"
+                                          className="flex-1 py-1 px-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] font-medium border border-dashed border-emerald-300 transition-all"
                                         >
                                           {dayOrders.length === 0 ? 'Свободно' : '+ Ещё'}
                                         </button>
                                         {dayOrdersAll.length === 0 && (
                                           <button
                                             onClick={() => handleMarkDayOff(dateStr, g.id)}
-                                            className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg text-xs font-medium border border-dashed border-slate-300 transition-all"
+                                            className="flex-1 py-1 px-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded text-[11px] font-medium border border-dashed border-slate-300 transition-all"
                                           >
                                             Выходной
                                           </button>
