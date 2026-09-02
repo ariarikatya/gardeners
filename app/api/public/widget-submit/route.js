@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { forwardToAmo } from '@/lib/amo';
+import { forwardToAmoUnsorted } from '@/lib/amo';
 import { notifyDispatchers } from '@/lib/vkApi';
 
 const prisma = new PrismaClient();
@@ -96,7 +96,7 @@ export async function POST(req) {
     noteParts.push('Заявка с виджета онлайн-записи сайта');
     noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-    const result = await forwardToAmo({
+    const result = await forwardToAmoUnsorted({
       clientName: name,
       clientPhone: phone,
       note: noteParts.join(' | '),
@@ -107,7 +107,7 @@ export async function POST(req) {
       approxWhere: body.district || undefined,
     });
 
-    console.log('4. forwardToAmo результат:', JSON.stringify(result));
+    console.log('4. forwardToAmoUnsorted результат:', JSON.stringify(result));
 
     // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId
     console.log('🔍 НАЧИНАЮ ПОИСК amoDealId в amoCRM...');
@@ -208,16 +208,47 @@ export async function POST(req) {
             leads = searchRes.ok && searchData ? (searchData?._embedded?.leads || []) : [];
           }
 
+          let foundLeadId = null;
+
           if (leads.length > 0) {
-            const foundLeadId = String(leads[0].id);
-            console.log('9. Сохраняю amoDealId:', foundLeadId);
+            foundLeadId = String(leads[0].id);
+            console.log('9. Найдено в /api/v4/leads, amoDealId:', foundLeadId);
+          } else {
+            console.log('🔍 ПОИСК В НЕРАЗОБРАННОМ: делаем запрос GET /api/v4/leads/unsorted...');
+            let unsortedRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads/unsorted`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${tokenData.access_token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+
+            let unsortedData = await unsortedRes.json().catch(() => null);
+            console.log('🔍 ПОИСК В НЕРАЗОБРАННОМ: статус', unsortedRes.status, 'тело:', JSON.stringify(unsortedData));
+
+            const unsortedList = unsortedRes.ok && unsortedData ? (unsortedData?._embedded?.unsorted || []) : [];
+            const matchedUnsorted = unsortedList.find(u => {
+              const uStr = JSON.stringify(u);
+              return uStr.includes(queryPhone);
+            });
+
+            if (matchedUnsorted) {
+              const leadUid = matchedUnsorted._embedded?.leads?.[0]?.id || matchedUnsorted.lead_id || matchedUnsorted.id;
+              if (leadUid) {
+                foundLeadId = String(leadUid);
+                console.log('9. Найдено в /api/v4/leads/unsorted, amoDealId:', foundLeadId);
+              }
+            }
+          }
+
+          if (foundLeadId) {
             await prisma.webLead.update({
               where: { id: lead.id },
               data: { amoDealId: foundLeadId },
             });
             console.log('✅ amoDealId успешно сохранен в WebLead:', foundLeadId);
           } else {
-            console.log('9. Сделка по запросу не найдена в amoCRM.');
+            console.log('9. Сделка пока не найдена в amoCRM (остается в Неразобранном, amoDealId = null).');
           }
         } else {
           console.error('❌ Не удалось обновить access_token в amoCRM:', JSON.stringify(tokenData));

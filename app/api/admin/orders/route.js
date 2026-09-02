@@ -94,7 +94,7 @@ export async function POST(req) {
       },
     });
 
-    if (fromLead && !leadAmoDealId) {
+    if (!leadAmoDealId) {
       let serviceName = '';
       if (serviceId) {
         const service = await prisma.service.findUnique({ where: { id: serviceId } });
@@ -125,6 +125,83 @@ export async function POST(req) {
         executor: gardenerName || undefined,
         approxWhere: district || undefined,
       });
+
+      // Поиск созданной сделки в amoCRM и сохранение amoDealId в заказе
+      (async () => {
+        try {
+          if (!clientPhone) return;
+          await new Promise(resolve => setTimeout(resolve, 8000));
+          const phoneClean = String(clientPhone).replace(/\D/g, '');
+          if (!phoneClean) return;
+
+          const clientIdDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
+          const clientSecretDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
+          const refreshTokenDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_REFRESH_TOKEN' } });
+          const subDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
+
+          const clientId = clientIdDb?.value || process.env.AMO_CLIENT_ID;
+          const clientSecret = clientSecretDb?.value || process.env.AMO_CLIENT_SECRET;
+          const refreshToken = refreshTokenDb?.value || process.env.AMO_REFRESH_TOKEN;
+          const subdomain = subDb?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+
+          if (!clientId || !clientSecret || !refreshToken) return;
+
+          const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client_id: clientId,
+              client_secret: clientSecret,
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
+            })
+          });
+
+          const tokenData = await tokenRes.json().catch(() => ({}));
+          if (tokenRes.ok && tokenData.access_token) {
+            let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(phoneClean)}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${tokenData.access_token}`,
+                'Content-Type': 'application/json',
+              },
+            });
+            let searchData = await searchRes.json().catch(() => null);
+            let leads = searchRes.ok && searchData ? (searchData?._embedded?.leads || []) : [];
+
+            let foundLeadId = null;
+            if (leads.length > 0) {
+              foundLeadId = String(leads[0].id);
+            } else {
+              let unsortedRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads/unsorted`, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${tokenData.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              let unsortedData = await unsortedRes.json().catch(() => null);
+              const unsortedList = unsortedRes.ok && unsortedData ? (unsortedData?._embedded?.unsorted || []) : [];
+              const matched = unsortedList.find(u => JSON.stringify(u).includes(phoneClean));
+              if (matched) {
+                const leadUid = matched._embedded?.leads?.[0]?.id || matched.lead_id || matched.id;
+                if (leadUid) foundLeadId = String(leadUid);
+              }
+            }
+
+            if (foundLeadId) {
+              await prisma.order.update({
+                where: { id: order.id },
+                data: { amoDealId: foundLeadId }
+              });
+              console.log(`✅ amoDealId (${foundLeadId}) сохранен для заказа ${order.id}`);
+            }
+          }
+        } catch (err) {
+          console.error('Background amoDealId search for order error:', err.message);
+        }
+      })();
     }
 
     // Уведомление садовника во ВКонтакте (fire-and-forget)
@@ -258,6 +335,12 @@ export async function PUT(req) {
         if (updateData.status === 'Отказ') action = 'refusal';
         else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') action = 'complete';
         else if (updateData.status === 'Новый заказ') action = 'reset';
+
+        try {
+          await amoApi.addNoteToLead(amoLeadId, `Статус заказа в CRM изменен: "${existing.status}" ➔ "${updateData.status}"`);
+        } catch (e) {
+          console.error('Failed adding status note to amo:', e.message);
+        }
 
         if (action) {
           const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
