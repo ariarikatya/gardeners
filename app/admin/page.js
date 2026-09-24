@@ -1373,66 +1373,20 @@ export default function AdminDashboard() {
                           ))}
                         </div>
                       </div>
-                      <div className="min-w-[200px]">
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Мастера ({searchGardenerIds.length ? searchGardenerIds.length : 'Все'})</label>
-                        <div className="flex flex-wrap gap-1 mb-1.5 min-h-[24px]">
-                          {searchGardenerIds.length === 0 ? (
-                            <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Все мастера</span>
-                          ) : (
-                            searchGardenerIds.map(id => {
-                              const g = gardeners.find(item => item.id === id);
-                              return (
-                                <span key={id} className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
-                                  {g ? g.name : id}
-                                  <button type="button" onClick={() => setSearchGardenerIds(prev => prev.filter(x => x !== id))} className="text-emerald-600 hover:text-emerald-900 font-bold ml-0.5">✕</button>
-                                </span>
-                              );
-                            })
-                          )}
-                        </div>
-                        <select
-                          onChange={e => {
-                            if (e.target.value === 'all') setSearchGardenerIds([]);
-                            else if (e.target.value && !searchGardenerIds.includes(e.target.value)) setSearchGardenerIds(prev => [...prev, e.target.value]);
-                            e.target.value = '';
-                          }}
-                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white w-full"
-                        >
-                          <option value="">+ Выбрать мастера...</option>
-                          <option value="all">Все мастера</option>
-                          {gardeners.filter(g => !searchGardenerIds.includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                        </select>
-                      </div>
-                      <div className="min-w-[200px]">
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Услуги ({searchServiceIds.length ? searchServiceIds.length : 'Все'})</label>
-                        <div className="flex flex-wrap gap-1 mb-1.5 min-h-[24px]">
-                          {searchServiceIds.length === 0 ? (
-                            <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Все услуги</span>
-                          ) : (
-                            searchServiceIds.map(id => {
-                              const s = services.find(item => item.id === id);
-                              return (
-                                <span key={id} className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
-                                  {s ? s.name : id}
-                                  <button type="button" onClick={() => setSearchServiceIds(prev => prev.filter(x => x !== id))} className="text-emerald-600 hover:text-emerald-900 font-bold ml-0.5">✕</button>
-                                </span>
-                              );
-                            })
-                          )}
-                        </div>
-                        <select
-                          onChange={e => {
-                            if (e.target.value === 'all') setSearchServiceIds([]);
-                            else if (e.target.value && !searchServiceIds.includes(e.target.value)) setSearchServiceIds(prev => [...prev, e.target.value]);
-                            e.target.value = '';
-                          }}
-                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white w-full"
-                        >
-                          <option value="">+ Выбрать услугу...</option>
-                          <option value="all">Все услуги</option>
-                          {services.filter(s => !searchServiceIds.includes(s.id)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                      </div>
+                      <MultiSelectFilter
+                        label="Мастера"
+                        items={gardeners}
+                        selectedIds={searchGardenerIds}
+                        onChange={setSearchGardenerIds}
+                        placeholderAll="Все мастера"
+                      />
+                      <MultiSelectFilter
+                        label="Услуги"
+                        items={services}
+                        selectedIds={searchServiceIds}
+                        onChange={setSearchServiceIds}
+                        placeholderAll="Все услуги"
+                      />
                     </div>
 
                     {searchGroups.length === 0 ? (
