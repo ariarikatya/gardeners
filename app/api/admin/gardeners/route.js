@@ -54,7 +54,7 @@ export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo } = body;
+  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo, jobTitle, timeSlots, isRegular, annualContract, partnerId } = body;
 
   try {
     const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });
@@ -105,6 +105,21 @@ export async function PUT(req) {
     if (preparations !== undefined) dataToUpdate.preparations = parseJsonField(preparations);
     if (works !== undefined) dataToUpdate.works = parseJsonField(works);
     if (reviews !== undefined) dataToUpdate.reviews = parseJsonField(reviews);
+
+    if (jobTitle !== undefined) dataToUpdate.jobTitle = jobTitle === '' ? null : jobTitle;
+    if (timeSlots !== undefined) dataToUpdate.timeSlots = parseJsonField(timeSlots);
+    if (isRegular !== undefined) dataToUpdate.isRegular = Boolean(isRegular);
+    if (annualContract !== undefined) dataToUpdate.annualContract = Boolean(annualContract);
+    if (partnerId !== undefined) {
+      dataToUpdate.partnerId = partnerId === '' ? null : partnerId;
+      // Если обновляется партнер, устанавливаем взаимную связь для напарника
+      if (partnerId && partnerId !== existing.partnerId) {
+        await prisma.gardener.update({
+          where: { id: partnerId },
+          data: { partnerId: id }
+        }).catch(() => {});
+      }
+    }
 
     const gardener = await prisma.gardener.update({
       where: { id },

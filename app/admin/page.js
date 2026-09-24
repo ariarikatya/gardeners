@@ -3,6 +3,128 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
+function CatalogManagerSection() {
+  const [type, setType] = useState('inventory');
+  const [items, setItems] = useState([]);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [image, setImage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const loadCatalog = () => {
+    fetch('/api/admin/catalog')
+      .then(res => res.json())
+      .then(data => {
+        if (type === 'inventory') setItems(data.inventoryItems || []);
+        else setItems(data.preparationItems || []);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadCatalog();
+  }, [type]);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, name: name.trim(), description, image }),
+      });
+      if (res.ok) {
+        setName('');
+        setDescription('');
+        setImage('');
+        loadCatalog();
+      } else {
+        alert((await res.json()).error || 'Ошибка сохранения');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Удалить из справочника?')) return;
+    const res = await fetch('/api/admin/catalog', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, id }),
+    });
+    if (res.ok) loadCatalog();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 border-b border-slate-200 pb-3">
+        <button
+          type="button"
+          onClick={() => setType('inventory')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold ${type === 'inventory' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+        >
+          Инвентарь
+        </button>
+        <button
+          type="button"
+          onClick={() => setType('preparation')}
+          className={`px-4 py-2 rounded-lg text-xs font-bold ${type === 'preparation' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+        >
+          Препараты
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="col-span-2 space-y-2">
+          <h4 className="text-xs font-bold text-slate-600 uppercase">Список ({items.length})</h4>
+          {items.length === 0 ? (
+            <div className="text-xs text-slate-400 italic">Справочник пуст</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-1">
+              {items.map(it => (
+                <div key={it.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {it.image ? (
+                      <img src={it.image} alt="" className="w-12 h-12 object-cover rounded-lg border flex-shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">Без фото</div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-slate-800 truncate">{it.name}</div>
+                      {it.description && <div className="text-slate-500 text-[11px] truncate">{it.description}</div>}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDelete(it.id)} className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 bg-rose-50 rounded hover:bg-rose-100">
+                    Удалить
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleAdd} className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 h-fit">
+          <h4 className="text-xs font-bold text-slate-700 uppercase">+ Добавить в справочник</h4>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Название</label>
+            <input type="text" required value={name} onChange={e => setName(e.target.value)} className="w-full border rounded p-2 text-xs bg-white" placeholder="Например: Секатор / Купорос" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Описание (опционально)</label>
+            <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full border rounded p-2 text-xs bg-white" placeholder="Назначение / характеристики" />
+          </div>
+          <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded p-2 text-xs font-bold">
+            {loading ? 'Сохранение...' : 'Сохранить'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
@@ -80,6 +202,7 @@ export default function AdminDashboard() {
   const [gardeners, setGardeners] = useState([]);
   const [orders, setOrders] = useState([]);
   const [dayOffs, setDayOffs] = useState([]);
+  const [blockedDays, setBlockedDays] = useState([]);
   const [services, setServices] = useState([]);
   const [webLeads, setWebLeads] = useState([]);
   const [hasAdminVk, setHasAdminVk] = useState(false);
@@ -125,8 +248,8 @@ export default function AdminDashboard() {
   // Поиск ближайшего окна под запрос клиента
   const [showQuickSearch, setShowQuickSearch] = useState(false);
   const [searchWeekdays, setSearchWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
-  const [searchGardenerId, setSearchGardenerId] = useState('all');
-  const [searchServiceId, setSearchServiceId] = useState('all');
+  const [searchGardenerIds, setSearchGardenerIds] = useState([]);
+  const [searchServiceIds, setSearchServiceIds] = useState([]);
   const [longPressInfo, setLongPressInfo] = useState(null);
   const [longPressTimer, setLongPressTimer] = useState(null);
 
@@ -258,10 +381,11 @@ export default function AdminDashboard() {
       }
       const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
-      const [resG, resO, resD, resS, resMe] = await Promise.all([
+      const [resG, resO, resD, resB, resS, resMe] = await Promise.all([
         fetch('/api/admin/gardeners'),
         fetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         fetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        fetch(`/api/admin/blockday?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         fetch('/api/admin/services'),
         fetch('/api/auth/me')
       ]);
@@ -272,12 +396,14 @@ export default function AdminDashboard() {
       const dataG = await resG.json();
       const dataO = await resO.json();
       const dataD = await resD.json();
+      const dataB = await resB.json();
       const dataS = await resS.json();
       const allOrd = dataO.orders || [];
       setGardeners(dataG.gardeners || []);
       setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
       setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(dataD.dayOffs || []);
+      setBlockedDays(dataB.blockedDays || []);
       setServices(dataS.services || []);
       await loadWebLeads(true);
     } catch (e) {
@@ -574,7 +700,25 @@ export default function AdminDashboard() {
   };
 
   const openEditGardener = (g) => {
-    setEditingGardener({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services || []).map(s => s.id), vkId: g.vkId || '' });
+    let slots = [];
+    if (g.timeSlots) {
+      if (Array.isArray(g.timeSlots)) slots = g.timeSlots;
+      else if (typeof g.timeSlots === 'string') {
+        try { slots = JSON.parse(g.timeSlots); } catch (e) { slots = []; }
+      }
+    }
+    setEditingGardener({
+      id: g.id,
+      name: g.name,
+      phone: g.phone,
+      serviceIds: (g.services || []).map(s => s.id),
+      vkId: g.vkId || '',
+      jobTitle: g.jobTitle || 'садовник',
+      timeSlots: slots,
+      isRegular: Boolean(g.isRegular),
+      annualContract: Boolean(g.annualContract),
+      partnerId: g.partnerId || ''
+    });
   };
 
   const toggleEditGardenerService = (serviceId) => {
@@ -610,6 +754,77 @@ export default function AdminDashboard() {
       body: JSON.stringify({ id })
     });
     if (res.ok) fetchData();
+  };
+
+  const handleRestoreRefusalOrder = async (orderId) => {
+    try {
+      const res = await fetch('/api/admin/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: orderId, status: 'Новый заказ', refusalReason: null })
+      });
+      if (res.ok) {
+        fetchData();
+      } else {
+        alert((await res.json()).error || 'Не удалось вернуть заказ в работу');
+      }
+    } catch (err) {
+      alert('Ошибка сети');
+    }
+  };
+
+  const handleMoveToRefusal = async () => {
+    const reason = prompt('Укажите причину отказа:', formData.refusalReason || 'Отказ');
+    if (reason === null) return;
+    const updatedForm = {
+      ...formData,
+      status: 'Отказ',
+      refusalReason: reason.trim() || 'Без указания причины'
+    };
+    setFormData(updatedForm);
+    if (selectedOrder) {
+      const res = await fetch('/api/admin/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedOrder.id, ...updatedForm })
+      });
+      if (res.ok) {
+        setShowOrderModal(false);
+        fetchData();
+      } else {
+        alert((await res.json()).error || 'Ошибка при переносе в отказы');
+      }
+    } else {
+      const res = await fetch('/api/admin/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedForm)
+      });
+      if (res.ok) {
+        setShowOrderModal(false);
+        fetchData();
+      } else {
+        alert((await res.json()).error || 'Ошибка при создании отказа');
+      }
+    }
+  };
+
+  const handleToggleBlockDay = async (dateStr, gardenerId) => {
+    try {
+      const res = await fetch('/api/admin/blockday', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dateStr, gardenerId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchData();
+      } else {
+        alert(data.error || 'Ошибка смены блокировки дня');
+      }
+    } catch (err) {
+      alert('Не удалось изменить блокировку дня');
+    }
   };
 
   // Массовая привязка vkId по списку phone,vkId (н-р: 79991234567,12345) или json entries
@@ -763,9 +978,9 @@ export default function AdminDashboard() {
   // количестве садовников список не превращался в десятки строк на одну дату
   let searchGroups = [];
   if (showQuickSearch) {
-    let candidateGardeners = searchGardenerId === 'all' ? gardeners : gardeners.filter(g => g.id === searchGardenerId);
-    if (searchServiceId !== 'all') {
-      candidateGardeners = candidateGardeners.filter(g => (g.services || []).some(s => s.id === searchServiceId));
+    let candidateGardeners = searchGardenerIds.length === 0 ? gardeners : gardeners.filter(g => searchGardenerIds.includes(g.id));
+    if (searchServiceIds.length > 0) {
+      candidateGardeners = candidateGardeners.filter(g => (g.services || []).some(s => searchServiceIds.includes(s.id)));
     }
     for (const date of searchDates) {
       if (!searchWeekdays.includes(date.getDay())) continue;
@@ -922,6 +1137,12 @@ export default function AdminDashboard() {
           className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           🌿 Услуги
+        </button>
+        <button
+          onClick={() => setActiveTab('catalog')}
+          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'catalog' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+        >
+          📦 Базы
         </button>
         <button
           onClick={() => setActiveTab('auction')}
@@ -1087,26 +1308,64 @@ export default function AdminDashboard() {
                           ))}
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Садовник</label>
+                      <div className="min-w-[200px]">
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Мастера ({searchGardenerIds.length ? searchGardenerIds.length : 'Все'})</label>
+                        <div className="flex flex-wrap gap-1 mb-1.5 min-h-[24px]">
+                          {searchGardenerIds.length === 0 ? (
+                            <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Все мастера</span>
+                          ) : (
+                            searchGardenerIds.map(id => {
+                              const g = gardeners.find(item => item.id === id);
+                              return (
+                                <span key={id} className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
+                                  {g ? g.name : id}
+                                  <button type="button" onClick={() => setSearchGardenerIds(prev => prev.filter(x => x !== id))} className="text-emerald-600 hover:text-emerald-900 font-bold ml-0.5">✕</button>
+                                </span>
+                              );
+                            })
+                          )}
+                        </div>
                         <select
-                          value={searchGardenerId}
-                          onChange={e => setSearchGardenerId(e.target.value)}
-                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                          onChange={e => {
+                            if (e.target.value === 'all') setSearchGardenerIds([]);
+                            else if (e.target.value && !searchGardenerIds.includes(e.target.value)) setSearchGardenerIds(prev => [...prev, e.target.value]);
+                            e.target.value = '';
+                          }}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white w-full"
                         >
-                          <option value="all">Любой</option>
-                          {gardeners.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                          <option value="">+ Выбрать мастера...</option>
+                          <option value="all">Все мастера</option>
+                          {gardeners.filter(g => !searchGardenerIds.includes(g.id)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">Услуга</label>
+                      <div className="min-w-[200px]">
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Услуги ({searchServiceIds.length ? searchServiceIds.length : 'Все'})</label>
+                        <div className="flex flex-wrap gap-1 mb-1.5 min-h-[24px]">
+                          {searchServiceIds.length === 0 ? (
+                            <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Все услуги</span>
+                          ) : (
+                            searchServiceIds.map(id => {
+                              const s = services.find(item => item.id === id);
+                              return (
+                                <span key={id} className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
+                                  {s ? s.name : id}
+                                  <button type="button" onClick={() => setSearchServiceIds(prev => prev.filter(x => x !== id))} className="text-emerald-600 hover:text-emerald-900 font-bold ml-0.5">✕</button>
+                                </span>
+                              );
+                            })
+                          )}
+                        </div>
                         <select
-                          value={searchServiceId}
-                          onChange={e => setSearchServiceId(e.target.value)}
-                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                          onChange={e => {
+                            if (e.target.value === 'all') setSearchServiceIds([]);
+                            else if (e.target.value && !searchServiceIds.includes(e.target.value)) setSearchServiceIds(prev => [...prev, e.target.value]);
+                            e.target.value = '';
+                          }}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white w-full"
                         >
-                          <option value="all">Любая</option>
-                          {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                          <option value="">+ Выбрать услугу...</option>
+                          <option value="all">Все услуги</option>
+                          {services.filter(s => !searchServiceIds.includes(s.id)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                       </div>
                     </div>
@@ -1266,8 +1525,15 @@ export default function AdminDashboard() {
                       <tr className="bg-slate-100 border-b border-slate-200">
                         <th className="px-1.5 py-1 text-left text-[12px] font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
                         {visibleGardeners.map(g => (
-                          <th key={g.id} className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm">
-                            {g.name}
+                          <th key={g.id} className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm align-top">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span>{g.name}</span>
+                              {g.jobTitle && <span className="text-[10px] text-slate-500 font-normal bg-slate-200/60 px-1.5 py-0.2 rounded">{g.jobTitle}</span>}
+                              <div className="flex flex-wrap items-center justify-center gap-1 mt-0.5">
+                                {g.isRegular && <span className="text-[9px] bg-indigo-100 text-indigo-800 px-1 py-0.2 rounded font-semibold" title="Постоянник">★ постоянник</span>}
+                                {g.annualContract && <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-semibold" title="Годовой контракт">📜 годовой</span>}
+                              </div>
+                            </div>
                           </th>
                         ))}
                       </tr>
@@ -1292,11 +1558,22 @@ export default function AdminDashboard() {
                                 ? dayOrdersAll
                                 : dayOrdersAll.filter(o => o.status === filterStatus);
                               const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
+                              const isBlockedDay = blockedDays.some(b => b.gardenerId === g.id && b.date.startsWith(dateStr));
                               const activeCount = dayOrdersAll.filter(o => o.status === 'Новый заказ').length;
 
                               return (
-                                <td key={g.id} className="p-1 border-r border-slate-200 text-center text-[12px] align-top">
-                                  {dayOff && dayOrdersAll.length === 0 ? (
+                                <td key={g.id} className={`p-1 border-r border-slate-200 text-center text-[12px] align-top ${isBlockedDay ? 'bg-rose-100/80 border-rose-200' : ''}`}>
+                                  {isBlockedDay && dayOrdersAll.length === 0 ? (
+                                    <div className="p-1.5 rounded bg-rose-200/90 text-rose-900 font-bold flex flex-col items-center gap-1 text-[11px] border border-rose-300 shadow-sm">
+                                      <span>🛑 СТОП</span>
+                                      <button
+                                        onClick={() => handleToggleBlockDay(dateStr, g.id)}
+                                        className="py-0.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-semibold transition-all shadow-xs"
+                                      >
+                                        Открыть
+                                      </button>
+                                    </div>
+                                  ) : dayOff && dayOrdersAll.length === 0 ? (
                                     <div className="p-1 rounded bg-slate-300 text-slate-700 font-medium flex flex-col items-center gap-0.5 text-[11px]">
                                       🚫 Выходной
                                       <button onClick={() => handleRemoveDayOff(dayOff.id)} className="text-[10px] underline hover:text-slate-900">
@@ -1305,6 +1582,12 @@ export default function AdminDashboard() {
                                     </div>
                                   ) : (
                                     <div className="space-y-0.5">
+                                      {isBlockedDay && (
+                                        <div className="p-1 rounded bg-rose-200 text-rose-900 font-bold text-[10px] mb-1 flex items-center justify-between px-1.5">
+                                          <span>🛑 СТОП</span>
+                                          <button onClick={() => handleToggleBlockDay(dateStr, g.id)} className="text-[9px] underline font-semibold text-emerald-800">Открыть</button>
+                                        </div>
+                                      )}
                                       {dayOrders.map(order => (
                                         <div
                                           key={order.id}
@@ -1329,22 +1612,31 @@ export default function AdminDashboard() {
                                           {order.status === 'Отказ' && <div className="text-[9px] opacity-90">✕ отказ мастера</div>}
                                         </div>
                                       ))}
-                                      <div className="flex gap-1">
-                                        <button
-                                          onClick={() => openNewOrderModal(dateStr, g.id)}
-                                          className="flex-1 py-1 px-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] font-medium border border-dashed border-emerald-300 transition-all"
-                                        >
-                                          {dayOrders.length === 0 ? 'Свободно' : '+ Ещё'}
-                                        </button>
-                                        {dayOrdersAll.length === 0 && (
+                                      {!isBlockedDay && (
+                                        <div className="flex gap-1">
                                           <button
-                                            onClick={() => handleMarkDayOff(dateStr, g.id)}
-                                            className="flex-1 py-1 px-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded text-[11px] font-medium border border-dashed border-slate-300 transition-all"
+                                            onClick={() => openNewOrderModal(dateStr, g.id)}
+                                            className="flex-1 py-1 px-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] font-medium border border-dashed border-emerald-300 transition-all"
                                           >
-                                            Выходной
+                                            {dayOrders.length === 0 ? 'Свободно' : '+ Ещё'}
                                           </button>
-                                        )}
-                                      </div>
+                                          <button
+                                            onClick={() => handleToggleBlockDay(dateStr, g.id)}
+                                            className="py-1 px-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded text-[11px] font-medium border border-dashed border-rose-300 transition-all"
+                                            title="Поставить СТОП на этот день"
+                                          >
+                                            Стоп
+                                          </button>
+                                          {dayOrdersAll.length === 0 && (
+                                            <button
+                                              onClick={() => handleMarkDayOff(dateStr, g.id)}
+                                              className="py-1 px-1 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded text-[11px] font-medium border border-dashed border-slate-300 transition-all"
+                                            >
+                                              Вых.
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </td>
@@ -1406,6 +1698,79 @@ export default function AdminDashboard() {
                                 </label>
                               ))}
                             </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Должность</label>
+                              <select
+                                value={editingGardener.jobTitle || 'садовник'}
+                                onChange={e => setEditingGardener({ ...editingGardener, jobTitle: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              >
+                                <option value="мастер по обрезке">мастер по обрезке</option>
+                                <option value="садовник">садовник</option>
+                                <option value="автополивщик">автополивщик</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1">Напарник</label>
+                              <select
+                                value={editingGardener.partnerId || ''}
+                                onChange={e => setEditingGardener({ ...editingGardener, partnerId: e.target.value })}
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                              >
+                                <option value="">Без напарника</option>
+                                {gardeners.filter(other => other.id !== editingGardener.id).map(other => (
+                                  <option key={other.id} value={other.id}>{other.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Временные интервалы работы</label>
+                            <div className="flex gap-4">
+                              {['Утро', 'Обед', 'Вечер'].map(slot => {
+                                const checked = (editingGardener.timeSlots || []).includes(slot);
+                                return (
+                                  <label key={slot} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={e => {
+                                        const current = editingGardener.timeSlots || [];
+                                        const next = e.target.checked ? [...current, slot] : current.filter(s => s !== slot);
+                                        setEditingGardener({ ...editingGardener, timeSlots: next });
+                                      }}
+                                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                                    />
+                                    {slot}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-6 items-center">
+                            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(editingGardener.isRegular)}
+                                onChange={e => setEditingGardener({ ...editingGardener, isRegular: e.target.checked })}
+                                className="rounded text-emerald-600 focus:ring-emerald-500"
+                              />
+                              Постоянник
+                            </label>
+                            <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(editingGardener.annualContract)}
+                                onChange={e => setEditingGardener({ ...editingGardener, annualContract: e.target.checked })}
+                                className="rounded text-emerald-600 focus:ring-emerald-500"
+                              />
+                              Годовой контракт
+                            </label>
                           </div>
 
                           <div>
@@ -1516,6 +1881,14 @@ export default function AdminDashboard() {
             </div>
           )}
 
+          {activeTab === 'catalog' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
+              <h3 className="text-lg font-bold text-slate-800">Справочные базы: Инвентарь и Препараты</h3>
+              <p className="text-xs text-slate-500">Позиции из этих баз можно выбирать галочками в карточке каждого садовника.</p>
+              <CatalogManagerSection />
+            </div>
+          )}
+
           {activeTab === 'services' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6">
@@ -1597,12 +1970,26 @@ export default function AdminDashboard() {
                                 {order.refusalReason || 'Причина не указана'}
                               </td>
                               <td className="p-3">
-                                <button
-                                  onClick={() => openEditOrderModal(order)}
-                                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg whitespace-nowrap"
-                                >
-                                  Переназначить / Редактировать
-                                </button>
+                                <div className="flex flex-wrap gap-1.5 items-center">
+                                  <button
+                                    onClick={() => handleRestoreRefusalOrder(order.id)}
+                                    className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-lg font-medium whitespace-nowrap"
+                                  >
+                                    🔄 Вернуть в работу
+                                  </button>
+                                  <button
+                                    onClick={() => openEditOrderModal(order)}
+                                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-lg whitespace-nowrap"
+                                  >
+                                    Переназначить
+                                  </button>
+                                  <button
+                                    onClick={() => { setSelectedOrder(order); handleDeleteOrder(); }}
+                                    className="text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2 py-1.5 rounded-lg font-medium whitespace-nowrap"
+                                  >
+                                    🗑 Удалить
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -2030,6 +2417,9 @@ export default function AdminDashboard() {
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setShowOrderModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">
                     Отмена
+                  </button>
+                  <button type="button" onClick={handleMoveToRefusal} className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-medium">
+                    ✕ В отказы
                   </button>
                   <button type="button" onClick={() => handleSaveOrder(null, true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg">
                     На аукцион

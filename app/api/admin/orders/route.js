@@ -47,6 +47,15 @@ export async function POST(req) {
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
   const dayOfWeek = days[orderDate.getDay()];
 
+  if (gardenerId) {
+    const isBlocked = await prisma.blockedDay.findFirst({
+      where: { gardenerId, date: orderDate }
+    });
+    if (isBlocked) {
+      return NextResponse.json({ error: 'На этот день для данного мастера установлена блокировка ("СТОП"). Запись невозможна.' }, { status: 400 });
+    }
+  }
+
   let leadAmoDealId = null;
   const targetLeadId = leadId || webLeadId;
   if (targetLeadId) {
@@ -233,6 +242,48 @@ export async function POST(req) {
       }
     })();
 
+    // Автоматический дубль для напарника
+    if (gardenerId && !body._isDuplicate) {
+      const g = await prisma.gardener.findUnique({ where: { id: gardenerId } });
+      if (g && g.partnerId) {
+        const partner = await prisma.gardener.findUnique({ where: { id: g.partnerId } });
+        if (partner) {
+          try {
+            const partnerOrder = await prisma.order.create({
+              data: {
+                date: orderDate,
+                dayOfWeek,
+                clientName,
+                address,
+                district: district || null,
+                clientPhone,
+                description: `${description || ''} (Дубль/Напарник: ${g.name})`.trim(),
+                priceContract: parseFloat(priceContract) || 0,
+                priceFact: parseFloat(priceFact) || 0,
+                employeeSalary: parseFloat(employeeSalary) || 0,
+                companyShare: parseFloat(companyShare) || 0,
+                status: status || 'Новый заказ',
+                comment,
+                refusalReason: refusalReason || null,
+                gardenerId: partner.id,
+                serviceId: serviceId || null,
+                serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
+                isCash: typeof isCash === 'boolean' ? isCash : true,
+                linkedOrderId: order.id,
+              },
+            });
+
+            await prisma.order.update({
+              where: { id: order.id },
+              data: { linkedOrderId: partnerOrder.id },
+            });
+          } catch (err) {
+            console.error('Partner duplicate creation error:', err);
+          }
+        }
+      }
+    }
+
     return NextResponse.json({ order });
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось создать заказ' }, { status: 400 });
@@ -256,6 +307,18 @@ export async function PUT(req) {
   console.log('6. serviceName:', existing?.service?.name);
 
   const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+
+  const checkGardenerId = updateData.gardenerId !== undefined ? updateData.gardenerId : existing?.gardenerId;
+  const checkDate = updateData.date ? new Date(updateData.date) : existing?.date;
+
+  if (checkGardenerId && checkDate) {
+    const isBlocked = await prisma.blockedDay.findFirst({
+      where: { gardenerId: checkGardenerId, date: checkDate }
+    });
+    if (isBlocked && (updateData.gardenerId !== undefined || updateData.date !== undefined)) {
+      return NextResponse.json({ error: 'На этот день для данного мастера установлена блокировка ("СТОП"). Запись невозможна.' }, { status: 400 });
+    }
+  }
 
   if (updateData.date) {
     updateData.date = new Date(updateData.date);
@@ -372,6 +435,59 @@ export async function PUT(req) {
       }
     } catch (e) {
       console.error('Failed updating amo lead stage on admin PUT:', e.message);
+    }
+
+    // Синхронизация связанного заказа-дубля напарника
+    if (!body._isDuplicateSync) {
+      const linkedId = order.linkedOrderId || existing?.linkedOrderId;
+      if (linkedId) {
+        const partnerUpdate = { _isDuplicateSync: true };
+        if (updateData.date) partnerUpdate.date = updateData.date;
+        if (updateData.status) partnerUpdate.status = updateData.status;
+        if (updateData.refusalReason) partnerUpdate.refusalReason = updateData.refusalReason;
+
+        await prisma.order.update({
+          where: { id: linkedId },
+          data: partnerUpdate
+        }).catch(err => console.error('Failed to sync partner order update:', err));
+      } else if (updateData.gardenerId && updateData.gardenerId !== existing?.gardenerId) {
+        const newGardener = await prisma.gardener.findUnique({ where: { id: updateData.gardenerId } });
+        if (newGardener && newGardener.partnerId) {
+          const partner = await prisma.gardener.findUnique({ where: { id: newGardener.partnerId } });
+          if (partner) {
+            try {
+              const partnerOrder = await prisma.order.create({
+                data: {
+                  date: order.date,
+                  dayOfWeek: order.dayOfWeek,
+                  clientName: order.clientName,
+                  address: order.address,
+                  district: order.district,
+                  clientPhone: order.clientPhone,
+                  description: `${order.description || ''} (Дубль/Напарник: ${newGardener.name})`.trim(),
+                  priceContract: order.priceContract,
+                  priceFact: order.priceFact,
+                  employeeSalary: order.employeeSalary,
+                  companyShare: order.companyShare,
+                  status: order.status,
+                  comment: order.comment,
+                  gardenerId: partner.id,
+                  serviceId: order.serviceId,
+                  serviceIds: order.serviceIds,
+                  isCash: order.isCash,
+                  linkedOrderId: order.id
+                }
+              });
+              await prisma.order.update({
+                where: { id: order.id },
+                data: { linkedOrderId: partnerOrder.id }
+              });
+            } catch (err) {
+              console.error('Failed to create partner order on gardener change:', err);
+            }
+          }
+        }
+      }
     }
 
     console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА ==========');
@@ -501,6 +617,13 @@ export async function DELETE(req) {
       }
     } else {
       console.log('⚠️ [DELETE] amoDealId не указан, пропускаем удаление из amoCRM');
+    }
+
+    if (order.linkedOrderId) {
+      console.log('🗑️ [DELETE] Удаляю связанный дубль напарника:', order.linkedOrderId);
+      await prisma.order.delete({
+        where: { id: order.linkedOrderId }
+      }).catch(err => console.error('Failed to delete linked partner order:', err.message));
     }
 
     console.log('🗑️ [DELETE] Удаляю запись из Prisma...');

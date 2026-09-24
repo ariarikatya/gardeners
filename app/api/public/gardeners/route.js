@@ -13,18 +13,50 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: CORS_HEADERS });
 }
 
-export async function GET() {
+function parseArrayParam(searchParams, paramNames) {
+  const result = [];
+  for (const name of paramNames) {
+    const values = searchParams.getAll(name);
+    for (const val of values) {
+      if (typeof val === 'string') {
+        val.split(',').forEach((v) => {
+          const trimmed = v.trim();
+          if (trimmed && !result.includes(trimmed)) {
+            result.push(trimmed);
+          }
+        });
+      }
+    }
+  }
+  return result;
+}
+
+export async function GET(req) {
   try {
-    const gardeners = await prisma.gardener.findMany({
+    const { searchParams } = req ? new URL(req.url) : { searchParams: new URLSearchParams() };
+    const gardenerIds = parseArrayParam(searchParams, ['gardenerId', 'gardenerIds', 'gardenerIds[]']);
+    const serviceIds = parseArrayParam(searchParams, ['serviceId', 'serviceIds', 'serviceIds[]']);
+
+    let gardeners = await prisma.gardener.findMany({
       include: {
         services: true,
       },
     });
 
+    if (gardenerIds.length > 0) {
+      gardeners = gardeners.filter((g) => gardenerIds.includes(String(g.id)));
+    }
+
+    if (serviceIds.length > 0) {
+      gardeners = gardeners.filter((g) =>
+        g.services && g.services.some((s) => serviceIds.includes(String(s.id)))
+      );
+    }
+
     const mappedGardeners = gardeners.map((g, index) => {
       const photoUrl = g.photo || g.videoUrl || g.photoUrl || 'https://placehold.co/200x200/16213e/afcd3c?text=Фото';
       const serviceSkills = g.services ? g.services.map((s) => s.name) : [];
-      const special = serviceSkills.join(', ') || 'Обрезание, уход за садом';
+      const special = serviceSkills.join(', ') || 'Ообрезание, уход за садом';
 
       const parseJson = (v, fallback = []) => {
         if (!v) return fallback;
@@ -36,12 +68,10 @@ export async function GET() {
       };
 
       const rawReviews = parseJson(g.reviews);
-      // Фильтруем: показываем ТОЛЬКО отзывы со status === 'approved' либо БЕЗ поля status (старые)
       const approvedReviews = Array.isArray(rawReviews)
         ? rawReviews.filter(r => r && (r.status === 'approved' || !r.status))
         : [];
 
-      // Пересчитываем rating и reviewsCount исключительно по одобренным отзывам
       const totalRatingSum = approvedReviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0);
       const calculatedRating = approvedReviews.length > 0
         ? Number((totalRatingSum / approvedReviews.length).toFixed(1))
@@ -66,6 +96,7 @@ export async function GET() {
         reviews: approvedReviews,
         works: parseJson(g.works),
         companyExperience: '',
+        // Должность g.jobTitle скрыта от клиента по требованию задачи
       };
     });
 

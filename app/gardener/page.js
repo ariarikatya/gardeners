@@ -70,6 +70,7 @@ function compressImage(file, maxWidth = 1600, quality = 0.8) {
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
+  const [myDayOffs, setMyDayOffs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
   const [walletRange, setWalletRange] = useState('month');
@@ -85,6 +86,7 @@ export default function GardenerDashboard() {
   const [claimingId, setClaimingId] = useState(null);
 
   // Портфолио садовника
+  const [gardenerProfile, setGardenerProfile] = useState(null);
   const [myWorks, setMyWorks] = useState([]);
   const [loadingWorks, setLoadingWorks] = useState(false);
   const [savingWorks, setSavingWorks] = useState(false);
@@ -110,6 +112,7 @@ export default function GardenerDashboard() {
       const res = await fetch('/api/gardener/profile');
       const data = await res.json();
       if (res.ok && data.gardener) {
+        setGardenerProfile(data.gardener);
         setMyWorks(data.gardener.works || []);
       }
     } catch (e) {
@@ -200,6 +203,7 @@ export default function GardenerDashboard() {
       const data = await resOrders.json();
       const ops = await resOps.json();
       setOrders(data.orders || []);
+      setMyDayOffs(data.dayOffs || []);
       setOperations(ops.operations || []);
     } catch (e) {
       console.error(e);
@@ -642,6 +646,12 @@ export default function GardenerDashboard() {
     ordersByDate[key].push(o);
   });
 
+  const dayOffMap = {};
+  myDayOffs.forEach(d => {
+    const key = d.date.split('T')[0];
+    dayOffMap[key] = true;
+  });
+
   const calendarCells = [];
   for (let i = 0; i < startOffset; i++) calendarCells.push(null);
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
@@ -653,20 +663,29 @@ export default function GardenerDashboard() {
     if (d === null) return <div key={i}></div>;
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dayOrders = ordersByDate[dateStr] || [];
+    const isDayOff = Boolean(dayOffMap[dateStr]);
     const isSelected = selectedDateStr === dateStr;
     const cellDate = new Date(dateStr);
     const wd = cellDate.getDay();
     const isWeekend = wd === 0 || wd === 6;
-    const baseBorderBg = isSelected ? 'border-emerald-500 bg-emerald-50' : dayOrders.length > 0 ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-100';
+
+    const baseBorderBg = isSelected
+      ? 'border-emerald-500 bg-emerald-50'
+      : isDayOff
+      ? 'border-slate-300 bg-slate-200 text-slate-600'
+      : dayOrders.length > 0
+      ? 'border-emerald-200 bg-emerald-50/50'
+      : 'border-slate-100';
+
     return (
       <button
         key={i}
         onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
-        className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend ? 'border-slate-700 bg-slate-50/30' : ''}`}
+        className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend && !isDayOff ? 'border-slate-400 bg-slate-50/30' : ''}`}
       >
-        {/* Выходные: помечаем тёмной рамкой (border). Сам номер и индикаторы выглядят как у остальных */}
-        <span className={`font-medium text-slate-700`}>{d}</span>
-        {dayOrders.length > 0 && (
+        <span className={`font-medium ${isDayOff ? 'text-slate-600 font-bold' : 'text-slate-700'}`}>{d}</span>
+        {isDayOff && <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">выходной</span>}
+        {dayOrders.length > 0 && !isDayOff && (
           <div className="flex items-center gap-0.5 mt-1">
             {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (
               <span key={idx} className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
@@ -1286,6 +1305,22 @@ export default function GardenerDashboard() {
                       onChange={e => setFactAmount(e.target.value)}
                       className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
                     />
+                    {factAmount && parseFloat(factAmount) > 0 && gardenerProfile && (
+                      <div className="mt-2 text-xs p-2.5 bg-emerald-50 rounded-lg border border-emerald-200 space-y-1">
+                        <div className="flex justify-between text-slate-700">
+                          <span>Долг фирме ({gardenerProfile.writeoffPercent || 0}%):</span>
+                          <strong className="text-amber-800 font-bold">
+                            {Math.round(parseFloat(factAmount) * ((gardenerProfile.writeoffPercent || 0) > 1 ? (gardenerProfile.writeoffPercent || 0) / 100 : (gardenerProfile.writeoffPercent || 0))).toLocaleString('ru-RU')} ₽
+                          </strong>
+                        </div>
+                        <div className="flex justify-between text-slate-700">
+                          <span>К выплате садовнику:</span>
+                          <strong className="text-emerald-800 font-bold">
+                            {(parseFloat(factAmount) - Math.round(parseFloat(factAmount) * ((gardenerProfile.writeoffPercent || 0) > 1 ? (gardenerProfile.writeoffPercent || 0) / 100 : (gardenerProfile.writeoffPercent || 0)))).toLocaleString('ru-RU')} ₽
+                          </strong>
+                        </div>
+                      </div>
+                    )}
                     <p className="text-xs text-slate-400 mt-2">Без всех трёх фото и суммы заказ нельзя закрыть как выполненный.</p>
                   </div>
                 </>

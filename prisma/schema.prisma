@@ -24,26 +24,37 @@ model User {
 }
 
 model Gardener {
-  id              String      @id @default(uuid())
-  name            String
-  phone           String      @unique
-  vkId            String?     // VK user id / peer id for notifications
-  bonusPercent    Float       @default(0)
-  finePercent     Float       @default(0)
-  writeoffPercent Float       @default(0)
-  rating          Float?      @default(4.5)
-  reviewsCount    Int?        @default(0)
-  skills          Json?
-  inventory       Json?
-  preparations    Json?
-  works           Json?
-  reviews         Json?
-  photo           String?
-  user            User?
-  orders          Order[]
-  dayOffs         DayOff[]
-  services        Service[]   @relation("GardenerServices")
-  Operation       Operation[]
+  id               String            @id @default(uuid())
+  name             String
+  phone            String            @unique
+  vkId             String?           // VK user id / peer id for notifications
+  bonusPercent     Float             @default(0)
+  finePercent      Float             @default(0)
+  writeoffPercent  Float             @default(0)
+  rating           Float?            @default(4.5)
+  reviewsCount     Int?              @default(0)
+  skills           Json?
+  inventory        Json?
+  preparations     Json?
+  works            Json?
+  reviews          Json?
+  photo            String?
+
+  // Новые поля (пункты 3, 5, 8)
+  jobTitle         String?           // "мастер по обрезке" | "садовник" | "автополивщик"
+  timeSlots        Json?             // ["Утро", "Обед", "Вечер"]
+  isRegular        Boolean           @default(false)
+  annualContract   Boolean           @default(false)
+  partnerId        String?           // ID напарника
+
+  user             User?
+  orders           Order[]
+  dayOffs          DayOff[]
+  blockedDays      BlockedDay[]
+  services         Service[]         @relation("GardenerServices")
+  inventoryItems   InventoryItem[]   @relation("GardenerInventory")
+  preparationItems PreparationItem[] @relation("GardenerPreparations")
+  Operation        Operation[]
 }
 
 model Service {
@@ -82,6 +93,9 @@ model Order {
   serviceId             String?
   service               Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
+  // Связь дублей напарников (пункт 5)
+  linkedOrderId         String?
+
   // ID сделки в amoCRM (если создана/связана)
   amoDealId             String?
 
@@ -110,6 +124,34 @@ model DayOff {
   gardener   Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
 
   @@unique([date, gardenerId]) // Выходной либо есть, либо нет — на один день одна отметка
+}
+
+model BlockedDay {
+  id         String   @id @default(uuid())
+  date       DateTime // YYYY-MM-DD
+  gardenerId String
+  gardener   Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([date, gardenerId])
+}
+
+model InventoryItem {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  description String?
+  image       String?
+  gardeners   Gardener[] @relation("GardenerInventory")
+  createdAt   DateTime   @default(now())
+}
+
+model PreparationItem {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  description String?
+  image       String?
+  gardeners   Gardener[] @relation("GardenerPreparations")
+  createdAt   DateTime   @default(now())
 }
 
 model Operation {

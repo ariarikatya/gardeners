@@ -78,7 +78,21 @@ export async function PUT(req) {
       return NextResponse.json({ error: 'Прикрепите фото: до, после и акт/документ' }, { status: 400 });
     }
 
-    data = { status: 'Выполнен', priceFact: amount, photoBefore: beforeVal, photoAfter: afterVal, photoAct: actVal };
+    const gardener = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
+    const writeoffPercent = gardener?.writeoffPercent || 0;
+    const percentRatio = writeoffPercent > 1 ? writeoffPercent / 100 : writeoffPercent;
+    const companyShare = amount * percentRatio;
+    const employeeSalary = amount - companyShare;
+
+    data = {
+      status: 'Выполнен',
+      priceFact: amount,
+      companyShare,
+      employeeSalary,
+      photoBefore: beforeVal,
+      photoAfter: afterVal,
+      photoAct: actVal
+    };
 
     // Обработка портфолио
     if (Array.isArray(portfolioPhotos) && portfolioPhotos.length > 0) {
