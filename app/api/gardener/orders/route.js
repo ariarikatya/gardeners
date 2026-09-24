@@ -19,18 +19,23 @@ export async function GET(req) {
 
   // Показываем только активные заказы: Новые, Перенос (запрос от садовника), Выполнен
   // Скрываем: Отказ, Перенесен (уже перенесен диспетчером)
-  const orders = await prisma.order.findMany({
-    where: { 
-      gardenerId: payload.gardenerId,
-      status: {
-        in: ['Новый заказ', 'Перенос', 'Выполнен']
-      }
-    },
-    include: { service: true },
-    orderBy: { date: 'asc' },
-  });
+  const [orders, dayOffs] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        gardenerId: payload.gardenerId,
+        status: {
+          in: ['Новый заказ', 'Перенос', 'Выполнен']
+        }
+      },
+      include: { service: true },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.dayOff.findMany({
+      where: { gardenerId: payload.gardenerId },
+    })
+  ]);
 
-  return NextResponse.json({ orders });
+  return NextResponse.json({ orders, dayOffs });
 }
 
 export async function PUT(req) {

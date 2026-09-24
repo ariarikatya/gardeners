@@ -648,7 +648,8 @@ export default function GardenerDashboard() {
 
   const dayOffMap = {};
   myDayOffs.forEach(d => {
-    const key = d.date.split('T')[0];
+    if (!d || !d.date) return;
+    const key = typeof d.date === 'string' ? d.date.split('T')[0] : new Date(d.date).toISOString().split('T')[0];
     dayOffMap[key] = true;
   });
 
@@ -670,9 +671,9 @@ export default function GardenerDashboard() {
     const isWeekend = wd === 0 || wd === 6;
 
     const baseBorderBg = isSelected
-      ? 'border-emerald-500 bg-emerald-50'
+      ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500'
       : isDayOff
-      ? 'border-slate-300 bg-slate-200 text-slate-600'
+      ? 'border-slate-300 bg-slate-200 text-slate-600 font-medium'
       : dayOrders.length > 0
       ? 'border-emerald-200 bg-emerald-50/50'
       : 'border-slate-100';
@@ -681,10 +682,14 @@ export default function GardenerDashboard() {
       <button
         key={i}
         onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
-        className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend && !isDayOff ? 'border-slate-400 bg-slate-50/30' : ''}`}
+        className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend && !isDayOff ? 'border-slate-300 bg-slate-50/50' : ''}`}
       >
-        <span className={`font-medium ${isDayOff ? 'text-slate-600 font-bold' : 'text-slate-700'}`}>{d}</span>
-        {isDayOff && <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">выходной</span>}
+        <span className={`font-medium ${isDayOff ? 'text-slate-700 font-bold' : 'text-slate-700'}`}>{d}</span>
+        {isDayOff && (
+          <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-slate-600 bg-slate-300/80 px-1 py-0.2 rounded">
+            🏖️ Выходной
+          </span>
+        )}
         {dayOrders.length > 0 && !isDayOff && (
           <div className="flex items-center gap-0.5 mt-1">
             {Array.from({ length: dayOrders.length }).slice(0,6).map((_, idx) => (

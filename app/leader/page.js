@@ -62,6 +62,7 @@ export default function LeaderDashboard() {
   const [ordersList, setOrdersList] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [leaderScale, setLeaderScale] = useState(1);
+  const [leaderTab, setLeaderTab] = useState('finance');
 
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
@@ -320,6 +321,25 @@ export default function LeaderDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-2 sm:px-3 py-3 space-y-3">
+        <div className="flex gap-2 border-b border-slate-200 pb-2">
+          <button
+            onClick={() => setLeaderTab('finance')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'finance' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
+          >
+            💰 Финансы и Заказы
+          </button>
+          <button
+            onClick={() => setLeaderTab('catalog')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'catalog' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
+          >
+            📦 Справочная база и назначение
+          </button>
+        </div>
+
+        {leaderTab === 'catalog' ? (
+          <CatalogLeaderSection gardeners={data.gardeners || []} onRefresh={fetchData} />
+        ) : (
+        <>
         <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1">Период</label>
@@ -382,7 +402,7 @@ export default function LeaderDashboard() {
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Прогноз продаж</div>
                 <div className="text-2xl font-bold text-blue-700 mt-2">{formatMoney(summary.forecast)}</div>
-                <div className="text-[11px] text-slate-500 mt-1">Будет начислено: {formatMoney(summary.estimated)}</div>
+                <div className="text-[11px] text-slate-500 mt-1">Ожидаемая доля фирмы по НЕвыполненным заказам.</div>
               </div>
             </div>
  
@@ -681,7 +701,257 @@ export default function LeaderDashboard() {
             </div>
           </div>
         )}
+        </>
+        )}
       </main>
+    </div>
+  );
+}
+
+function CatalogLeaderSection({ gardeners, onRefresh }) {
+  const [catalogType, setCatalogType] = useState('inventory');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
+
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
+  const [selectedGardenerIds, setSelectedGardenerIds] = useState([]);
+  const [assigning, setAssigning] = useState(false);
+
+  const loadCatalog = async () => {
+    try {
+      const res = await fetch('/api/catalog');
+      if (res.ok) {
+        const data = await res.json();
+        setItems(catalogType === 'inventory' ? data.inventoryItems || [] : data.preparationItems || []);
+      }
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    loadCatalog();
+    setSelectedItemIds([]);
+  }, [catalogType]);
+
+  const handleAddItem = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: catalogType, name: name.trim(), description: desc.trim() }),
+      });
+      if (res.ok) {
+        setName('');
+        setDesc('');
+        loadCatalog();
+      } else {
+        alert((await res.json()).error || 'Ошибка');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteItem = async (id) => {
+    if (!confirm('Удалить из справочника?')) return;
+    const res = await fetch('/api/catalog', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: catalogType, id }),
+    });
+    if (res.ok) loadCatalog();
+  };
+
+  const handleMassAssign = async () => {
+    if (selectedItemIds.length === 0) {
+      alert('Выберите хотя бы одну позицию из справочника!');
+      return;
+    }
+    if (selectedGardenerIds.length === 0) {
+      alert('Выберите хотя бы одного сотрудника!');
+      return;
+    }
+
+    setAssigning(true);
+    try {
+      const res = await fetch('/api/catalog/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: catalogType,
+          itemIds: selectedItemIds,
+          gardenerIds: selectedGardenerIds,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Успешно назначено ${data.count} сотрудникам!`);
+        setSelectedItemIds([]);
+        if (onRefresh) onRefresh();
+      } else {
+        alert(data.error || 'Ошибка назначения');
+      }
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const toggleAllGardeners = () => {
+    if (selectedGardenerIds.length === gardeners.length) {
+      setSelectedGardenerIds([]);
+    } else {
+      setSelectedGardenerIds(gardeners.map(g => g.id));
+    }
+  };
+
+  const toggleAllItems = () => {
+    if (selectedItemIds.length === items.length) {
+      setSelectedItemIds([]);
+    } else {
+      setSelectedItemIds(items.map(i => i.id));
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
+      <div className="flex items-center justify-between border-b pb-4">
+        <div>
+          <h3 className="text-lg font-bold text-slate-800">Общий справочник баз и массовое назначение</h3>
+          <p className="text-xs text-slate-500">Добавляйте позиции в базу и массово распределяйте их по сотрудникам в 1 клик</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setCatalogType('inventory')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${catalogType === 'inventory' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'}`}
+          >
+            🧰 Инвентарь
+          </button>
+          <button
+            type="button"
+            onClick={() => setCatalogType('preparation')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${catalogType === 'preparation' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700'}`}
+          >
+            🧪 Препараты
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <form onSubmit={handleAddItem} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 h-fit">
+          <h4 className="text-xs font-bold text-slate-700 uppercase">+ Новая позиция в базу</h4>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Название</label>
+            <input
+              type="text" required
+              value={name} onChange={e => setName(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+              placeholder={catalogType === 'inventory' ? 'Например: Газонокосилка Honda' : 'Например: Бордоская смесь'}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Описание / характеристики</label>
+            <input
+              type="text"
+              value={desc} onChange={e => setDesc(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white"
+              placeholder="Характеристики или применение..."
+            />
+          </div>
+          <button
+            type="submit" disabled={loading}
+            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Сохранение...' : '+ Добавить в справочник'}
+          </button>
+        </form>
+
+        <div className="lg:col-span-2 space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-700 uppercase">
+              Справочник ({items.length})
+            </h4>
+            {items.length > 0 && (
+              <button type="button" onClick={toggleAllItems} className="text-xs text-emerald-600 font-semibold hover:underline">
+                {selectedItemIds.length === items.length ? 'Снять выделение' : 'Выбрать все позиции'}
+              </button>
+            )}
+          </div>
+
+          {items.length === 0 ? (
+            <div className="text-xs text-slate-400 italic p-4 bg-slate-50 rounded-xl border">Справочник пуст</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1 border rounded-xl">
+              {items.map(it => {
+                const isChecked = selectedItemIds.includes(it.id);
+                return (
+                  <div key={it.id} className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 text-xs ${isChecked ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-200'}`}>
+                    <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => setSelectedItemIds(prev => prev.includes(it.id) ? prev.filter(x => x !== it.id) : [...prev, it.id])}
+                        className="rounded text-emerald-600"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-800 truncate">{it.name}</div>
+                        {it.description && <div className="text-[10px] text-slate-500 truncate">{it.description}</div>}
+                      </div>
+                    </label>
+                    <button
+                      type="button" onClick={() => handleDeleteItem(it.id)}
+                      className="text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 rounded text-[10px]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-slate-700 uppercase">
+                Массовое назначение сотрудникам ({selectedGardenerIds.length} выбрано)
+              </h4>
+              <button type="button" onClick={toggleAllGardeners} className="text-xs text-emerald-600 font-semibold hover:underline">
+                {selectedGardenerIds.length === gardeners.length ? 'Снять выделение' : 'Выбрать всех сотрудников'}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 border border-slate-200 rounded-xl bg-slate-50">
+              {gardeners.map(g => {
+                const isSelected = selectedGardenerIds.includes(g.id);
+                return (
+                  <label key={g.id} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer select-none ${isSelected ? 'bg-emerald-100 border-emerald-400 text-emerald-900 font-medium' : 'bg-white border-slate-200 text-slate-700'}`}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => setSelectedGardenerIds(prev => prev.includes(g.id) ? prev.filter(x => x !== g.id) : [...prev, g.id])}
+                      className="rounded text-emerald-600"
+                    />
+                    <span>{g.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleMassAssign}
+              disabled={assigning || selectedItemIds.length === 0 || selectedGardenerIds.length === 0}
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-sm transition-all"
+            >
+              {assigning ? 'Назначение...' : `🚀 Назначить ${selectedItemIds.length} поз. для ${selectedGardenerIds.length} сотрудников`}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -90,7 +90,14 @@ export async function GET(req) {
       const targets = normalizePaidTargets(o.paidTo);
       return sum + (targets.includes('COMPANY') ? Number(o.priceFact || o.priceContract || 0) : 0);
     }, 0);
-    const estimated = pendingOrders.reduce((sum, o) => sum + Math.max(Number(o.priceContract || o.priceFact || 0) - Number(o.companyShare || 0), 0), 0);
+    const estimated = pendingOrders.reduce((sum, o) => {
+      const price = Number(o.priceContract || o.priceFact || 0);
+      if (price <= 0) return sum;
+      if (o.companyShare > 0) return sum + Number(o.companyShare);
+      if (o.employeeSalary > 0) return sum + Math.max(price - Number(o.employeeSalary), 0);
+      const ratio = gardener.writeoffPercent > 1 ? gardener.writeoffPercent / 100 : gardener.writeoffPercent;
+      return sum + Math.round(price * (1 - ratio));
+    }, 0);
 
     const ops = opsByGardener[gardener.id] || [];
     const bonusOps = ops.filter(op => op.type === 'bonus').reduce((s, o) => s + Number(o.amount || 0), 0);
@@ -133,11 +140,21 @@ export async function GET(req) {
     };
   });
 
-  const daysInPeriod = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-  const avgDailyRevenue = totalRevenue / daysInPeriod;
-  const lastDayOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0);
-  const remainingDays = Math.max(0, lastDayOfMonth.getDate() - end.getDate());
-  const forecastRevenue = avgDailyRevenue * (daysInPeriod + remainingDays);
+  const calcExpectedCompanyRevenue = (order) => {
+    const price = Number(order.priceContract || order.priceFact || 0);
+    if (price <= 0) return 0;
+    if (order.companyShare > 0) return Number(order.companyShare);
+    if (order.employeeSalary > 0) return Math.max(price - Number(order.employeeSalary), 0);
+    const g = gardeners.find(item => item.id === order.gardenerId);
+    if (g && g.writeoffPercent) {
+      const ratio = g.writeoffPercent > 1 ? g.writeoffPercent / 100 : g.writeoffPercent;
+      return Math.round(price * (1 - ratio));
+    }
+    return price;
+  };
+
+  const pendingOrdersAll = orders.filter(o => !['Выполнен', 'Отменен', 'Отказ'].includes(o.status));
+  const forecastRevenue = pendingOrdersAll.reduce((sum, o) => sum + calcExpectedCompanyRevenue(o), 0);
 
   return NextResponse.json({
     period: {
@@ -169,14 +186,34 @@ export async function PUT(req) {
   const { id, bonusPercent, finePercent, writeoffPercent } = await req.json();
   if (!id) return NextResponse.json({ error: 'Не указан садовник' }, { status: 400 });
 
+  const newPercent = Number(writeoffPercent || 0);
+
   const gardener = await prisma.gardener.update({
     where: { id },
     data: {
       bonusPercent: Number(bonusPercent || 0),
       finePercent: Number(finePercent || 0),
-      writeoffPercent: Number(writeoffPercent || 0),
+      writeoffPercent: newPercent,
     },
   });
+
+  try {
+    const ratio = newPercent > 1 ? newPercent / 100 : newPercent;
+    const gardenerOrders = await prisma.order.findMany({ where: { gardenerId: id } });
+    for (const o of gardenerOrders) {
+      const price = o.priceFact > 0 ? o.priceFact : o.priceContract > 0 ? o.priceContract : 0;
+      if (price > 0) {
+        const employeeSalary = Math.round(price * ratio);
+        const companyShare = price - employeeSalary;
+        await prisma.order.update({
+          where: { id: o.id },
+          data: { employeeSalary, companyShare }
+        });
+      }
+    }
+  } catch (e) {
+    console.error('Failed to recalculate orders on gardener percent update:', e);
+  }
 
   return NextResponse.json({ gardener });
 }

@@ -3,128 +3,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-function CatalogManagerSection() {
-  const [type, setType] = useState('inventory');
-  const [items, setItems] = useState([]);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [image, setImage] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const loadCatalog = () => {
-    fetch('/api/admin/catalog')
-      .then(res => res.json())
-      .then(data => {
-        if (type === 'inventory') setItems(data.inventoryItems || []);
-        else setItems(data.preparationItems || []);
-      })
-      .catch(() => {});
-  };
-
-  useEffect(() => {
-    loadCatalog();
-  }, [type]);
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setLoading(true);
-    try {
-      const res = await fetch('/api/admin/catalog', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, name: name.trim(), description, image }),
-      });
-      if (res.ok) {
-        setName('');
-        setDescription('');
-        setImage('');
-        loadCatalog();
-      } else {
-        alert((await res.json()).error || 'Ошибка сохранения');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (!confirm('Удалить из справочника?')) return;
-    const res = await fetch('/api/admin/catalog', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, id }),
-    });
-    if (res.ok) loadCatalog();
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-2 border-b border-slate-200 pb-3">
-        <button
-          type="button"
-          onClick={() => setType('inventory')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold ${type === 'inventory' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'}`}
-        >
-          Инвентарь
-        </button>
-        <button
-          type="button"
-          onClick={() => setType('preparation')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold ${type === 'preparation' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'}`}
-        >
-          Препараты
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="col-span-2 space-y-2">
-          <h4 className="text-xs font-bold text-slate-600 uppercase">Список ({items.length})</h4>
-          {items.length === 0 ? (
-            <div className="text-xs text-slate-400 italic">Справочник пуст</div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-1">
-              {items.map(it => (
-                <div key={it.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {it.image ? (
-                      <img src={it.image} alt="" className="w-12 h-12 object-cover rounded-lg border flex-shrink-0" />
-                    ) : (
-                      <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 flex-shrink-0">Без фото</div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="font-bold text-xs text-slate-800 truncate">{it.name}</div>
-                      {it.description && <div className="text-slate-500 text-[11px] truncate">{it.description}</div>}
-                    </div>
-                  </div>
-                  <button onClick={() => handleDelete(it.id)} className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 bg-rose-50 rounded hover:bg-rose-100">
-                    Удалить
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <form onSubmit={handleAdd} className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 h-fit">
-          <h4 className="text-xs font-bold text-slate-700 uppercase">+ Добавить в справочник</h4>
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Название</label>
-            <input type="text" required value={name} onChange={e => setName(e.target.value)} className="w-full border rounded p-2 text-xs bg-white" placeholder="Например: Секатор / Купорос" />
-          </div>
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Описание (опционально)</label>
-            <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full border rounded p-2 text-xs bg-white" placeholder="Назначение / характеристики" />
-          </div>
-          <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded p-2 text-xs font-bold">
-            {loading ? 'Сохранение...' : 'Сохранить'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
@@ -195,6 +73,148 @@ function getOrderServiceIds(order) {
   return order.serviceId ? [order.serviceId] : [];
 }
 
+function MultiSelectFilter({ label, items, selectedIds, onChange, placeholderAll }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const toggleItem = (id) => {
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter(x => x !== id));
+    } else {
+      onChange([...selectedIds, id]);
+    }
+  };
+
+  const clearAll = () => onChange([]);
+  const selectAll = () => onChange(items.map(i => i.id));
+
+  return (
+    <div className="relative min-w-[200px]">
+      <label className="block text-xs font-semibold text-slate-500 mb-1">
+        {label} {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+      </label>
+
+      {/* Выбранные чипсы */}
+      <div className="flex flex-wrap gap-1 mb-1 max-w-[300px]">
+        {selectedIds.length === 0 ? (
+          <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{placeholderAll}</span>
+        ) : (
+          selectedIds.map(id => {
+            const item = items.find(i => i.id === id);
+            return (
+              <span key={id} className="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium">
+                {item ? item.name : id}
+                <button
+                  type="button"
+                  onClick={() => toggleItem(id)}
+                  className="text-emerald-600 hover:text-emerald-900 font-bold ml-0.5"
+                >
+                  ✕
+                </button>
+              </span>
+            );
+          })
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 flex items-center justify-between w-full shadow-sm hover:bg-slate-50"
+      >
+        <span className="truncate">{selectedIds.length === 0 ? placeholderAll : `Выбрано: ${selectedIds.length}`}</span>
+        <span className="ml-1 text-[10px] text-slate-400">▼</span>
+      </button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setIsOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-40 w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-2 max-h-60 overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-1 mb-1 text-[11px]">
+              <button type="button" onClick={selectAll} className="text-emerald-600 hover:underline font-semibold">Выбрать все</button>
+              <button type="button" onClick={clearAll} className="text-slate-400 hover:underline">Очистить</button>
+            </div>
+            <div className="space-y-1">
+              {items.map(item => {
+                const isChecked = selectedIds.includes(item.id);
+                return (
+                  <label key={item.id} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleItem(item.id)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="truncate text-slate-700">{item.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ColumnToggleDropdown({ gardeners, hiddenIds, onToggle, onShowAll }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const hiddenCount = hiddenIds.length;
+
+  return (
+    <div className="relative">
+      <label className="block text-xs font-semibold text-slate-500 mb-1">Столбцы</label>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-700 flex items-center gap-1 shadow-sm hover:bg-slate-50"
+      >
+        <span>👁 Столбцы</span>
+        {hiddenCount > 0 && (
+          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+            -{hiddenCount}
+          </span>
+        )}
+        <span className="text-[10px] text-slate-400 ml-1">▼</span>
+      </button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setIsOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-40 w-64 bg-white border border-slate-200 rounded-xl shadow-lg p-2 max-h-60 overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-1 mb-1 text-[11px]">
+              <span className="font-semibold text-slate-600">Видимость мастеров</span>
+              {hiddenCount > 0 && (
+                <button type="button" onClick={onShowAll} className="text-emerald-600 hover:underline font-semibold">
+                  Показать все
+                </button>
+              )}
+            </div>
+            <div className="space-y-1">
+              {gardeners.map(g => {
+                const isVisible = !hiddenIds.includes(g.id);
+                return (
+                  <label key={g.id} className="flex items-center gap-2 px-2 py-1 hover:bg-slate-50 rounded cursor-pointer text-xs">
+                    <input
+                      type="checkbox"
+                      checked={isVisible}
+                      onChange={() => onToggle(g.id)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className={`truncate ${isVisible ? 'text-slate-800' : 'text-slate-400 line-through'}`}>{g.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2 border-t pt-1 italic">
+              Подсказка: Двойной клик по заголовку столбца скрывает мастера.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('calendar');
@@ -252,6 +272,29 @@ export default function AdminDashboard() {
   const [searchServiceIds, setSearchServiceIds] = useState([]);
   const [longPressInfo, setLongPressInfo] = useState(null);
   const [longPressTimer, setLongPressTimer] = useState(null);
+
+  // Скрытые столбцы с сохранением в localStorage
+  const [hiddenGardenerIds, setHiddenGardenerIds] = useState([]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('admin_hidden_gardener_ids');
+      if (saved) setHiddenGardenerIds(JSON.parse(saved));
+    } catch (e) {}
+  }, []);
+
+  const toggleHideGardener = (id) => {
+    setHiddenGardenerIds(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      try { localStorage.setItem('admin_hidden_gardener_ids', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  };
+
+  const showAllColumns = () => {
+    setHiddenGardenerIds([]);
+    try { localStorage.setItem('admin_hidden_gardener_ids', JSON.stringify([])); } catch (e) {}
+  };
 
   // Генерация дат для сетки календаря
   const dates = [];
@@ -957,8 +1000,10 @@ export default function AdminDashboard() {
     return true;
   });
 
+  const displayGardeners = visibleGardeners.filter(g => !hiddenGardenerIds.includes(g.id));
+
   const isFilterActive = filterGardenerId !== 'all' || filterStatus !== 'all' || filterServiceId !== 'all' || !!filterDistrict.trim();
-  const isEmptyFilterResult = visibleGardeners.length === 0 || (isFilterActive && filteredOrders.length === 0);
+  const isEmptyFilterResult = displayGardeners.length === 0 || (isFilterActive && filteredOrders.length === 0);
 
   // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
   // Для поиска по полю "примерно где" - показываем все локации сверху
@@ -1137,12 +1182,6 @@ export default function AdminDashboard() {
           className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           🌿 Услуги
-        </button>
-        <button
-          onClick={() => setActiveTab('catalog')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'catalog' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
-        >
-          📦 Базы
         </button>
         <button
           onClick={() => setActiveTab('auction')}
@@ -1437,23 +1476,19 @@ export default function AdminDashboard() {
 
               {/* Фильтры отображения календаря */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 mb-2 flex flex-wrap gap-4 items-end text-xs">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Садовник</label>
-                  <select
-                    value={filterGardenerId}
-                    onChange={e => setFilterGardenerId(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
-                  >
-                    <option value="all">Все садовники</option>
-                    {gardeners.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                </div>
+                <MultiSelectFilter
+                  label="Мастер (садовник)"
+                  items={gardeners}
+                  selectedIds={filterGardenerIds}
+                  onChange={setFilterGardenerIds}
+                  placeholderAll="Все садовники"
+                />
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Статус заказа</label>
                   <select
                     value={filterStatus}
                     onChange={e => setFilterStatus(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white"
                   >
                     <option value="all">Любой</option>
                     <option value="Новый заказ">Новый заказ</option>
@@ -1463,17 +1498,13 @@ export default function AdminDashboard() {
                     <option value="Отменен">Отменен</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Услуга (специализация)</label>
-                  <select
-                    value={filterServiceId}
-                    onChange={e => setFilterServiceId(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
-                  >
-                    <option value="all">Любая</option>
-                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
+                <MultiSelectFilter
+                  label="Услуга (специализация)"
+                  items={services}
+                  selectedIds={filterServiceIds}
+                  onChange={setFilterServiceIds}
+                  placeholderAll="Все услуги"
+                />
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Примерно где (район)</label>
                   <select value={filterDistrict} onChange={e => setFilterDistrict(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white text-slate-700">
@@ -1481,6 +1512,12 @@ export default function AdminDashboard() {
                     {allDistricts.map(district => <option key={district} value={district}>{district}</option>)}
                   </select>
                 </div>
+                <ColumnToggleDropdown
+                  gardeners={visibleGardeners}
+                  hiddenIds={hiddenGardenerIds}
+                  onToggle={toggleHideGardener}
+                  onShowAll={showAllColumns}
+                />
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">Дни недели</label>
                   <div className="flex gap-1">
@@ -1524,8 +1561,13 @@ export default function AdminDashboard() {
                     <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
                       <tr className="bg-slate-100 border-b border-slate-200">
                         <th className="px-1.5 py-1 text-left text-[12px] font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
-                        {visibleGardeners.map(g => (
-                          <th key={g.id} className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm align-top">
+                        {displayGardeners.map(g => (
+                          <th
+                            key={g.id}
+                            onDoubleClick={() => toggleHideGardener(g.id)}
+                            title="Двойной клик — скрыть столбец"
+                            className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm align-top cursor-pointer hover:bg-slate-200/60 transition-colors select-none"
+                          >
                             <div className="flex flex-col items-center gap-0.5">
                               <span>{g.name}</span>
                               {g.jobTitle && <span className="text-[10px] text-slate-500 font-normal bg-slate-200/60 px-1.5 py-0.2 rounded">{g.jobTitle}</span>}
@@ -1552,7 +1594,7 @@ export default function AdminDashboard() {
                                 {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
                               </span>
                             </td>
-                            {visibleGardeners.map(g => {
+                            {displayGardeners.map(g => {
                               const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
                               const dayOrders = filterStatus === 'all'
                                 ? dayOrdersAll
@@ -1881,13 +1923,6 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {activeTab === 'catalog' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
-              <h3 className="text-lg font-bold text-slate-800">Справочные базы: Инвентарь и Препараты</h3>
-              <p className="text-xs text-slate-500">Позиции из этих баз можно выбирать галочками в карточке каждого садовника.</p>
-              <CatalogManagerSection />
-            </div>
-          )}
 
           {activeTab === 'services' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2274,7 +2309,23 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Садовник</label>
-                  <select value={formData.gardenerId} onChange={e => setFormData({...formData, gardenerId: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                  <select
+                    value={formData.gardenerId}
+                    onChange={e => {
+                      const gId = e.target.value;
+                      const gardener = gardeners.find(g => g.id === gId);
+                      let salary = formData.employeeSalary;
+                      let share = formData.companyShare;
+                      if (gardener && formData.priceFact > 0) {
+                        const gPercent = gardener.writeoffPercent || 0;
+                        const ratio = gPercent > 1 ? gPercent / 100 : gPercent;
+                        salary = Math.round(formData.priceFact * ratio);
+                        share = formData.priceFact - salary;
+                      }
+                      setFormData({ ...formData, gardenerId: gId, employeeSalary: salary, companyShare: share });
+                    }}
+                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
+                  >
                     <option value="">Без садовника (для аукциона)</option>
                     {gardeners.map(g => (
                       <option key={g.id} value={g.id}>{g.name}</option>
