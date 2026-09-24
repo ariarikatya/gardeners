@@ -719,6 +719,8 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
+  const [image, setImage] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [selectedGardenerIds, setSelectedGardenerIds] = useState([]);
@@ -739,6 +741,39 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
     setSelectedItemIds([]);
   }, [catalogType]);
 
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    setUploading(true);
+    try {
+      const file = files[0];
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64 })
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        setImage(data.url);
+      } else {
+        alert(data.error || 'Ошибка загрузки фото');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Ошибка при загрузке изображения');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleAddItem = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
@@ -747,11 +782,12 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
       const res = await fetch('/api/catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: catalogType, name: name.trim(), description: desc.trim() }),
+        body: JSON.stringify({ type: catalogType, name: name.trim(), description: desc.trim(), image: image || null }),
       });
       if (res.ok) {
         setName('');
         setDesc('');
+        setImage('');
         loadCatalog();
       } else {
         alert((await res.json()).error || 'Ошибка');
@@ -851,7 +887,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
         <form onSubmit={handleAddItem} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 h-fit">
           <h4 className="text-xs font-bold text-slate-700 uppercase">+ Новая позиция в базу</h4>
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Название</label>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Название *</label>
             <input
               type="text" required
               value={name} onChange={e => setName(e.target.value)}
@@ -868,11 +904,36 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
               placeholder="Характеристики или применение..."
             />
           </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Фотография</label>
+            <div className="flex items-center gap-2">
+              {image ? (
+                <div className="relative group flex-shrink-0">
+                  <img src={image} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                  <button
+                    type="button"
+                    onClick={() => setImage('')}
+                    className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
+                    title="Удалить фото"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : null}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                disabled={uploading}
+                className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 disabled:opacity-50"
+              />
+            </div>
+          </div>
           <button
-            type="submit" disabled={loading}
+            type="submit" disabled={loading || uploading}
             className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors disabled:opacity-50"
           >
-            {loading ? 'Сохранение...' : '+ Добавить в справочник'}
+            {loading ? 'Сохранение...' : uploading ? 'Загрузка фото...' : '+ Добавить в справочник'}
           </button>
         </form>
 
@@ -896,14 +957,21 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
                 const isChecked = selectedItemIds.includes(it.id);
                 return (
                   <div key={it.id} className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 text-xs ${isChecked ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-200'}`}>
-                    <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1">
+                    <label className="flex items-center gap-3 cursor-pointer min-w-0 flex-1">
                       <input
                         type="checkbox"
                         checked={isChecked}
                         onChange={() => setSelectedItemIds(prev => prev.includes(it.id) ? prev.filter(x => x !== it.id) : [...prev, it.id])}
-                        className="rounded text-emerald-600"
+                        className="rounded text-emerald-600 flex-shrink-0"
                       />
-                      <div className="min-w-0">
+                      {it.image ? (
+                        <img src={it.image} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                      ) : (
+                        <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-[9px] text-slate-400 flex-shrink-0 text-center px-1">
+                          Без фото
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
                         <div className="font-bold text-slate-800 truncate">{it.name}</div>
                         {it.description && <div className="text-[10px] text-slate-500 truncate">{it.description}</div>}
                       </div>
