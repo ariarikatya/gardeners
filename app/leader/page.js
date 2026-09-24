@@ -90,8 +90,13 @@ export default function LeaderDashboard() {
       if (nextStart) params.set('start', nextStart);
       if (nextEnd) params.set('end', nextEnd);
       const res = await fetch(`/api/leader?${params.toString()}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorJson;
+        try { errorJson = JSON.parse(errorText); } catch (e) {}
+        throw new Error((errorJson && errorJson.error) || `Ошибка сервера (${res.status}): ${errorText.slice(0, 100)}`);
+      }
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Ошибка загрузки');
       setData(json);
     } catch (error) {
       alert(error.message);
@@ -402,7 +407,7 @@ export default function LeaderDashboard() {
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Прогноз продаж</div>
                 <div className="text-2xl font-bold text-blue-700 mt-2">{formatMoney(summary.forecast)}</div>
-                <div className="text-[11px] text-slate-500 mt-1">Ожидаемая доля фирмы по НЕвыполненным заказам.</div>
+                <div className="text-[11px] text-slate-500 mt-1">Считается по планируемым заказам за вычетом процента садовника.</div>
               </div>
             </div>
  
@@ -766,7 +771,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
     if (res.ok) loadCatalog();
   };
 
-  const handleMassAssign = async () => {
+  const handleMassAssign = async (action = 'assign') => {
     if (selectedItemIds.length === 0) {
       alert('Выберите хотя бы одну позицию из справочника!');
       return;
@@ -785,15 +790,16 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
           type: catalogType,
           itemIds: selectedItemIds,
           gardenerIds: selectedGardenerIds,
+          action,
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`Успешно назначено ${data.count} сотрудникам!`);
+        alert(action === 'unassign' ? `Снято назначение у ${data.count} сотрудников!` : `Успешно назначено ${data.count} сотрудникам!`);
         setSelectedItemIds([]);
         if (onRefresh) onRefresh();
       } else {
-        alert(data.error || 'Ошибка назначения');
+        alert(data.error || 'Ошибка');
       }
     } finally {
       setAssigning(false);
@@ -941,14 +947,24 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={handleMassAssign}
-              disabled={assigning || selectedItemIds.length === 0 || selectedGardenerIds.length === 0}
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-sm transition-all"
-            >
-              {assigning ? 'Назначение...' : `🚀 Назначить ${selectedItemIds.length} поз. для ${selectedGardenerIds.length} сотрудников`}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleMassAssign('assign')}
+                disabled={assigning || selectedItemIds.length === 0 || selectedGardenerIds.length === 0}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-sm transition-all"
+              >
+                {assigning ? 'Назначение...' : `🚀 Назначить (${selectedItemIds.length} поз. → ${selectedGardenerIds.length} сотр.)`}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMassAssign('unassign')}
+                disabled={assigning || selectedItemIds.length === 0 || selectedGardenerIds.length === 0}
+                className="py-2.5 px-4 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 disabled:opacity-40 font-bold text-xs rounded-xl transition-all"
+              >
+                ✕ Снять
+              </button>
+            </div>
           </div>
         </div>
       </div>

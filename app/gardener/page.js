@@ -200,8 +200,8 @@ export default function GardenerDashboard() {
         fetch('/api/gardener/orders'),
         fetch('/api/gardener/operations')
       ]);
-      const data = await resOrders.json();
-      const ops = await resOps.json();
+      const data = resOrders.ok ? await resOrders.json() : {};
+      const ops = resOps.ok ? await resOps.json() : {};
       setOrders(data.orders || []);
       setMyDayOffs(data.dayOffs || []);
       setOperations(ops.operations || []);
@@ -686,8 +686,8 @@ export default function GardenerDashboard() {
       >
         <span className={`font-medium ${isDayOff ? 'text-slate-700 font-bold' : 'text-slate-700'}`}>{d}</span>
         {isDayOff && (
-          <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-slate-600 bg-slate-300/80 px-1 py-0.2 rounded">
-            🏖️ Выходной
+          <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-slate-600 bg-slate-300/80 px-1 py-0.2 rounded truncate max-w-full">
+            🏖️ Вых.
           </span>
         )}
         {dayOrders.length > 0 && !isDayOff && (
