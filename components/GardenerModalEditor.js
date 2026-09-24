@@ -1,6 +1,8 @@
 'use client';
 import { useState } from 'react';
 
+import { useEffect } from 'react';
+
 export default function GardenerModalEditor({ gardener, type, onClose, onSave }) {
   // type: 'skills' | 'inventory' | 'preparations' | 'works' | 'reviews'
   const parseItems = (val) => {
@@ -14,6 +16,18 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
 
   const [items, setItems] = useState(parseItems(gardener[type]));
   const [uploading, setUploading] = useState(false);
+  const [catalogItems, setCatalogItems] = useState([]);
+
+  useEffect(() => {
+    if (type === 'inventory' || type === 'preparations') {
+      fetch('/api/catalog')
+        .then(res => res.json())
+        .then(data => {
+          setCatalogItems(type === 'inventory' ? data.inventoryItems || [] : data.preparationItems || []);
+        })
+        .catch(() => {});
+    }
+  }, [type]);
 
   // Form states depending on type
   const [skillText, setSkillText] = useState('');
@@ -382,6 +396,28 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
 
           {type === 'inventory' && (
             <div className="space-y-2">
+              {catalogItems.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Выбрать из общего справочника базы:</label>
+                  <select
+                    onChange={(e) => {
+                      const selected = catalogItems.find(c => c.id === e.target.value);
+                      if (selected) {
+                        setInvName(selected.name);
+                        setInvDesc(selected.description || '');
+                        setInvImage(selected.image || '');
+                      }
+                      e.target.value = '';
+                    }}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white text-emerald-800 font-medium"
+                  >
+                    <option value="">+ Выбрать из базы...</option>
+                    {catalogItems.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} {c.description ? `(${c.description})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <input
                 type="text"
                 placeholder="Название инструмента (например: Кусторез)"
@@ -415,6 +451,28 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
 
           {type === 'preparations' && (
             <div className="space-y-2">
+              {catalogItems.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Выбрать из общего справочника базы:</label>
+                  <select
+                    onChange={(e) => {
+                      const selected = catalogItems.find(c => c.id === e.target.value);
+                      if (selected) {
+                        setPrepName(selected.name);
+                        setPrepDesc(selected.description || '');
+                        setPrepImage(selected.image || '');
+                      }
+                      e.target.value = '';
+                    }}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white text-emerald-800 font-medium"
+                  >
+                    <option value="">+ Выбрать из базы...</option>
+                    {catalogItems.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} {c.description ? `(${c.description})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <input
                 type="text"
                 placeholder="Название препарата (например: Бордоская смесь)"
