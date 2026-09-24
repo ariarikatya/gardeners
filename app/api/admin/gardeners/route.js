@@ -54,7 +54,7 @@ export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
-  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo, jobTitle, timeSlots, isRegular, annualContract, partnerId } = body;
+  const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo, jobTitle, timeSlots, isRegular, annualContract, partnerId, writeoffPercent, bonusPercent, finePercent } = body;
 
   try {
     const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });
@@ -106,6 +106,27 @@ export async function PUT(req) {
     if (works !== undefined) dataToUpdate.works = parseJsonField(works);
     if (reviews !== undefined) dataToUpdate.reviews = parseJsonField(reviews);
 
+    if (writeoffPercent !== undefined) dataToUpdate.writeoffPercent = Number(writeoffPercent || 0);
+    if (bonusPercent !== undefined) dataToUpdate.bonusPercent = Number(bonusPercent || 0);
+    if (finePercent !== undefined) dataToUpdate.finePercent = Number(finePercent || 0);
+
+    if (writeoffPercent !== undefined && Number(writeoffPercent) !== existing.writeoffPercent) {
+      const newPercent = Number(writeoffPercent || 0);
+      const ratio = newPercent > 1 ? newPercent / 100 : newPercent;
+      const gardenerOrders = await prisma.order.findMany({ where: { gardenerId: id } });
+      for (const o of gardenerOrders) {
+        const price = o.priceFact > 0 ? o.priceFact : o.priceContract > 0 ? o.priceContract : 0;
+        if (price > 0) {
+          const employeeSalary = Math.round(price * ratio);
+          const companyShare = price - employeeSalary;
+          await prisma.order.update({
+            where: { id: o.id },
+            data: { employeeSalary, companyShare }
+          });
+        }
+      }
+    }
+
     if (jobTitle !== undefined) dataToUpdate.jobTitle = jobTitle === '' ? null : jobTitle;
     if (timeSlots !== undefined) dataToUpdate.timeSlots = parseJsonField(timeSlots);
     if (isRegular !== undefined) dataToUpdate.isRegular = Boolean(isRegular);
@@ -132,6 +153,10 @@ export async function PUT(req) {
     console.error('Gardener PUT error:', e);
     return NextResponse.json({ error: 'Не удалось обновить садовника' }, { status: 400 });
   }
+}
+
+export async function PATCH(req) {
+  return PUT(req);
 }
 
 export async function DELETE(req) {

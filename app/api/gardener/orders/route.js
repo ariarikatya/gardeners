@@ -84,10 +84,13 @@ export async function PUT(req) {
     }
 
     const gardener = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
-    const writeoffPercent = gardener?.writeoffPercent || 0;
-    const percentRatio = writeoffPercent > 1 ? writeoffPercent / 100 : writeoffPercent;
-    const companyShare = amount * percentRatio;
-    const employeeSalary = amount - companyShare;
+    const rawPercent = gardener?.writeoffPercent && Number(gardener.writeoffPercent) > 0 ? Number(gardener.writeoffPercent) : 35;
+    const gardenerRatio = rawPercent > 1 ? rawPercent / 100 : rawPercent;
+
+    // Formula: К выплате (employeeSalary) = amount * gardenerRatio
+    // Formula: Долг фирме (companyShare) = amount * (1 - gardenerRatio)
+    const employeeSalary = Math.round(amount * gardenerRatio);
+    const companyShare = amount - employeeSalary;
 
     data = {
       status: 'Выполнен',
