@@ -59,7 +59,18 @@ export async function GET(req) {
   const totalRevenue = orders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0);
   const totalContract = orders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
   const totalSalary = orders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
-  const totalCompanyShare = orders.reduce((sum, o) => sum + Number(o.companyShare || 0), 0);
+  const completedCashOrders = orders.filter(o => o.status === 'Выполнен' && o.isCash !== false);
+  const totalCompanyShare = completedCashOrders.reduce((sum, o) => {
+    let share = Number(o.companyShare || 0);
+    if (share <= 0) {
+      const price = Number(o.priceFact || o.priceContract || 0);
+      const g = gardeners.find(item => item.id === o.gardenerId);
+      const rawPercent = g?.writeoffPercent && Number(g.writeoffPercent) > 0 ? Number(g.writeoffPercent) : 35;
+      const ratio = rawPercent > 1 ? rawPercent / 100 : rawPercent;
+      share = price - Math.round(price * ratio);
+    }
+    return sum + share;
+  }, 0);
 
   // Загрузим операции лидера за период и сгруппируем по садовнику
   const operations = await prisma.operation.findMany({ where: { createdAt: { gte: start, lte: end } } });
@@ -80,7 +91,18 @@ export async function GET(req) {
     const earned = completedOrders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0);
     const contract = gardenerOrders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
     const salary = gardenerOrders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
-    const share = gardenerOrders.reduce((sum, o) => sum + Number(o.companyShare || 0), 0);
+    const share = completedOrders
+      .filter(o => o.isCash !== false)
+      .reduce((sum, o) => {
+        let sh = Number(o.companyShare || 0);
+        if (sh <= 0) {
+          const price = Number(o.priceFact || o.priceContract || 0);
+          const rawPercent = gardener.writeoffPercent && Number(gardener.writeoffPercent) > 0 ? Number(gardener.writeoffPercent) : 35;
+          const ratio = rawPercent > 1 ? rawPercent / 100 : rawPercent;
+          sh = price - Math.round(price * ratio);
+        }
+        return sum + sh;
+      }, 0);
     const paidToGardener = completedOrders.reduce((sum, o) => {
       const targets = normalizePaidTargets(o.paidTo);
       const hasGardenerPayment = targets.includes('GARDENER') || (!targets.length && o.paid);
@@ -155,6 +177,9 @@ export async function GET(req) {
 
   const pendingOrdersAll = orders.filter(o => !['Выполнен', 'Отменен', 'Отказ'].includes(o.status));
   const forecastRevenue = pendingOrdersAll.reduce((sum, o) => sum + calcExpectedCompanyRevenue(o), 0);
+
+  const daysInPeriod = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  const avgDailyRevenue = daysInPeriod > 0 ? (totalRevenue - approvedExpenses) / daysInPeriod : 0;
 
   return NextResponse.json({
     period: {

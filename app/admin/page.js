@@ -443,11 +443,11 @@ export default function AdminDashboard() {
         const meData = await resMe.json();
         setCurrentUser(meData.user || null);
       }
-      const dataG = await resG.json();
-      const dataO = await resO.json();
-      const dataD = await resD.json();
-      const dataB = await resB.json();
-      const dataS = await resS.json();
+      const dataG = resG.ok ? await resG.json() : {};
+      const dataO = resO.ok ? await resO.json() : {};
+      const dataD = resD.ok ? await resD.json() : {};
+      const dataB = resB.ok ? await resB.json() : {};
+      const dataS = resS.ok ? await resS.json() : {};
       const allOrd = dataO.orders || [];
       setGardeners(dataG.gardeners || []);
       setOrders(allOrd.filter(o => o.status !== 'Аукцион'));

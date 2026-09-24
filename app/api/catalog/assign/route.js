@@ -16,7 +16,7 @@ export async function POST(req) {
   const user = await checkAuth(req);
   if (!user) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { type, itemIds, gardenerIds } = await req.json();
+  const { type, itemIds, gardenerIds, action } = await req.json();
 
   if (!Array.isArray(itemIds) || itemIds.length === 0) {
     return NextResponse.json({ error: 'Выберите хотя бы одну позицию' }, { status: 400 });
@@ -60,22 +60,31 @@ export async function POST(req) {
         }
       }
 
-      // Добавляем новые элементы, проверяя по названию на дубликаты
-      const updatedList = [...existingList];
-      items.forEach(it => {
-        const exists = updatedList.some(existingIt => {
-          if (typeof existingIt === 'string') return existingIt.toLowerCase() === it.name.toLowerCase();
-          return existingIt && existingIt.name && existingIt.name.toLowerCase() === it.name.toLowerCase();
-        });
+      let updatedList = [];
 
-        if (!exists) {
-          updatedList.push({
-            name: it.name,
-            desc: it.description || '',
-            image: it.image || null,
+      if (action === 'unassign') {
+        const removeNames = items.map(it => it.name.toLowerCase());
+        updatedList = existingList.filter(existingIt => {
+          const itemTitle = typeof existingIt === 'string' ? existingIt : existingIt && existingIt.name;
+          return itemTitle && !removeNames.includes(itemTitle.toLowerCase());
+        });
+      } else {
+        updatedList = [...existingList];
+        items.forEach(it => {
+          const exists = updatedList.some(existingIt => {
+            if (typeof existingIt === 'string') return existingIt.toLowerCase() === it.name.toLowerCase();
+            return existingIt && existingIt.name && existingIt.name.toLowerCase() === it.name.toLowerCase();
           });
-        }
-      });
+
+          if (!exists) {
+            updatedList.push({
+              name: it.name,
+              desc: it.description || '',
+              image: it.image || null,
+            });
+          }
+        });
+      }
 
       await prisma.gardener.update({
         where: { id: gardener.id },
