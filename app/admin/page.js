@@ -259,9 +259,9 @@ export default function AdminDashboard() {
   const [newServiceName, setNewServiceName] = useState('');
 
   // Фильтры календаря
-  const [filterGardenerId, setFilterGardenerId] = useState('all');
+  const [filterGardenerIds, setFilterGardenerIds] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [filterServiceId, setFilterServiceId] = useState('all');
+  const [filterServiceIds, setFilterServiceIds] = useState([]);
   const [filterDistrict, setFilterDistrict] = useState('');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
 
@@ -333,8 +333,15 @@ export default function AdminDashboard() {
   };
 
   const handleToday = () => {
-    setCurrentMonth(new Date());
-    setStartFromToday(true);
+    const today = new Date();
+    const isCurrentMonth = currentMonth.getFullYear() === today.getFullYear() && currentMonth.getMonth() === today.getMonth();
+
+    if (!isCurrentMonth) {
+      setCurrentMonth(today);
+      setStartFromToday(true);
+    } else {
+      setStartFromToday(prev => !prev);
+    }
   };
 
   const maxAllowedMonth = new Date(now.getFullYear(), now.getMonth() + 12, 1);
@@ -975,23 +982,35 @@ export default function AdminDashboard() {
     });
   };
 
-  let visibleGardeners = filterGardenerId === 'all'
-    ? gardeners
-    : gardeners.filter(g => g.id === filterGardenerId);
-  if (filterServiceId !== 'all') {
-    visibleGardeners = visibleGardeners.filter(g => (g.services || []).some(s => s.id === filterServiceId));
+  let visibleGardeners = gardeners || [];
+  const hasGardenerFilter = Array.isArray(filterGardenerIds) && filterGardenerIds.length > 0;
+  const hasServiceFilter = Array.isArray(filterServiceIds) && filterServiceIds.length > 0;
+
+  if (hasGardenerFilter || hasServiceFilter) {
+    visibleGardeners = (gardeners || []).filter(g => {
+      const matchGardener = hasGardenerFilter && filterGardenerIds.includes(g.id);
+      const matchService = hasServiceFilter && (g.services || []).some(s => filterServiceIds.includes(s.id));
+      return matchGardener || matchService;
+    });
   }
+
   if (filterDistrict) {
     const normalizedDistrict = filterDistrict.trim().toLocaleLowerCase('ru-RU');
-    visibleGardeners = visibleGardeners.filter(g => orders.some(order =>
+    visibleGardeners = visibleGardeners.filter(g => (orders || []).some(order =>
       order.gardenerId === g.id && (order.district || '').trim().toLocaleLowerCase('ru-RU') === normalizedDistrict
     ));
   }
 
-  const filteredOrders = orders.filter(o => {
-    if (filterGardenerId !== 'all' && o.gardenerId !== filterGardenerId) return false;
+  const filteredOrders = (orders || []).filter(o => {
     if (filterStatus !== 'all' && o.status !== filterStatus) return false;
-    if (filterServiceId !== 'all' && getOrderServiceIds(o).indexOf(filterServiceId) === -1) return false;
+
+    if (hasGardenerFilter || hasServiceFilter) {
+      const matchGardener = hasGardenerFilter && filterGardenerIds.includes(o.gardenerId);
+      const orderServiceIds = getOrderServiceIds(o);
+      const matchService = hasServiceFilter && orderServiceIds.some(sid => filterServiceIds.includes(sid));
+      if (!matchGardener && !matchService) return false;
+    }
+
     if (filterDistrict) {
       const normDist = filterDistrict.trim().toLocaleLowerCase('ru-RU');
       const orderDist = (o.district || '').trim().toLocaleLowerCase('ru-RU');
@@ -1000,9 +1019,9 @@ export default function AdminDashboard() {
     return true;
   });
 
-  const displayGardeners = visibleGardeners.filter(g => !hiddenGardenerIds.includes(g.id));
+  const displayGardeners = visibleGardeners.filter(g => !(hiddenGardenerIds || []).includes(g.id));
 
-  const isFilterActive = filterGardenerId !== 'all' || filterStatus !== 'all' || filterServiceId !== 'all' || !!filterDistrict.trim();
+  const isFilterActive = hasGardenerFilter || hasServiceFilter || filterStatus !== 'all' || !!filterDistrict.trim();
   const isEmptyFilterResult = displayGardeners.length === 0 || (isFilterActive && filteredOrders.length === 0);
 
   // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
@@ -1298,9 +1317,16 @@ export default function AdminDashboard() {
                   <button
                     type="button"
                     onClick={handleToday}
-                    className="ml-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg text-xs border border-emerald-200 transition-all"
+                    className={`ml-1 px-3 py-1 font-bold rounded-lg text-xs border transition-all ${
+                      startFromToday && currentMonth.getFullYear() === now.getFullYear() && currentMonth.getMonth() === now.getMonth()
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                    }`}
+                    title={startFromToday ? 'Кликните, чтобы показать с начала месяца' : 'Кликните, чтобы показать с сегодня'}
                   >
-                    Сегодня
+                    {startFromToday && currentMonth.getFullYear() === now.getFullYear() && currentMonth.getMonth() === now.getMonth()
+                      ? '✓ С сегодня'
+                      : 'Сегодня (с 1-го)'}
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
