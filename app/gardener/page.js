@@ -545,6 +545,12 @@ export default function GardenerDashboard() {
             const phoneDigits = formatPhoneDigits(order.clientPhone);
             const maskedPhone = maskPhone(order.clientPhone);
 
+            const isTomorrowOrder = (() => {
+              const tom = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+              tom.setHours(0,0,0,0);
+              return orderDateAtMidnight.getTime() === tom.getTime();
+            })();
+
             return showPhone ? (
               <div className="space-y-2 mt-1">
                 <div className="flex items-center justify-between flex-wrap gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
@@ -564,17 +570,40 @@ export default function GardenerDashboard() {
                     <option value="написал смс">написал смс</option>
                   </select>
                 </div>
+
+                {/* Бейдж со временем и статусом звонка / предупреждение о штрафе */}
+                {order.clientCalledAt || order.callStatus ? (
+                  <div className="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 p-2 rounded-lg flex items-center justify-between">
+                    <span>📞 {order.callStatus ? `Статус: ${order.callStatus}` : 'Звонок зафиксирован'}</span>
+                    {order.clientCalledAt && (
+                      <span className="text-slate-500">{new Date(order.clientCalledAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
+                    )}
+                  </div>
+                ) : isTomorrowOrder ? (
+                  <div className="text-[11px] bg-amber-50 text-amber-900 border border-amber-200 p-2 rounded-lg font-medium flex items-center gap-1">
+                    <span>⚠️ Не связался — после 20:00 штраф 1000 ₽</span>
+                  </div>
+                ) : null}
+
                 <div className="flex gap-2">
                   <a
                     href={`tel:${phoneDigits ? `+${phoneDigits}` : order.clientPhone}`}
-                    onClick={() => markOrderAction(order, 'mark_call')}
+                    onClick={() => {
+                      if (order.callStatus && ['не дозвон', 'отказ'].includes(order.callStatus)) {
+                        if (!confirm(`Текущий статус звонка «${order.callStatus}». Изменить статус на «связался»?`)) {
+                          markOrderAction(order, 'mark_call');
+                          return;
+                        }
+                      }
+                      markOrderAction(order, 'mark_call', { callStatus: 'связался' });
+                    }}
                     className="flex-1 text-center text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
                   >
                     📞 Позвонить
                   </a>
                   <a
                     href={`sms:+${phoneDigits || order.clientPhone}`}
-                    onClick={() => markOrderAction(order, 'mark_call')}
+                    onClick={() => markOrderAction(order, 'mark_call', { callStatus: 'написал смс' })}
                     className="flex-1 text-center text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white py-2 px-3 rounded-lg flex items-center justify-center gap-1 shadow-sm"
                   >
                     💬 SMS

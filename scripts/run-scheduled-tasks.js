@@ -32,13 +32,24 @@ async function run() {
       }
     }
 
-    if (now.getHours() >= 18) {
+    if (now.getHours() >= 20) {
       const toms = await prisma.order.findMany({ where: { date: { gte: tomorrow, lte: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 23, 59, 59) } } });
       for (const o of toms) {
         if (!o.callStatus && o.status !== 'Выполнен' && o.status !== 'Отменен') {
-          const exists = await prisma.operation.findFirst({ where: { gardenerId: o.gardenerId, type: 'fine', orderId: o.id } });
+          const exists = await prisma.operation.findFirst({
+            where: {
+              gardenerId: o.gardenerId,
+              type: 'fine',
+              orderId: o.id,
+              OR: [
+                { description: { contains: '18:00' } },
+                { description: { contains: '20:00' } },
+                { description: { contains: 'не связался' } }
+              ]
+            }
+          });
           if (!exists) {
-            const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 1000, description: `Штраф: не связался с клиентом до 18:00 (order:${o.id})` } });
+            const op = await prisma.operation.create({ data: { gardenerId: o.gardenerId, orderId: o.id, type: 'fine', amount: 1000, description: `Штраф: не связался с клиентом до 20:00 (order:${o.id})` } });
             created.push(op);
             console.log('Created call fine for order', o.id, 'gardener', o.gardenerId);
           }
