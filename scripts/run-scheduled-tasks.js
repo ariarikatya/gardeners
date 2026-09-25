@@ -1,9 +1,8 @@
 // Script to run scheduled tasks (fines) from the command line environment.
 // Usage: node scripts/run-scheduled-tasks.js
 
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function startOfDay(d) {
   const x = new Date(d);

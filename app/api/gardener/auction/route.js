@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { notifyDispatchers } from '@/lib/vkApi';
 
-const prisma = new PrismaClient();
 
 async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;

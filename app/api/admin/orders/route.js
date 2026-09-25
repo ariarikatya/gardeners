@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { forwardToAmo } from '@/lib/amo';
-import amoApi from '@/lib/amoApi'; // Исправлено имя файла
+import amoApi from '@/lib/amoApi';
 import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
+import { sendToAll } from '@/lib/webPush';
 
-const prisma = new PrismaClient();
 
 const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
 
@@ -102,6 +102,34 @@ export async function POST(req) {
         amoDealId: leadAmoDealId,
       },
     });
+
+    // Web push notifications for dispatchers (fire-and-forget)
+    (async () => {
+      try {
+        let serviceName = '';
+        if (order.serviceId) {
+          const svc = await prisma.service.findUnique({ where: { id: order.serviceId } });
+          if (svc) serviceName = svc.name;
+        }
+        const dateStr = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
+        const bodyParts = [
+          `Имя: ${order.clientName || 'Не указано'}`,
+          `Тел: ${order.clientPhone || 'Не указан'}`,
+          serviceName ? `Услуга: ${serviceName}` : null,
+          `Дата: ${dateStr}`,
+          order.district ? `Район: ${order.district}` : null,
+        ].filter(Boolean).join(', ');
+
+        await sendToAll({
+          title: '🌿 Новая заявка',
+          body: bodyParts,
+          tag: order.id,
+          url: '/admin',
+        });
+      } catch (err) {
+        console.error('WebPush notification error on order creation:', err.message);
+      }
+    })();
 
     if (!leadAmoDealId) {
       let serviceName = '';
@@ -390,6 +418,36 @@ export async function PUT(req) {
       data: updateData,
       include: { service: true }
     });
+
+    if (updateData.status && existing && existing.status !== updateData.status) {
+      (async () => {
+        try {
+          let serviceName = order.service?.name || '';
+          if (!serviceName && order.serviceId) {
+            const svc = await prisma.service.findUnique({ where: { id: order.serviceId } });
+            if (svc) serviceName = svc.name;
+          }
+          const dateStr = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
+          const bodyParts = [
+            `Статус: ${order.status}`,
+            `Имя: ${order.clientName || 'Не указано'}`,
+            `Тел: ${order.clientPhone || 'Не указан'}`,
+            serviceName ? `Услуга: ${serviceName}` : null,
+            `Дата: ${dateStr}`,
+            order.district ? `Район: ${order.district}` : null,
+          ].filter(Boolean).join(', ');
+
+          await sendToAll({
+            title: '🌿 Заявка обновлена',
+            body: bodyParts,
+            tag: order.id,
+            url: '/admin',
+          });
+        } catch (err) {
+          console.error('WebPush notification error on order status update:', err.message);
+        }
+      })();
+    }
 
     try {
       const amoLeadId = order.amoDealId || existing?.amoDealId;

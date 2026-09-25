@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 // ИСПРАВЛЕНО: используем import вместо require для совместимости с Next.js App Router
 import { sendVkMessage, getSiteUrl } from '@/lib/vkApi';
 
 // ИСПРАВЛЕНО: безопасная инициализация Prisma для серверлесс-среды (Netlify)
 const globalForPrisma = globalThis;
-const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 function sanitizePhone(text) {

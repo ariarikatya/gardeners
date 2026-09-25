@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 
-const prisma = new PrismaClient();
 
 async function checkLeader(req) {
   const token = req.cookies.get('token')?.value;
