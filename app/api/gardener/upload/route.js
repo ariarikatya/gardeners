@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 import { uploadToYandexDisk } from '@/lib/yandexDisk';
 
-const prisma = new PrismaClient();
 
 async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;

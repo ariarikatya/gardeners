@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 import { forwardToAmoUnsorted } from '@/lib/amo';
 import { notifyDispatchers } from '@/lib/vkApi';
+import { sendToAll } from '@/lib/webPush';
 
-const prisma = new PrismaClient();
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +80,29 @@ export async function POST(req) {
         preferredInventory: finalInventory,
       },
     });
+
+    // Web push notifications for dispatchers (fire-and-forget)
+    (async () => {
+      try {
+        const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
+        const bodyParts = [
+          `Имя: ${name ? String(name).trim() : 'Не указано'}`,
+          `Тел: ${phoneClean}`,
+          `Услуга: ${serviceName || 'Не указана'}`,
+          `Дата: ${prefDateStr}`,
+          body.district ? `Район: ${body.district}` : null,
+        ].filter(Boolean).join(', ');
+
+        await sendToAll({
+          title: '🌿 Новая заявка',
+          body: bodyParts,
+          tag: lead.id,
+          url: '/admin',
+        });
+      } catch (err) {
+        console.error('WebPush notification error:', err.message);
+      }
+    })();
 
     // ...и одновременно уходит в amoCRM — сразу через веб-формы (forwardToAmo)
     const noteParts = [];

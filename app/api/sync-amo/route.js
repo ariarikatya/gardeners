@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 import amoApi from '@/lib/amoApi';
 import { STAGE_IDS } from '@/lib/amoStageIds';
 
-const prisma = new PrismaClient();
 
 export async function GET() {
   try {

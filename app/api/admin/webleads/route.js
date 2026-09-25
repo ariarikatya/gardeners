@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import amoApi from '@/lib/amoApi';
 
-const prisma = new PrismaClient();
 
 async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
