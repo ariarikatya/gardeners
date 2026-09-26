@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { verifyToken } from '@/lib/jwt';
 import prisma from '@/lib/prisma';
 import { uploadToYandexDisk } from '@/lib/yandexDisk';
@@ -43,15 +44,17 @@ export async function POST(req) {
     const folderPath = `/Садовники/${folderName}`;
 
     console.log(`📁 Создаю/проверяю папку: /Садовники/${folderName}`);
-    console.log(`📤 Загружаю фото в Яндекс Диск. Всего файлов: ${files.length}`);
+    console.log(`📤 Загружаю фото в ImgBB. Всего файлов: ${files.length}`);
 
-    // 2. Параллельная загрузка всех файлов в ImgBB и Яндекс.Диск с ожиданиями (Promise.all)
-    const uploadPromises = files.map(async (file, index) => {
+    const fileItems = await Promise.all(files.map(async (file, index) => {
       const arrayBuffer = await file.arrayBuffer();
       const fileBuffer = Buffer.from(arrayBuffer);
       const base64 = fileBuffer.toString('base64');
+      return { fileBuffer, base64, index };
+    }));
 
-      // Загрузка в ImgBB
+    // 2. Загрузка всех файлов в ImgBB (основные ссылки для ответа клиенту)
+    const urls = await Promise.all(fileItems.map(async ({ base64 }) => {
       const uploadForm = new FormData();
       uploadForm.append('key', apiKey);
       uploadForm.append('image', base64);
@@ -67,22 +70,31 @@ export async function POST(req) {
         throw new Error(data.error?.message || 'ImgBB отклонил загрузку фото');
       }
 
-      // Загрузка в Яндекс.Диск
-      const type = incomingForm.get('type') || 'order'; // 'order' | 'receipt'
-      const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
-      const timestamp = Date.now();
-      const fileName = `${which}_${timestamp}_${index + 1}.jpg`;
-
-      try {
-        await uploadToYandexDisk({ folderPath, fileName, fileBuffer });
-      } catch (err) {
-        console.error(`Ошибка отправки файла ${fileName} на Яндекс.Диск:`, err);
-      }
-
       return data.data.url;
-    });
+    }));
 
-    const urls = await Promise.all(uploadPromises);
+    // 3. Дублирование на Яндекс.Диск в фоновом режиме (не блокируя ответ клиенту)
+    const type = incomingForm.get('type') || 'order'; // 'order' | 'receipt'
+    const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
+    const timestamp = Date.now();
+
+    const yandexTask = (async () => {
+      for (const item of fileItems) {
+        const fileName = `${which}_${timestamp}_${item.index + 1}.jpg`;
+        try {
+          await uploadToYandexDisk({ folderPath, fileName, fileBuffer: item.fileBuffer });
+        } catch (err) {
+          console.error(`[Yandex.Disk Background Error] ${fileName}:`, err?.message || err);
+        }
+      }
+    })();
+
+    try {
+      waitUntil(yandexTask);
+    } catch (err) {
+      // Запасной вариант, если не в Vercel среде
+      yandexTask.catch(e => console.error('Background task error:', e));
+    }
 
     return NextResponse.json({
       url: urls[0],

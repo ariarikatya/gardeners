@@ -35,6 +35,48 @@ function formatPhoneDigits(phone) {
   return digits;
 }
 
+function xhrUpload(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.timeout = 120000;
+
+    if (xhr.upload && typeof onProgress === 'function') {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress(percent);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText || '{}');
+      } catch (err) {
+        data = {};
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data);
+      } else {
+        const errorMsg = data.error || data.message || `Ошибка сервера (${xhr.status})`;
+        reject(new Error(errorMsg));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Сетевая ошибка. Проверьте интернет и попробуйте снова'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Загрузка прервана: слишком долго, попробуйте ещё раз'));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 // Сжимаем фото перед загрузкой, чтобы не упереться в лимит размера запроса
 function compressImage(file, maxWidth = 1600, quality = 0.8) {
   return new Promise((resolve) => {
@@ -180,6 +222,7 @@ export default function GardenerDashboard() {
   const [photoActUrls, setPhotoActUrls] = useState([]);
 
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   // --- траты садовника ---
@@ -212,15 +255,14 @@ export default function GardenerDashboard() {
     }
   };
 
-  const uploadReceipt = async (file) => {
+  const uploadReceipt = async (file, onProgress) => {
     try {
       const compressed = await compressImage(file);
       const formData = new FormData();
       formData.append('image', compressed, 'receipt.jpg');
       formData.append('type', 'receipt');
-      const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (res.ok) return data.url;
+      const data = await xhrUpload('/api/gardener/upload', formData, onProgress);
+      if (data.url) return data.url;
       throw new Error(data.error || 'Ошибка загрузки');
     } catch (e) {
       throw e;
@@ -321,23 +363,34 @@ export default function GardenerDashboard() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     setUploadingWhich(which);
+    setUploadProgress(0);
+    let successCount = 0;
+    let failCount = 0;
     try {
       const uploaded = [];
       for (const file of files) {
-        const compressed = await compressImage(file);
-        const formData = new FormData();
-        formData.append('image', compressed, 'photo.jpg');
-        formData.append('type', 'order');
-        formData.append('which', which);
-        if (actionOrder) {
-          formData.append('orderId', actionOrder.id);
-          formData.append('orderDate', actionOrder.date ? actionOrder.date.split('T')[0] : '');
-          formData.append('clientName', actionOrder.clientName || '');
+        try {
+          const compressed = await compressImage(file);
+          const formData = new FormData();
+          formData.append('image', compressed, 'photo.jpg');
+          formData.append('type', 'order');
+          formData.append('which', which);
+          if (actionOrder) {
+            formData.append('orderId', actionOrder.id);
+            formData.append('orderDate', actionOrder.date ? actionOrder.date.split('T')[0] : '');
+            formData.append('clientName', actionOrder.clientName || '');
+          }
+          const data = await xhrUpload('/api/gardener/upload', formData, (pct) => setUploadProgress(pct));
+          if (data.url) {
+            uploaded.push(data.url);
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          console.error('Ошибка загрузки отдельного файла:', err);
+          failCount++;
         }
-        const res = await fetch('/api/gardener/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (res.ok) uploaded.push(data.url);
-        else alert('Ошибка при загрузке одного из файлов: ' + (data.error || ''));
       }
 
       if (which === 'before') {
@@ -357,10 +410,15 @@ export default function GardenerDashboard() {
       } else if (which === 'act') {
         setPhotoActUrls(prev => [...prev, ...uploaded]);
       }
+
+      if (failCount > 0) {
+        alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
+      }
     } catch (err) {
-      alert('Не удалось загрузить фото: ' + err.message);
+      alert('Не удалось загрузить фото: ' + (err.message || 'Произошла ошибка'));
     } finally {
       setUploadingWhich(null);
+      setUploadProgress(0);
       e.target.value = '';
     }
   };
@@ -837,30 +895,38 @@ export default function GardenerDashboard() {
                                     const files = Array.from(e.target.files || []);
                                     if (!files.length) return;
                                     setSavingWorks(true);
+                                    let successCount = 0;
+                                    let failCount = 0;
                                     try {
                                       const uploaded = [];
                                       for (const f of files) {
-                                        const base64 = await new Promise((res, rej) => {
-                                          const reader = new FileReader();
-                                          reader.onloadend = () => res(reader.result.split(',')[1]);
-                                          reader.onerror = rej;
-                                          reader.readAsDataURL(f);
-                                        });
-                                        const res = await fetch('/api/upload-image', {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({ image: base64 })
-                                        });
-                                        const data = await res.json();
-                                        if (res.ok && data.url) uploaded.push(data.url);
+                                        try {
+                                          const compressed = await compressImage(f);
+                                          const formData = new FormData();
+                                          formData.append('image', compressed, 'work.jpg');
+                                          formData.append('type', 'portfolio');
+                                          const data = await xhrUpload('/api/gardener/upload', formData);
+                                          if (data.url) {
+                                            uploaded.push(data.url);
+                                            successCount++;
+                                          } else {
+                                            failCount++;
+                                          }
+                                        } catch (err) {
+                                          console.error('Ошибка загрузки фото портфолио:', err);
+                                          failCount++;
+                                        }
                                       }
                                       if (uploaded.length > 0) {
                                         const newImgs = [...imgList, ...uploaded];
                                         const updated = myWorks.map((item, i) => i === wIdx ? { ...item, images: newImgs, image: newImgs[0] || '' } : item);
                                         await handleSaveWorks(updated);
                                       }
+                                      if (failCount > 0) {
+                                        alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
+                                      }
                                     } catch (err) {
-                                      alert('Ошибка загрузки фото');
+                                      alert('Ошибка загрузки фото: ' + (err.message || 'Произошла ошибка'));
                                     } finally {
                                       setSavingWorks(false);
                                       e.target.value = '';
@@ -914,26 +980,36 @@ export default function GardenerDashboard() {
                           onChange={async (e) => {
                             const files = Array.from(e.target.files || []);
                             if (!files.length) return;
+                            let successCount = 0;
+                            let failCount = 0;
                             try {
                               const uploaded = [];
                               for (const f of files) {
-                                const base64 = await new Promise((res, rej) => {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => res(reader.result.split(',')[1]);
-                                  reader.onerror = rej;
-                                  reader.readAsDataURL(f);
-                                });
-                                const res = await fetch('/api/upload-image', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ image: base64 })
-                                });
-                                const data = await res.json();
-                                if (res.ok && data.url) uploaded.push(data.url);
+                                try {
+                                  const compressed = await compressImage(f);
+                                  const formData = new FormData();
+                                  formData.append('image', compressed, 'work.jpg');
+                                  formData.append('type', 'portfolio');
+                                  const data = await xhrUpload('/api/gardener/upload', formData);
+                                  if (data.url) {
+                                    uploaded.push(data.url);
+                                    successCount++;
+                                  } else {
+                                    failCount++;
+                                  }
+                                } catch (err) {
+                                  console.error('Ошибка загрузки фото:', err);
+                                  failCount++;
+                                }
                               }
-                              setNewWorkImages([...newWorkImages, ...uploaded]);
+                              if (uploaded.length > 0) {
+                                setNewWorkImages(prev => [...prev, ...uploaded]);
+                              }
+                              if (failCount > 0) {
+                                alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
+                              }
                             } catch (err) {
-                              alert('Ошибка при загрузке фото');
+                              alert('Ошибка при загрузке фото: ' + (err.message || 'Произошла ошибка'));
                             } finally {
                               e.target.value = '';
                             }
@@ -1285,8 +1361,8 @@ export default function GardenerDashboard() {
                         </div>
                       ))}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
-                        {uploadingWhich === 'before' ? 'Загружаю...' : '📷 Добавить фото До'}
-                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'before')} disabled={uploadingWhich === 'before'} />
+                        {uploadingWhich === 'before' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото До'}
+                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'before')} disabled={uploadingWhich === 'before'} />
                       </label>
                     </div>
 
@@ -1316,8 +1392,8 @@ export default function GardenerDashboard() {
                         </div>
                       ))}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
-                        {uploadingWhich === 'after' ? 'Загружаю...' : '📷 Добавить фото После'}
-                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'after')} disabled={uploadingWhich === 'after'} />
+                        {uploadingWhich === 'after' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото После'}
+                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'after')} disabled={uploadingWhich === 'after'} />
                       </label>
                     </div>
 
@@ -1325,8 +1401,8 @@ export default function GardenerDashboard() {
                     <div className="flex flex-wrap gap-2 items-center mb-2">
                       {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
                       <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
-                        {uploadingWhich === 'act' ? 'Загружаю...' : '📷 Добавить фото акта'}
-                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple capture="environment" onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
+                        {uploadingWhich === 'act' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото акта'}
+                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
                       </label>
                     </div>
                   </div>
