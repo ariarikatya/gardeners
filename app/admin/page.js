@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import PushButton from '@/components/PushButton';
+import { clientNotify } from '@/lib/clientNotify';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -289,10 +290,18 @@ export default function AdminDashboard() {
       navigator.serviceWorker.addEventListener('message', handleMessage);
     }
 
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        document.title = 'Anemon Agro — Панель Диспетчера';
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', handleMessage);
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -388,7 +397,8 @@ export default function AdminDashboard() {
         setWebLeads(prevLeads => {
           if (prevLeads.length > 0) {
             const existingIds = new Set(prevLeads.map(l => l.id));
-            const newlyDiscovered = incomingLeads.filter(l => !existingIds.has(l.id)).map(l => l.id);
+            const newlyDiscoveredObj = incomingLeads.filter(l => !existingIds.has(l.id));
+            const newlyDiscovered = newlyDiscoveredObj.map(l => l.id);
             if (newlyDiscovered.length > 0) {
               setNewLeadIds(prev => new Set([...prev, ...newlyDiscovered]));
               setTimeout(() => {
@@ -398,6 +408,21 @@ export default function AdminDashboard() {
                   return next;
                 });
               }, 6000);
+
+              const latestLead = newlyDiscoveredObj[0];
+              if (latestLead) {
+                const bodyStr = [
+                  `Имя: ${latestLead.name || 'Не указано'}`,
+                  `Тел: ${latestLead.phone || ''}`,
+                  latestLead.serviceName ? `Услуга: ${latestLead.serviceName}` : null,
+                  latestLead.district ? `Район: ${latestLead.district}` : null,
+                ].filter(Boolean).join(', ');
+
+                clientNotify('🌐 Новая заявка с сайта', bodyStr, latestLead.id, '/admin');
+                if (document.hidden) {
+                  document.title = `(${newlyDiscovered.length}) Anemon Agro — Панель Диспетчера`;
+                }
+              }
             }
           }
           return incomingLeads;

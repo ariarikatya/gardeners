@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
+import { clientNotify } from '@/lib/clientNotify';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -236,9 +237,25 @@ export default function GardenerDashboard() {
   useEffect(() => {
     fetchOrders();
     fetchProfile();
+
+    const interval = setInterval(() => {
+      fetchOrders(true);
+    }, 45000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        document.title = '🌿 Мой Кабинет';
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (silent = false) => {
     try {
       const [resOrders, resOps] = await Promise.all([
         fetch('/api/gardener/orders'),
@@ -246,13 +263,28 @@ export default function GardenerDashboard() {
       ]);
       const data = resOrders.ok ? await resOrders.json() : {};
       const ops = resOps.ok ? await resOps.json() : {};
-      setOrders(data.orders || []);
+      const incomingOrders = data.orders || [];
+
+      if (silent && orders.length > 0) {
+        const prevMap = new Map(orders.map(o => [o.id, o]));
+        const newlyAssigned = incomingOrders.filter(o => !prevMap.has(o.id));
+        if (newlyAssigned.length > 0) {
+          const latest = newlyAssigned[0];
+          const dateStr = latest.date ? new Date(latest.date).toISOString().split('T')[0] : '';
+          clientNotify('🌿 Вам назначен заказ', `Дата: ${dateStr}, Клиент: ${latest.clientName || 'Не указано'}, Адрес: ${latest.address || ''}`, latest.id, '/gardener');
+          if (document.hidden) {
+            document.title = `(${newlyAssigned.length}) Мой Кабинет`;
+          }
+        }
+      }
+
+      setOrders(incomingOrders);
       setMyDayOffs(data.dayOffs || []);
       setOperations(ops.operations || []);
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
