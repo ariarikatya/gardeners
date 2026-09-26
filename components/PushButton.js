@@ -99,14 +99,35 @@ export default function PushButton({ className = '' }) {
           applicationServerKey: urlBase64ToUint8Array(vapidData.key),
         });
 
-        await fetch('/api/push/subscribe', {
+        const subRes = await fetch('/api/push/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ subscription: sub.toJSON() }),
         });
 
+        const subData = await subRes.json().catch(() => ({}));
+
+        if (!subRes.ok || subData.ok === false) {
+          alert('Ошибка при сохранении подписки на сервере: ' + (subData.error || 'Неизвестная ошибка'));
+          setPushLoading(false);
+          return;
+        }
+
         setPushState('enabled');
         setShowIosPushHint(false);
+
+        if (subData.hasUserId === false) {
+          alert('⚠️ Подписка сохранена, но не привязана к аккаунту (userId отсутствует). Перезайдите в аккаунт.');
+        } else {
+          const testRes = await fetch('/api/push/test', { method: 'POST' });
+          const testData = await testRes.json().catch(() => ({}));
+
+          if (testRes.ok && testData.ok) {
+            alert('✅ Подписка включена! Тестовое уведомление отправлено.');
+          } else {
+            alert('⚠️ Подписка включена, но тестовое уведомление вернуть не удалось: ' + (testData.error || 'Неизвестная ошибка'));
+          }
+        }
       }
     } catch (err) {
       console.error('[PushButton] Failed to toggle push notifications:', err);

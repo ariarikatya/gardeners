@@ -12,7 +12,7 @@ export async function POST(req) {
     const auth = sub.keys?.auth || sub.auth;
 
     if (!endpoint || !p256dh || !auth) {
-      return NextResponse.json({ error: 'Missing subscription details' }, { status: 400 });
+      return NextResponse.json({ ok: false, error: 'Missing subscription details' }, { status: 400 });
     }
 
     let userId = body.userId || null;
@@ -24,7 +24,7 @@ export async function POST(req) {
       }
     }
 
-    await prisma.pushSubscription.upsert({
+    const savedSub = await prisma.pushSubscription.upsert({
       where: { endpoint },
       update: {
         p256dh,
@@ -39,9 +39,14 @@ export async function POST(req) {
       },
     });
 
-    return NextResponse.json({ ok: true });
+    console.log(`[WebPush] subscribe saved: id=${savedSub.id} userId=${userId} endpoint=${endpoint.slice(0, 50)}...`);
+    if (!userId) {
+      console.warn('[WebPush] WARNING: subscription saved WITHOUT userId');
+    }
+
+    return NextResponse.json({ ok: true, saved: true, hasUserId: Boolean(userId) });
   } catch (err) {
     console.error('Error in /api/push/subscribe:', err);
-    return NextResponse.json({ error: err.message || 'Failed to subscribe' }, { status: 500 });
+    return NextResponse.json({ ok: false, error: err.message || 'Failed to subscribe' }, { status: 500 });
   }
 }
