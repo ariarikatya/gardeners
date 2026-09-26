@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { forwardToAmoUnsorted } from '@/lib/amo';
 import { notifyDispatchers } from '@/lib/vkApi';
-import { sendToAll } from '@/lib/webPush';
+import { sendToRoles, sendToUser } from '@/lib/webPush';
 
 
 const CORS_HEADERS = {
@@ -81,7 +81,7 @@ export async function POST(req) {
       },
     });
 
-    // Web push notifications for dispatchers (fire-and-forget)
+    // Web push notifications for dispatchers and preferred gardener (fire-and-forget)
     (async () => {
       try {
         const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
@@ -93,12 +93,26 @@ export async function POST(req) {
           body.district ? `Район: ${body.district}` : null,
         ].filter(Boolean).join(', ');
 
-        await sendToAll({
-          title: '🌿 Новая заявка',
+        await sendToRoles(['ADMIN', 'LEADER'], {
+          title: '🌐 Новая заявка с сайта',
           body: bodyParts,
           tag: lead.id,
           url: '/admin',
         });
+
+        if (finalGardenerId) {
+          const prefGardenerUser = await prisma.user.findFirst({
+            where: { gardenerId: finalGardenerId },
+          });
+          if (prefGardenerUser) {
+            await sendToUser(prefGardenerUser.id, {
+              title: '🌐 Новая заявка с сайта',
+              body: bodyParts,
+              tag: lead.id,
+              url: '/gardener',
+            });
+          }
+        }
       } catch (err) {
         console.error('WebPush notification error:', err.message);
       }

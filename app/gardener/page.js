@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import PushButton from '@/components/PushButton';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -793,6 +794,7 @@ export default function GardenerDashboard() {
       <header className="bg-emerald-800 text-white py-4 px-4 flex justify-between items-center shadow">
         <h1 className="text-lg font-bold flex items-center gap-1">🌿 Мой Кабинет</h1>
         <div className="flex items-center gap-2">
+          <PushButton className="text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
           <a href="tel:88452650206" className="text-xs bg-emerald-700 hover:bg-emerald-600 px-3 py-1.5 rounded-lg flex items-center gap-1">
             📞 Диспетчер
           </a>

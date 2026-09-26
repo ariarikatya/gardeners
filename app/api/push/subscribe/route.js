@@ -19,8 +19,8 @@ export async function POST(req) {
     const token = req.cookies.get('token')?.value;
     if (token) {
       const payload = await verifyToken(token);
-      if (payload?.id) {
-        userId = payload.id;
+      if (payload?.userId || payload?.id) {
+        userId = payload.userId || payload.id;
       }
     }
 
