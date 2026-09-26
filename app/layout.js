@@ -1,4 +1,5 @@
 import './globals.css';
+import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
 
 export const metadata = {
   title: 'Анемон Агро',
@@ -18,19 +19,7 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         {children}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function () {
-                  navigator.serviceWorker.register('/sw.js').catch(function (err) {
-                    console.error('SW registration failed:', err);
-                  });
-                });
-              }
-            `,
-          }}
-        />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
