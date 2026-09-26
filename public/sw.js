@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v2';
+const CACHE_NAME = 'anemon-agro-v3';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -17,13 +17,20 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Данные и API — всегда только из сети, не кэшируем (чтобы не показывать старые заказы)
+  // Данные и API — всегда только из сети, не кэшируем
   if (url.pathname.startsWith('/api/')) return;
 
+  // Навигационные запросы (HTML) — только из сети, фоллбэк на /login если оффлайн
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).catch(() => caches.match('/login'))
@@ -31,17 +38,42 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) =>
-      cached ||
-      fetch(request)
-        .then((res) => {
-          const resClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, resClone));
+  // Статические ресурсы _next/static (с хэшами) — Cache First
+  if (url.pathname.startsWith('/_next/static/')) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((res) => {
+          if (res && res.status === 200 && res.type !== 'error') {
+            const resClone = res.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              try {
+                cache.put(request, resClone);
+              } catch (e) {}
+            }).catch(() => {});
+          }
           return res;
-        })
-        .catch(() => cached)
-    )
+        });
+      })
+    );
+    return;
+  }
+
+  // Все остальные ресурсы — Network First с обновлением кэша
+  event.respondWith(
+    fetch(request)
+      .then((res) => {
+        if (res && res.status === 200 && res.type !== 'error') {
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            try {
+              cache.put(request, resClone);
+            } catch (e) {}
+          }).catch(() => {});
+        }
+        return res;
+      })
+      .catch(() => caches.match(request))
   );
 });
 
