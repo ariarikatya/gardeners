@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { verifyToken } from '@/lib/jwt';
 import prisma from '@/lib/prisma';
-import { uploadToYandexDisk } from '@/lib/yandexDisk';
+import { scheduleYandexUpload, drainQueue } from '@/lib/yandexDisk';
 
 
 async function checkGardener(req) {
@@ -73,27 +73,23 @@ export async function POST(req) {
       return data.data.url;
     }));
 
-    // 3. Дублирование на Яндекс.Диск в фоновом режиме (не блокируя ответ клиенту)
+    // 3. Дублирование на Яндекс.Диск в фоновом режиме через очередь
     const type = incomingForm.get('type') || 'order'; // 'order' | 'receipt'
     const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
     const timestamp = Date.now();
 
-    const yandexTask = (async () => {
-      for (const item of fileItems) {
-        const fileName = `${which}_${timestamp}_${item.index + 1}.jpg`;
-        try {
-          await uploadToYandexDisk({ folderPath, fileName, fileBuffer: item.fileBuffer });
-        } catch (err) {
-          console.error(`[Yandex.Disk Background Error] ${fileName}:`, err?.message || err);
-        }
-      }
-    })();
+    for (const item of fileItems) {
+      const fileName = `${which}_${timestamp}_${item.index + 1}.jpg`;
+      scheduleYandexUpload({ folderPath, fileName, fileBuffer: item.fileBuffer });
+    }
+
+    const drainTask = drainQueue(40000);
 
     try {
-      waitUntil(yandexTask);
+      waitUntil(drainTask);
     } catch (err) {
-      // Запасной вариант, если не в Vercel среде
-      yandexTask.catch(e => console.error('Background task error:', e));
+      // Запасной вариант вне Vercel
+      drainTask.catch(e => console.error('[Yandex.Disk Drain Error]:', e));
     }
 
     return NextResponse.json({
