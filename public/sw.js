@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v3';
+const CACHE_NAME = 'anemon-agro-v4';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -107,12 +107,22 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url.includes('/admin') && 'focus' in client) {
-          client.focus();
-          if ('postMessage' in client) {
-            client.postMessage({ type: 'OPEN_WEBLEADS_TAB', url: targetUrl });
+        if (targetUrl.startsWith('/gardener') && client.url.includes('/gardener')) {
+          if ('focus' in client) {
+            return client.focus();
           }
-          return;
+        } else if (targetUrl.startsWith('/admin') && client.url.includes('/admin')) {
+          if ('focus' in client) {
+            client.focus();
+            if ('postMessage' in client) {
+              client.postMessage({ type: 'OPEN_WEBLEADS_TAB', url: targetUrl });
+            }
+            return;
+          }
+        } else if (client.url === targetUrl || client.url.endsWith(targetUrl)) {
+          if ('focus' in client) {
+            return client.focus();
+          }
         }
       }
       if (self.clients.openWindow) {

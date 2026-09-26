@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import PushButton from '@/components/PushButton';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -276,11 +277,6 @@ export default function AdminDashboard() {
   // Скрытые столбцы с сохранением в localStorage
   const [hiddenGardenerIds, setHiddenGardenerIds] = useState([]);
 
-  // Push notifications state
-  const [pushState, setPushState] = useState('disabled'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'unsupported'
-  const [pushLoading, setPushLoading] = useState(false);
-  const [showIosPushHint, setShowIosPushHint] = useState(false);
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -293,118 +289,12 @@ export default function AdminDashboard() {
       navigator.serviceWorker.addEventListener('message', handleMessage);
     }
 
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setPushState('unsupported');
-      return () => {
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.removeEventListener('message', handleMessage);
-        }
-      };
-    }
-
-    if (Notification.permission === 'denied') {
-      setPushState('denied');
-    } else {
-      navigator.serviceWorker.ready.then(async (reg) => {
-        try {
-          const sub = await reg.pushManager.getSubscription();
-          if (sub) {
-            setPushState('enabled');
-          } else {
-            setPushState('disabled');
-          }
-        } catch (err) {
-          console.error('Error checking push subscription:', err);
-        }
-      }).catch(() => {});
-    }
-
     return () => {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', handleMessage);
       }
     };
   }, []);
-
-  const urlBase64ToUint8Array = (base64String) => {
-    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
-  };
-
-  const handleTogglePush = async () => {
-    if (pushLoading) return;
-    setPushLoading(true);
-
-    try {
-      if (pushState === 'enabled') {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) {
-          await fetch('/api/push/unsubscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: sub.endpoint }),
-          }).catch(() => {});
-          await sub.unsubscribe().catch(() => {});
-        }
-        setPushState('disabled');
-      } else {
-        const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-
-        if (isIos && !isStandalone) {
-          setShowIosPushHint(true);
-        }
-
-        const permission = await Notification.requestPermission();
-        if (permission === 'denied') {
-          setPushState('denied');
-          alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
-          setPushLoading(false);
-          return;
-        }
-
-        if (permission !== 'granted') {
-          setPushLoading(false);
-          return;
-        }
-
-        const vapidRes = await fetch('/api/push/vapid-public-key');
-        const vapidData = await vapidRes.json();
-        if (!vapidData.key) {
-          alert('VAPID публичный ключ не настроен на сервере.');
-          setPushLoading(false);
-          return;
-        }
-
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidData.key),
-        });
-
-        await fetch('/api/push/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ subscription: sub.toJSON() }),
-        });
-
-        setPushState('enabled');
-        setShowIosPushHint(false);
-      }
-    } catch (err) {
-      console.error('Failed to toggle push notifications:', err);
-      alert('Ошибка при настройке уведомлений: ' + err.message);
-    } finally {
-      setPushLoading(false);
-    }
-  };
 
   useEffect(() => {
     try {
@@ -1232,12 +1122,6 @@ export default function AdminDashboard() {
           Выйти
         </button>
         </div>
-        {showIosPushHint && (
-          <div className="mt-2 bg-amber-100 border border-amber-300 text-amber-900 px-3 py-2 rounded-lg text-xs flex justify-between items-center">
-            <span>📲 <strong>На iPhone:</strong> Поделиться → На экран „Домой“, затем разрешите уведомления.</span>
-            <button onClick={() => setShowIosPushHint(false)} className="text-amber-700 font-bold ml-2">✕</button>
-          </div>
-        )}
         <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
           <a
             href="/admin/amo-connect"
@@ -1245,35 +1129,7 @@ export default function AdminDashboard() {
           >
             🔌 amoCRM
           </a>
-          {pushState === 'enabled' ? (
-            <button
-              type="button"
-              onClick={handleTogglePush}
-              disabled={pushLoading}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
-              title="Нажмите, чтобы отключить push-уведомления"
-            >
-              🔔 {pushLoading ? '...' : 'Отключить уведомления'}
-            </button>
-          ) : pushState === 'denied' ? (
-            <button
-              type="button"
-              onClick={() => alert('Уведомления заблокированы браузером. Разрешите их в настройках сайта.')}
-              className="flex items-center gap-1.5 bg-rose-700 hover:bg-rose-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
-              title="Разрешите уведомления в настройках сайта"
-            >
-              🔕 Разрешите уведомления в настройках
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleTogglePush}
-              disabled={pushLoading}
-              className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
-            >
-              🔔 {pushLoading ? '...' : 'Включить уведомления'}
-            </button>
-          )}
+          <PushButton className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap" />
           <button
             onClick={async () => {
               try {

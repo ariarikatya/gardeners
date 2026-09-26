@@ -4,7 +4,7 @@ import { verifyToken } from '@/lib/jwt';
 import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi';
 import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
-import { sendToAll } from '@/lib/webPush';
+import { sendToRoles, sendToUser, sendToAll } from '@/lib/webPush';
 
 
 const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
@@ -103,7 +103,7 @@ export async function POST(req) {
       },
     });
 
-    // Web push notifications for dispatchers (fire-and-forget)
+    // Web push notifications for dispatchers & gardeners (fire-and-forget)
     (async () => {
       try {
         let serviceName = '';
@@ -120,12 +120,31 @@ export async function POST(req) {
           order.district ? `Район: ${order.district}` : null,
         ].filter(Boolean).join(', ');
 
-        await sendToAll({
-          title: '🌿 Новая заявка',
+        await sendToRoles(['ADMIN', 'LEADER'], {
+          title: '🌿 Новый заказ',
           body: bodyParts,
           tag: order.id,
           url: '/admin',
         });
+
+        if (order.status === 'Аукцион') {
+          await sendToRoles(['GARDENER'], {
+            title: '🔔 Новый заказ на аукционе',
+            body: bodyParts,
+            tag: order.id,
+            url: '/gardener',
+          });
+        } else if (order.gardenerId) {
+          const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
+          if (gUser) {
+            await sendToUser(gUser.id, {
+              title: '🌿 Вам назначен заказ',
+              body: bodyParts,
+              tag: order.id,
+              url: '/gardener',
+            });
+          }
+        }
       } catch (err) {
         console.error('WebPush notification error on order creation:', err.message);
       }
@@ -305,6 +324,23 @@ export async function POST(req) {
               where: { id: order.id },
               data: { linkedOrderId: partnerOrder.id },
             });
+
+            const partnerUser = await prisma.user.findFirst({ where: { gardenerId: partner.id } });
+            if (partnerUser) {
+              const dateStr = partnerOrder.date ? new Date(partnerOrder.date).toISOString().split('T')[0] : '';
+              const pBodyParts = [
+                `Клиент: ${partnerOrder.clientName || 'Не указано'}`,
+                `Адрес: ${partnerOrder.address || 'Не указан'}`,
+                `Дата: ${dateStr}`,
+              ].filter(Boolean).join(', ');
+
+              sendToUser(partnerUser.id, {
+                title: '🌿 Вам назначен заказ',
+                body: pBodyParts,
+                tag: partnerOrder.id,
+                url: '/gardener',
+              }).catch((err) => console.error('Partner push notification error:', err));
+            }
           } catch (err) {
             console.error('Partner duplicate creation error:', err);
           }
@@ -437,7 +473,7 @@ export async function PUT(req) {
             order.district ? `Район: ${order.district}` : null,
           ].filter(Boolean).join(', ');
 
-          await sendToAll({
+          await sendToRoles(['ADMIN', 'LEADER'], {
             title: '🌿 Заявка обновлена',
             body: bodyParts,
             tag: order.id,
@@ -540,6 +576,16 @@ export async function PUT(req) {
                 where: { id: order.id },
                 data: { linkedOrderId: partnerOrder.id }
               });
+
+              const partnerUser = await prisma.user.findFirst({ where: { gardenerId: partner.id } });
+              if (partnerUser) {
+                sendToUser(partnerUser.id, {
+                  title: '🌿 Вам назначен заказ',
+                  body: `Дата: ${order.date ? new Date(order.date).toISOString().split('T')[0] : ''}, Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+                  tag: partnerOrder.id,
+                  url: '/gardener',
+                }).catch(err => console.error('Partner push error on gardener change:', err));
+              }
             } catch (err) {
               console.error('Failed to create partner order on gardener change:', err);
             }
@@ -550,11 +596,13 @@ export async function PUT(req) {
 
     console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА ==========');
 
-    // Уведомление садовника во ВКонтакте (fire-and-forget)
+    // Уведомление садовника (VK и Web Push) (fire-and-forget)
     (async () => {
       try {
         const siteUrl = getSiteUrl();
+        const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
 
+        // 1. Аукцион
         if (order.status === 'Аукцион' && existing.status !== 'Аукцион') {
           let serviceName = '';
           if (order.serviceId) {
@@ -567,48 +615,101 @@ export async function PUT(req) {
             serviceName,
             description: order.description
           }, prisma);
+
+          const auctionBody = [
+            `Дата: ${dateFormatted}`,
+            order.district ? `Район: ${order.district}` : null,
+            serviceName ? `Услуга: ${serviceName}` : null,
+          ].filter(Boolean).join(', ');
+
+          await sendToRoles(['GARDENER'], {
+            title: '🔔 Новый заказ на аукционе',
+            body: auctionBody,
+            tag: order.id,
+            url: '/gardener',
+          });
           return;
         }
 
-        if (!process.env.VK_GROUP_TOKEN) return;
-
-        // 1. Отмена заказа
+        // 2. Отмена заказа
         if (updateData.status === 'Отменен' && existing && existing.status !== 'Отменен') {
           const gId = order.gardenerId || existing.gardenerId;
           if (gId) {
             const g = await prisma.gardener.findUnique({ where: { id: gId } });
-            if (g && g.vkId) {
-              const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
+            if (g && g.vkId && process.env.VK_GROUP_TOKEN) {
               const text = `❌ Заказ на ${dateFormatted} отменен.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\n${siteUrl}/gardener`;
               await sendVkMessage(g.vkId, text);
+            }
+
+            const gUser = await prisma.user.findFirst({ where: { gardenerId: gId } });
+            if (gUser) {
+              await sendToUser(gUser.id, {
+                title: '❌ Заказ отменен',
+                body: `Заказ на ${dateFormatted} отменен. Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+                tag: order.id,
+                url: '/gardener',
+              });
             }
           }
           return;
         }
 
-        // 2. Перенос заказа (смена даты)
+        // 3. Перенос заказа (смена даты)
         const isDateChanged = updateData.date && existing && existing.date && new Date(existing.date).toDateString() !== new Date(updateData.date).toDateString();
         if (isDateChanged && order.gardenerId) {
           const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
-          if (g && g.vkId) {
-            const newDateFormatted = new Date(order.date).toISOString().split('T')[0];
+          const newDateFormatted = new Date(order.date).toISOString().split('T')[0];
+          if (g && g.vkId && process.env.VK_GROUP_TOKEN) {
             const text = `🗓 Заказ перенесен на новую дату: ${newDateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}\n${siteUrl}/gardener`;
             await sendVkMessage(g.vkId, text);
           }
+
+          const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
+          if (gUser) {
+            await sendToUser(gUser.id, {
+              title: '🗓 Заказ перенесен',
+              body: `Заказ перенесен на новую дату: ${newDateFormatted}. Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+              tag: order.id,
+              url: '/gardener',
+            });
+          }
         }
 
-        // 3. Смена/назначение садовника (новый заказ для садовника)
+        // 4. Смена/назначение садовника (новый заказ для садовника)
         const isGardenerChanged = updateData.gardenerId && existing && existing.gardenerId !== updateData.gardenerId;
-        if (isGardenerChanged && order.gardenerId) {
-          const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
-          if (g && g.vkId) {
-            const dateFormatted = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
-            const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}\n${siteUrl}/gardener`;
-            await sendVkMessage(g.vkId, text);
+        if (isGardenerChanged) {
+          if (order.gardenerId) {
+            const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
+            if (g && g.vkId && process.env.VK_GROUP_TOKEN) {
+              const text = `🌿 Новый заказ на ${dateFormatted}.\nКлиент: ${order.clientName || 'Не указано'}\nАдрес: ${order.address || 'Не указан'}\nЧто делать: ${order.description || 'Не указано'}\n${siteUrl}/gardener`;
+              await sendVkMessage(g.vkId, text);
+            }
+
+            const newGUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
+            if (newGUser) {
+              await sendToUser(newGUser.id, {
+                title: '🌿 Вам назначен заказ',
+                body: `Дата: ${dateFormatted}, Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+                tag: order.id,
+                url: '/gardener',
+              });
+            }
+          }
+
+          if (existing.gardenerId) {
+            const oldGUser = await prisma.user.findFirst({ where: { gardenerId: existing.gardenerId } });
+            if (oldGUser) {
+              await sendToUser(oldGUser.id, {
+                title: 'Заказ перенесён на другого садовника',
+                body: `Заказ клиента ${order.clientName || 'Не указано'} (${order.address || 'Не указан'}) передан другому мастеру`,
+                tag: order.id,
+                url: '/gardener',
+              });
+            }
           }
         }
       } catch (err) {
-        console.error(`VK notify failed for order ${order.id}:`, err.message);
+        console.error(`Notify failed for order ${order.id}:`, err.message);
       }
     })();
 
