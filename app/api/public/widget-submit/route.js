@@ -86,8 +86,6 @@ export async function POST(req) {
       try {
         const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
         const bodyParts = [
-          `Имя: ${name ? String(name).trim() : 'Не указано'}`,
-          `Тел: ${phoneClean}`,
           `Услуга: ${serviceName || 'Не указана'}`,
           `Дата: ${prefDateStr}`,
           body.district ? `Район: ${body.district}` : null,
