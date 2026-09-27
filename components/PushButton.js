@@ -17,9 +17,18 @@ export default function PushButton({ className = '' }) {
   const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'unsupported'
   const [pushLoading, setPushLoading] = useState(false);
   const [showIosPushHint, setShowIosPushHint] = useState(false);
+  const [isIosNonPwa, setIsIosNonPwa] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
+
+    if (isIos && !isStandalone) {
+      setIsIosNonPwa(true);
+      setShowIosPushHint(true);
+    }
 
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushState('unsupported');
@@ -49,6 +58,13 @@ export default function PushButton({ className = '' }) {
 
   const handleTogglePush = async () => {
     if (pushLoading) return;
+
+    if (isIosNonPwa) {
+      setShowIosPushHint(true);
+      alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+      return;
+    }
+
     setPushLoading(true);
 
     try {
@@ -65,13 +81,6 @@ export default function PushButton({ className = '' }) {
         }
         setPushState('disabled');
       } else {
-        const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-
-        if (isIos && !isStandalone) {
-          setShowIosPushHint(true);
-        }
-
         const permission = await Notification.requestPermission();
         if (permission === 'denied') {
           setPushState('denied');
@@ -94,10 +103,22 @@ export default function PushButton({ className = '' }) {
         }
 
         const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidData.key),
-        });
+        let sub = null;
+        try {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidData.key),
+          });
+        } catch (subErr) {
+          if (subErr.name === 'NotAllowedError' || /internal service error/i.test(subErr.message)) {
+            alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+            setShowIosPushHint(true);
+          } else {
+            alert('Ошибка при подписке: ' + subErr.message);
+          }
+          setPushLoading(false);
+          return;
+        }
 
         const subRes = await fetch('/api/push/subscribe', {
           method: 'POST',
@@ -142,9 +163,17 @@ export default function PushButton({ className = '' }) {
   return (
     <>
       {showIosPushHint && (
-        <div className="fixed top-2 left-2 right-2 z-50 bg-amber-100 border border-amber-300 text-amber-900 px-3 py-2 rounded-lg text-xs flex justify-between items-center shadow-lg">
-          <span>📲 <strong>На iPhone:</strong> Поделиться → На экран „Домой“, затем откройте и разрешите уведомления.</span>
-          <button onClick={() => setShowIosPushHint(false)} className="text-amber-700 font-bold ml-2">✕</button>
+        <div className="fixed top-2 left-2 right-2 z-50 bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-2.5 rounded-xl text-xs flex justify-between items-start shadow-xl">
+          <div className="leading-relaxed">
+            <div className="font-bold mb-1">📲 Настройка уведомлений на iPhone:</div>
+            <ol className="list-decimal list-inside space-y-0.5 text-[11px]">
+              <li>Откройте меню Поделиться (квадрат со стрелкой)</li>
+              <li>Выберите «На экран „Домой“»</li>
+              <li>Откройте Anemon Agro с иконки Домашнего экрана</li>
+              <li>Нажмите «Включить уведомления» здесь ещё раз</li>
+            </ol>
+          </div>
+          <button onClick={() => setShowIosPushHint(false)} className="text-amber-800 font-bold ml-2 text-sm p-1">✕</button>
         </div>
       )}
 
@@ -171,8 +200,9 @@ export default function PushButton({ className = '' }) {
         <button
           type="button"
           onClick={handleTogglePush}
-          disabled={pushLoading || pushState === 'loading'}
-          className={className || "flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
+          disabled={pushLoading || pushState === 'loading' || isIosNonPwa}
+          className={className || `flex items-center gap-1.5 ${isIosNonPwa ? 'bg-slate-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-500'} text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs`}
+          title={isIosNonPwa ? 'Добавьте приложение на экран Домой на iPhone' : undefined}
         >
           🔔 {pushLoading ? '...' : 'Включить уведомления'}
         </button>

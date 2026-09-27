@@ -113,11 +113,10 @@ export async function POST(req) {
         }
         const dateStr = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
         const bodyParts = [
-          `Имя: ${order.clientName || 'Не указано'}`,
-          `Тел: ${order.clientPhone || 'Не указан'}`,
           serviceName ? `Услуга: ${serviceName}` : null,
           `Дата: ${dateStr}`,
           order.district ? `Район: ${order.district}` : null,
+          order.address ? `Адрес: ${order.address}` : null,
         ].filter(Boolean).join(', ');
 
         await sendToRoles(['ADMIN', 'LEADER'], {
@@ -129,7 +128,7 @@ export async function POST(req) {
 
         if (order.status === 'Аукцион') {
           await sendToRoles(['GARDENER'], {
-            title: '🔔 Новый заказ на аукционе',
+            title: '❗ Объявлен аукцион!',
             body: bodyParts,
             tag: order.id,
             url: '/gardener',
@@ -329,7 +328,6 @@ export async function POST(req) {
             if (partnerUser) {
               const dateStr = partnerOrder.date ? new Date(partnerOrder.date).toISOString().split('T')[0] : '';
               const pBodyParts = [
-                `Клиент: ${partnerOrder.clientName || 'Не указано'}`,
                 `Адрес: ${partnerOrder.address || 'Не указан'}`,
                 `Дата: ${dateStr}`,
               ].filter(Boolean).join(', ');
@@ -466,11 +464,10 @@ export async function PUT(req) {
           const dateStr = order.date ? new Date(order.date).toISOString().split('T')[0] : '';
           const bodyParts = [
             `Статус: ${order.status}`,
-            `Имя: ${order.clientName || 'Не указано'}`,
-            `Тел: ${order.clientPhone || 'Не указан'}`,
             serviceName ? `Услуга: ${serviceName}` : null,
             `Дата: ${dateStr}`,
             order.district ? `Район: ${order.district}` : null,
+            order.address ? `Объект: ${order.address}` : null,
           ].filter(Boolean).join(', ');
 
           await sendToRoles(['ADMIN', 'LEADER'], {
@@ -581,7 +578,7 @@ export async function PUT(req) {
               if (partnerUser) {
                 sendToUser(partnerUser.id, {
                   title: '🌿 Вам назначен заказ',
-                  body: `Дата: ${order.date ? new Date(order.date).toISOString().split('T')[0] : ''}, Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+                  body: `Дата: ${order.date ? new Date(order.date).toISOString().split('T')[0] : ''}, Адрес: ${order.address || 'Не указан'}`,
                   tag: partnerOrder.id,
                   url: '/gardener',
                 }).catch(err => console.error('Partner push error on gardener change:', err));
@@ -623,7 +620,7 @@ export async function PUT(req) {
           ].filter(Boolean).join(', ');
 
           await sendToRoles(['GARDENER'], {
-            title: '🔔 Новый заказ на аукционе',
+            title: '❗ Объявлен аукцион!',
             body: auctionBody,
             tag: order.id,
             url: '/gardener',
@@ -645,7 +642,7 @@ export async function PUT(req) {
             if (gUser) {
               await sendToUser(gUser.id, {
                 title: '❌ Заказ отменен',
-                body: `Заказ на ${dateFormatted} отменен. Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+                body: `Заказ на ${dateFormatted} отменен. Адрес: ${order.address || 'Не указан'}`,
                 tag: order.id,
                 url: '/gardener',
               });
@@ -668,7 +665,7 @@ export async function PUT(req) {
           if (gUser) {
             await sendToUser(gUser.id, {
               title: '🗓 Заказ перенесен',
-              body: `Заказ перенесен на новую дату: ${newDateFormatted}. Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+              body: `Заказ перенесен на новую дату: ${newDateFormatted}. Адрес: ${order.address || 'Не указан'}`,
               tag: order.id,
               url: '/gardener',
             });
@@ -689,7 +686,7 @@ export async function PUT(req) {
             if (newGUser) {
               await sendToUser(newGUser.id, {
                 title: '🌿 Вам назначен заказ',
-                body: `Дата: ${dateFormatted}, Клиент: ${order.clientName || 'Не указано'}, Адрес: ${order.address || 'Не указан'}`,
+                body: `Дата: ${dateFormatted}, Адрес: ${order.address || 'Не указан'}`,
                 tag: order.id,
                 url: '/gardener',
               });
@@ -701,7 +698,7 @@ export async function PUT(req) {
             if (oldGUser) {
               await sendToUser(oldGUser.id, {
                 title: 'Заказ перенесён на другого садовника',
-                body: `Заказ клиента ${order.clientName || 'Не указано'} (${order.address || 'Не указан'}) передан другому мастеру`,
+                body: `Заказ по адресу (${order.address || 'Не указан'}) передан другому мастеру`,
                 tag: order.id,
                 url: '/gardener',
               });
