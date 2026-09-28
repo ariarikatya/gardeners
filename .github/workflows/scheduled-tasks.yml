@@ -2,10 +2,9 @@ name: Scheduled tasks - run fines/checks
 
 on:
   schedule:
-    # run daily at 20:05 Moscow time (MSK = UTC+3). The workflow times are in UTC.
-    # 20:05 MSK = 17:05 UTC, but adjust the cron lines below to match your desired timezone.
-    - cron: '5 17 * * *' # 17:05 UTC -> 20:05 MSK
-    - cron: '5 15 * * *' # optional run at 18:05 MSK (15:05 UTC)
+    # Main run daily at 23:55 Moscow time (MSK = UTC+3). Workflow times are in UTC.
+    # 23:55 MSK = 20:55 UTC
+    - cron: '55 20 * * *' # 20:55 UTC -> 23:55 MSK
   workflow_dispatch: {}
 
 jobs:
@@ -27,6 +26,7 @@ jobs:
 
       - name: Run scheduled tasks
         env:
+          TZ: Europe/Moscow
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Optional secrets for amo/vk if needed by the script
           AMO_REFRESH_TOKEN: ${{ secrets.AMO_REFRESH_TOKEN }}

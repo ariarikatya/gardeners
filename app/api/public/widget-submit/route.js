@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { forwardToAmoUnsorted } from '@/lib/amo';
+import amoApi from '@/lib/amoApi';
 import { notifyDispatchers } from '@/lib/vkApi';
 import { sendToRoles, sendToUser } from '@/lib/webPush';
 
@@ -116,7 +117,7 @@ export async function POST(req) {
       }
     })();
 
-    // ...и одновременно уходит в amoCRM — сразу через веб-формы (forwardToAmo)
+    // ...и одновременно уходит в amoCRM — сначала через API v4 с привязкой контакта, с фолбэком на веб-формы (forwardToAmoUnsorted)
     const noteParts = [];
     if (comment) noteParts.push(comment);
     if (serviceName) noteParts.push('Услуга: ' + serviceName);
@@ -131,126 +132,64 @@ export async function POST(req) {
     noteParts.push('Заявка с виджета онлайн-записи сайта');
     noteParts.push('Смотреть в CRM садовников: ' + ADMIN_PANEL_URL);
 
-    const result = await forwardToAmoUnsorted({
+    const amoParams = {
       clientName: name,
       clientPhone: phone,
       note: noteParts.join(' | '),
       workDescription: comment || undefined,
-      address: address || undefined, // Передается только в параметре address!
+      address: address || undefined,
       services: serviceName || undefined,
       serviceName: serviceName || undefined,
       approxWhere: body.district || undefined,
-    });
+    };
 
-    console.log('4. forwardToAmoUnsorted результат:', JSON.stringify(result));
-
-    // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId
-    console.log('🔍 НАЧИНАЮ ПОИСК amoDealId в amoCRM...');
     try {
-      console.log('⏳ Жду 8 секунд перед поиском сделки в amoCRM...');
-      await new Promise(resolve => setTimeout(resolve, 8000));
-
-      console.log('🔍 Читаю токены amoCRM из таблицы SystemSetting...');
-      const clientIdDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
-      const clientSecretDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
-      const refreshTokenDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_REFRESH_TOKEN' } });
-      const subDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
-
-      const clientId = clientIdDb?.value || process.env.AMO_CLIENT_ID;
-      const clientSecret = clientSecretDb?.value || process.env.AMO_CLIENT_SECRET;
-      const refreshToken = refreshTokenDb?.value || process.env.AMO_REFRESH_TOKEN;
-      const subdomain = subDb?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
-
-      if (!clientId || !clientSecret || !refreshToken) {
-        console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: В БД отсутствуют токены amoCRM!');
-        console.error('  client_id:', clientId ? 'найден' : 'НЕ НАЙДЕН');
-        console.error('  client_secret:', clientSecret ? 'найден' : 'НЕ НАЙДЕН');
-        console.error('  refresh_token:', refreshToken ? 'найден' : 'НЕ НАЙДЕН');
-        console.error('  Проверьте таблицу SystemSetting или пройдите OAuth на /admin/amo-connect');
-      } else {
-        console.log('✅ Токены найдены в БД, продолжаю поиск сделки...');
-
-        console.log('🔍 Запрашиваю свежий токен amoCRM через refresh_token...');
-        const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            client_id: clientId,
-            client_secret: clientSecret,
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
-          })
+      const apiRes = await amoApi.createLeadWithContact(amoParams);
+      if (apiRes && apiRes.leadId) {
+        await prisma.webLead.update({
+          where: { id: lead.id },
+          data: { amoDealId: String(apiRes.leadId) },
         });
+        console.log('✅ [widget-submit] amoDealId успешно сохранен в WebLead через API v4:', apiRes.leadId);
+      }
+    } catch (apiErr) {
+      console.warn('⚠️ [widget-submit] Ошибка API v4, применяю fallback через веб-форму:', apiErr.message);
+      const result = await forwardToAmoUnsorted(amoParams);
+      console.log('4. forwardToAmoUnsorted результат:', JSON.stringify(result));
 
-        const tokenData = await tokenRes.json().catch(() => ({}));
-        console.log('🔍 ОБМЕН ТОКЕНА: статус', tokenRes.status);
-        console.log('🔍 НОВЫЙ ТОКЕН:', tokenData.access_token ? 'получен' : 'ОШИБКА ' + JSON.stringify(tokenData));
+      // Поиск созданной сделки в amoCRM по телефону и сохранение amoDealId (фолбэк)
+      console.log('🔍 НАЧИНАЮ ПОИСК amoDealId в amoCRM...');
+      try {
+        console.log('⏳ Жду 8 секунд перед поиском сделки в amoCRM...');
+        await new Promise(resolve => setTimeout(resolve, 8000));
 
-        if (tokenRes.ok && tokenData.access_token) {
-          console.log('🔍 Сохраняю обновленные токены в SystemSetting...');
-          await prisma.systemSetting.upsert({ where: { key: 'AMO_ACCESS_TOKEN' }, update: { value: tokenData.access_token }, create: { key: 'AMO_ACCESS_TOKEN', value: tokenData.access_token } });
-          if (tokenData.refresh_token) {
-            await prisma.systemSetting.upsert({ where: { key: 'AMO_REFRESH_TOKEN' }, update: { value: tokenData.refresh_token }, create: { key: 'AMO_REFRESH_TOKEN', value: tokenData.refresh_token } });
-            console.log('✅ Новый refresh_token обновлен в БД');
-          }
+        const clientIdDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_ID' } });
+        const clientSecretDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_CLIENT_SECRET' } });
+        const refreshTokenDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_REFRESH_TOKEN' } });
+        const subDb = await prisma.systemSetting.findUnique({ where: { key: 'AMO_SUBDOMAIN' } });
 
-          const queryPhone = phoneClean.replace(/\D/g, '');
-          console.log('🔍 ПОИСК СДЕЛКИ (1): делаю запрос GET /api/v4/leads?query=' + queryPhone);
-          let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${tokenData.access_token}`,
-              'Content-Type': 'application/json',
-            },
+        const clientId = clientIdDb?.value || process.env.AMO_CLIENT_ID;
+        const clientSecret = clientSecretDb?.value || process.env.AMO_CLIENT_SECRET;
+        const refreshToken = refreshTokenDb?.value || process.env.AMO_REFRESH_TOKEN;
+        const subdomain = subDb?.value || process.env.AMO_SUBDOMAIN || 'ivanbahtin03';
+
+        if (clientId && clientSecret && refreshToken) {
+          const tokenRes = await fetch(`https://${subdomain}.amocrm.ru/oauth2/access_token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client_id: clientId,
+              client_secret: clientSecret,
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
+            })
           });
 
-          let searchData = await searchRes.json().catch(() => null);
-          console.log('🔍 ПОИСК СДЕЛКИ (1): статус', searchRes.status, 'тело:', JSON.stringify(searchData));
-
-          let leads = searchRes.ok && searchData ? (searchData?._embedded?.leads || []) : [];
-
-          // Повторный поиск по телефону через 5 секунд, если не найдены
-          if (leads.length === 0) {
-            console.log('⏳ Первый поиск по телефону не дал результатов, жду еще 5 секунд...');
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            console.log('🔍 ПОИСК СДЕЛКИ (2 - повторный по телефону): запрос...');
-            searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${tokenData.access_token}`,
-                'Content-Type': 'application/json',
-              },
-            });
-            searchData = await searchRes.json().catch(() => null);
-            console.log('🔍 ПОИСК СДЕЛКИ (2): статус', searchRes.status, 'тело:', JSON.stringify(searchData));
-            leads = searchRes.ok && searchData ? (searchData?._embedded?.leads || []) : [];
-          }
-
-          // Поиск по имени, если по телефону ничего не найдено
-          if (leads.length === 0 && name) {
-            const queryName = encodeURIComponent(String(name).trim());
-            console.log('🔍 ПОИСК СДЕЛКИ (3 - по имени ' + name + '): запрос...');
-            searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${queryName}`, {
-              method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${tokenData.access_token}`,
-                'Content-Type': 'application/json',
-              },
-            });
-            searchData = await searchRes.json().catch(() => null);
-            console.log('🔍 ПОИСК СДЕЛКИ (3): статус', searchRes.status, 'тело:', JSON.stringify(searchData));
-            leads = searchRes.ok && searchData ? (searchData?._embedded?.leads || []) : [];
-          }
-
-          let foundLeadId = null;
-
-          if (leads.length > 0) {
-            foundLeadId = String(leads[0].id);
-            console.log('9. Найдено в /api/v4/leads, amoDealId:', foundLeadId);
-          } else {
-            console.log('🔍 ПОИСК В НЕРАЗОБРАННОМ: делаем запрос GET /api/v4/leads/unsorted...');
-            let unsortedRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads/unsorted`, {
+          const tokenData = await tokenRes.json().catch(() => ({}));
+          if (tokenRes.ok && tokenData.access_token) {
+            const queryPhone = phoneClean.replace(/\D/g, '');
+            let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
               method: 'GET',
               headers: {
                 'Authorization': `Bearer ${tokenData.access_token}`,
@@ -258,39 +197,41 @@ export async function POST(req) {
               },
             });
 
-            let unsortedData = await unsortedRes.json().catch(() => null);
-            console.log('🔍 ПОИСК В НЕРАЗОБРАННОМ: статус', unsortedRes.status, 'тело:', JSON.stringify(unsortedData));
+            let searchData = await searchRes.json().catch(() => null);
+            let leads = searchRes.ok && searchData ? (searchData?._embedded?.leads || []) : [];
 
-            const unsortedList = unsortedRes.ok && unsortedData ? (unsortedData?._embedded?.unsorted || []) : [];
-            const matchedUnsorted = unsortedList.find(u => {
-              const uStr = JSON.stringify(u);
-              return uStr.includes(queryPhone);
-            });
-
-            if (matchedUnsorted) {
-              const leadUid = matchedUnsorted._embedded?.leads?.[0]?.id || matchedUnsorted.lead_id || matchedUnsorted.id;
-              if (leadUid) {
-                foundLeadId = String(leadUid);
-                console.log('9. Найдено в /api/v4/leads/unsorted, amoDealId:', foundLeadId);
+            let foundLeadId = null;
+            if (leads.length > 0) {
+              foundLeadId = String(leads[0].id);
+            } else {
+              let unsortedRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads/unsorted`, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${tokenData.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              let unsortedData = await unsortedRes.json().catch(() => null);
+              const unsortedList = unsortedRes.ok && unsortedData ? (unsortedData?._embedded?.unsorted || []) : [];
+              const matchedUnsorted = unsortedList.find(u => JSON.stringify(u).includes(queryPhone));
+              if (matchedUnsorted) {
+                const leadUid = matchedUnsorted._embedded?.leads?.[0]?.id || matchedUnsorted.lead_id || matchedUnsorted.id;
+                if (leadUid) foundLeadId = String(leadUid);
               }
             }
-          }
 
-          if (foundLeadId) {
-            await prisma.webLead.update({
-              where: { id: lead.id },
-              data: { amoDealId: foundLeadId },
-            });
-            console.log('✅ amoDealId успешно сохранен в WebLead:', foundLeadId);
-          } else {
-            console.log('9. Сделка пока не найдена в amoCRM (остается в Неразобранном, amoDealId = null).');
+            if (foundLeadId) {
+              await prisma.webLead.update({
+                where: { id: lead.id },
+                data: { amoDealId: foundLeadId },
+              });
+              console.log('✅ amoDealId успешно сохранен в WebLead (фолбэк):', foundLeadId);
+            }
           }
-        } else {
-          console.error('❌ Не удалось обновить access_token в amoCRM:', JSON.stringify(tokenData));
         }
+      } catch (amoSearchErr) {
+        console.error('⚠️ Ошибка поиска/сохранения amoDealId в widget-submit:', amoSearchErr.message);
       }
-    } catch (amoSearchErr) {
-      console.error('⚠️ Ошибка поиска/сохранения amoDealId в widget-submit:', amoSearchErr.message);
     }
 
     console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ ==========');
