@@ -5,15 +5,12 @@ Deployment notes — scheduled tasks and VK notifications
 - Script: scripts/run-scheduled-tasks.js
   - Run via node: node scripts/run-scheduled-tasks.js
   - Requires environment variable DATABASE_URL to connect to database.
-  - Should be run once a day around 20:05 (or twice: 18:05 and 20:05) depending on needs.
+  - Runs once a day at 23:55 MSK (20:55 UTC).
 
 - Example crontab entries (on the server, edit with `crontab -e`):
 
-# Run fines check at 20:05 every day
-5 20 * * * cd /path/to/repo && /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
-
-# (Optional) Run call-check at 18:05 every day
-5 18 * * * cd /path/to/repo && /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
+# Run fines check at 23:55 MSK every day
+55 23 * * * cd /path/to/repo && TZ=Europe/Moscow /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
 
 - Ensure the user running cron has access to the repository and env file (or system env variables). For deployments on platforms like Vercel, use their Scheduler (see below).
 
@@ -21,7 +18,7 @@ Deployment notes — scheduled tasks and VK notifications
 
 - If deploying to Vercel, use 'Vercel Scheduled Functions' or an external service to call the HTTP endpoint:
   POST https://your-site.com/api/admin/scheduled
-  The endpoint requires ADMIN auth (cookie-based). For simplicity, you can create a server-side scheduled job that triggers internally with server credentials, or implement a token-based endpoint if needed.
+  The endpoint requires ADMIN auth (cookie-based) or `x-cron-secret` header matching `CRON_SECRET`.
 
 3) systemd timer (example)
 
@@ -34,15 +31,15 @@ Description=Gardeners scheduled tasks
 Type=oneshot
 WorkingDirectory=/path/to/repo
 ExecStart=/usr/bin/node /path/to/repo/scripts/run-scheduled-tasks.js
-Environment=DATABASE_URL=postgres://user:pass@host:5432/db
+Environment=DATABASE_URL=postgres://user:pass@host:5432/db TZ=Europe/Moscow
 
 Then create `/etc/systemd/system/gardeners-scheduled.timer`:
 
 [Unit]
-Description=Run gardeners scheduled tasks daily at 20:05
+Description=Run gardeners scheduled tasks daily at 23:55 MSK
 
 [Timer]
-OnCalendar=*-*-* 20:05:00
+OnCalendar=*-*-* 23:55:00
 Persistent=true
 
 [Install]
@@ -119,3 +116,12 @@ Security and notes:
 4. **Просмотр логов функций**:
    - В консоли Vercel: `Deployments → текущий деплой → Logs` или в CLI командой `vercel logs`.
    - В логах ищите префикс `[WebPush]` для анализа количества найденных подписок и ошибок отправки.
+
+7) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
+
+- Требования к правам и токенам amoCRM API:
+  - Для полной работы API v4 интеграции токен должен иметь права на чтение и запись контактов (`contacts`), сделок (`leads`), примечаний и связь сущностей (`leads ↔ contacts`).
+  - При отсутствии токена или прав система автоматически пишет предупреждение в лог и безопасно отправляет заявку через резервную веб-форму (`forwardToAmo` / `forwardToAmoUnsorted`). Заявки клиентов никогда не теряются.
+
+- Привязка контактов:
+  - Новые сделки создаются с поиском существующего контакта по нормализованному номеру телефона. Если контакт существует — сделка связывается с ним без создания дубля контакта.
