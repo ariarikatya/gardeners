@@ -9,9 +9,11 @@
  */
 
 const prisma = require('../lib/prisma');
-const amoApi = require('../lib/amoApi').default;
 
 async function deduplicateAmoContacts() {
+  const amoModule = await import('../lib/amoApi.js');
+  const amoApi = amoModule.default || amoModule;
+
   const isApply = process.argv.includes('--apply');
   console.log(`[amo-dedupe-contacts] Starting contact deduplication (Mode: ${isApply ? 'APPLY' : 'DRY-RUN'})...`);
 
@@ -46,7 +48,7 @@ async function deduplicateAmoContacts() {
     for (const phone of phones) {
       processedPhones++;
       try {
-        const res = await amoApi.apiRequest(`/api/v4/contacts?query=${encodeURIComponent(phone)}&with=leads`);
+        const res = await amoApi.apiRequest(`/api/v4/contacts/fulltext?query=${encodeURIComponent(phone)}&with=leads`);
         const contacts = res?._embedded?.contacts || [];
 
         if (contacts.length <= 1) {
