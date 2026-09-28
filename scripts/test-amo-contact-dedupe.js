@@ -30,6 +30,7 @@ async function runTests() {
   const linksDb = [];
   let contactPostCount = 0;
   let simulatePathAFailure = false;
+  let simulateBothLinkPathsFailure = false;
 
   // Mock global fetch
   const originalFetch = global.fetch;
@@ -68,7 +69,7 @@ async function runTests() {
       };
     }
 
-    // Contact details query by ID
+    // Contact details query by ID or query
     if (path.startsWith('/api/v4/contacts?') && method === 'GET') {
       const parsedUrl = new URL(url);
       const query = parsedUrl.searchParams.get('query');
@@ -87,12 +88,22 @@ async function runTests() {
       }
 
       // Query by id[]
-      const found = contactsDb;
+      const idParams = parsedUrl.searchParams.getAll('id[]');
+      if (idParams.length > 0) {
+        const found = contactsDb.filter(c => idParams.includes(String(c.id)));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ _embedded: { contacts: found } }),
+          text: async () => JSON.stringify({ _embedded: { contacts: found } }),
+        };
+      }
+
       return {
         ok: true,
         status: 200,
-        json: async () => ({ _embedded: { contacts: found } }),
-        text: async () => JSON.stringify({ _embedded: { contacts: found } }),
+        json: async () => ({ _embedded: { contacts: contactsDb } }),
+        text: async () => JSON.stringify({ _embedded: { contacts: contactsDb } }),
       };
     }
 
@@ -160,7 +171,7 @@ async function runTests() {
 
     // Link contact to lead Path A
     if (path.startsWith('/api/v4/leads/') && path.endsWith('/link') && method === 'POST') {
-      if (simulatePathAFailure) {
+      if (simulatePathAFailure || simulateBothLinkPathsFailure) {
         return {
           ok: false,
           status: 404,
@@ -179,6 +190,14 @@ async function runTests() {
 
     // Link contact to lead Path B (fallback)
     if (path.startsWith('/api/v4/contacts/') && path.endsWith('/link') && method === 'POST') {
+      if (simulateBothLinkPathsFailure) {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({ error: 'Bad request' }),
+          text: async () => JSON.stringify({ error: 'Bad request' }),
+        };
+      }
       linksDb.push({ path, body });
       return {
         ok: true,
@@ -267,6 +286,37 @@ async function runTests() {
     const pathBLink = linksDb.find((l) => l.path.startsWith('/api/v4/contacts/101/link'));
     assert.ok(pathBLink, 'Path B fallback link (/api/v4/contacts/101/link) must be called when Path A fails');
     console.log('  ✅ Call 4 successfully fell back to Path B link endpoint!');
+
+    // Call 5: Case when fulltext finds nothing -> new contact created
+    console.log('  -> Call 5: Testing new phone number when fulltext search returns empty...');
+    simulatePathAFailure = false;
+    const res5 = await amoApi.createLeadWithContact({
+      name: 'Иван Иванов',
+      phone: '+7 908 553-53-11',
+      serviceName: 'Обрезка деревьев',
+    });
+    assert.strictEqual(res5.ok, true);
+    assert.strictEqual(contactsDb.length, 2, 'New contact created in DB for new phone');
+    assert.strictEqual(res5.contactId, 102, 'New contact ID is 102');
+    assert.strictEqual(contactPostCount, 2, 'POST /api/v4/contacts executed for new contact');
+    console.log('  ✅ Call 5 created new contact 102 when fulltext returned empty!');
+
+    // Call 6: Case when link fails on both Path A and Path B -> createLeadWithContact throws error
+    console.log('  -> Call 6: Testing failure when both link Path A and Path B fail...');
+    simulateBothLinkPathsFailure = true;
+    let didThrow = false;
+    try {
+      await amoApi.createLeadWithContact({
+        name: 'Сидор Сидоров',
+        phone: '79991234567',
+        serviceName: 'Обрезка деревьев',
+      });
+    } catch (linkErr) {
+      didThrow = true;
+      assert.ok(linkErr.message.includes('Failed to link contact'), 'Error message should indicate link failure');
+    }
+    assert.strictEqual(didThrow, true, 'createLeadWithContact must throw when both link paths fail');
+    console.log('  ✅ Call 6 threw error as expected when both link paths failed!');
 
     console.log('\n🎉 All contact deduplication tests passed successfully!');
   } finally {

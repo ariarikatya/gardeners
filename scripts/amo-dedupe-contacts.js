@@ -8,11 +8,15 @@
  *   Apply changes:     node scripts/amo-dedupe-contacts.js --apply
  */
 
-const prisma = require('../lib/prisma');
+import amoApi from '../lib/amoApi.js';
 
 async function deduplicateAmoContacts() {
-  const amoModule = await import('../lib/amoApi.js');
-  const amoApi = amoModule.default || amoModule;
+  const prisma = amoApi.getPrisma();
+  if (!prisma) {
+    console.error('❌ Could not load Prisma client for database access.');
+    process.exitCode = 1;
+    return;
+  }
 
   const isApply = process.argv.includes('--apply');
   console.log(`[amo-dedupe-contacts] Starting contact deduplication (Mode: ${isApply ? 'APPLY' : 'DRY-RUN'})...`);
