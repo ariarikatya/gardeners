@@ -28,11 +28,5 @@ jobs:
         env:
           TZ: Europe/Moscow
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          # Optional secrets for amo/vk if needed by the script
-          AMO_REFRESH_TOKEN: ${{ secrets.AMO_REFRESH_TOKEN }}
-          AMO_CLIENT_ID: ${{ secrets.AMO_CLIENT_ID }}
-          AMO_CLIENT_SECRET: ${{ secrets.AMO_CLIENT_SECRET }}
-          AMO_SUBDOMAIN: ${{ secrets.AMO_SUBDOMAIN }}
-          VK_GROUP_TOKEN: ${{ secrets.VK_GROUP_TOKEN }}
         run: |
           node ./scripts/run-scheduled-tasks.js
