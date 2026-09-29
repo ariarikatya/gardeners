@@ -1450,20 +1450,23 @@ export default function GardenerDashboard() {
                       className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
                     />
                     {factAmount && parseFloat(factAmount) > 0 && gardenerProfile && (() => {
-                      const rawPercent = gardenerProfile.writeoffPercent && Number(gardenerProfile.writeoffPercent) > 0 ? Number(gardenerProfile.writeoffPercent) : 35;
+                      const rawPercent = gardenerProfile.writeoffPercent && Number(gardenerProfile.writeoffPercent) > 0 ? Number(gardenerProfile.writeoffPercent) : 64.5;
                       const ratio = rawPercent > 1 ? rawPercent / 100 : rawPercent;
-                      const salary = Math.round(parseFloat(factAmount) * ratio);
-                      const debt = Math.round(parseFloat(factAmount) - salary);
+                      const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+                      const salary = round2(parseFloat(factAmount) * ratio);
+                      const debt = round2(parseFloat(factAmount) - salary);
+                      const compPercent = round2((1 - ratio) * 100);
+                      const gardPercent = round2(ratio * 100);
                       return (
                         <div className="mt-2 text-xs p-2.5 bg-emerald-50 rounded-lg border border-emerald-200 space-y-1">
                           <div className="flex justify-between text-slate-700">
-                            <span>Долг фирме ({Math.round((1 - ratio) * 100)}%):</span>
+                            <span>Долг фирме ({compPercent}%):</span>
                             <strong className="text-amber-800 font-bold">
                               {debt.toLocaleString('ru-RU')} ₽
                             </strong>
                           </div>
                           <div className="flex justify-between text-slate-700">
-                            <span>К выплате садовнику ({Math.round(ratio * 100)}%):</span>
+                            <span>К выплате садовнику ({gardPercent}%):</span>
                             <strong className="text-emerald-800 font-bold">
                               {salary.toLocaleString('ru-RU')} ₽
                             </strong>

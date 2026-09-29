@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { calculateOrderSplit } from '@/lib/money';
 
 
 async function checkAdmin(req) {
@@ -111,13 +112,11 @@ export async function PUT(req) {
 
     if (writeoffPercent !== undefined && Number(writeoffPercent) !== existing.writeoffPercent) {
       const newPercent = Number(writeoffPercent || 0);
-      const ratio = newPercent > 1 ? newPercent / 100 : newPercent;
       const gardenerOrders = await prisma.order.findMany({ where: { gardenerId: id } });
       for (const o of gardenerOrders) {
         const price = o.priceFact > 0 ? o.priceFact : o.priceContract > 0 ? o.priceContract : 0;
         if (price > 0) {
-          const employeeSalary = Math.round(price * ratio);
-          const companyShare = price - employeeSalary;
+          const { employeeSalary, companyShare } = calculateOrderSplit(price, newPercent);
           await prisma.order.update({
             where: { id: o.id },
             data: { employeeSalary, companyShare }
