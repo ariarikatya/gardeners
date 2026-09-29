@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { round2, calculateOrderSplit } from '@/lib/money';
 
 
 async function checkLeader(req) {
@@ -55,21 +56,20 @@ export async function GET(req) {
       .filter((value) => value === 'GARDENER' || value === 'COMPANY');
   };
 
-  const totalRevenue = orders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0);
-  const totalContract = orders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
-  const totalSalary = orders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
+  const totalRevenue = round2(orders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0));
+  const totalContract = round2(orders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0));
+  const totalSalary = round2(orders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0));
   const completedCashOrders = orders.filter(o => o.status === 'Выполнен' && o.isCash !== false);
-  const totalCompanyShare = completedCashOrders.reduce((sum, o) => {
+  const totalCompanyShare = round2(completedCashOrders.reduce((sum, o) => {
     let share = Number(o.companyShare || 0);
     if (share <= 0) {
       const price = Number(o.priceFact || o.priceContract || 0);
       const g = gardeners.find(item => item.id === o.gardenerId);
-      const rawPercent = g?.writeoffPercent && Number(g.writeoffPercent) > 0 ? Number(g.writeoffPercent) : 35;
-      const ratio = rawPercent > 1 ? rawPercent / 100 : rawPercent;
-      share = price - Math.round(price * ratio);
+      const split = calculateOrderSplit(price, g?.writeoffPercent);
+      share = split.companyShare;
     }
-    return sum + share;
-  }, 0);
+    return round2(sum + share);
+  }, 0));
 
   // Загрузим операции лидера за период и сгруппируем по садовнику
   const operations = await prisma.operation.findMany({ where: { createdAt: { gte: start, lte: end } } });
@@ -87,38 +87,37 @@ export async function GET(req) {
     const completedOrders = gardenerOrders.filter((o) => o.status === 'Выполнен');
     const pendingOrders = gardenerOrders.filter((o) => !['Выполнен', 'Отменен', 'Отказ'].includes(o.status));
 
-    const earned = completedOrders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0);
-    const contract = gardenerOrders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0);
-    const salary = gardenerOrders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0);
-    const share = completedOrders
+    const earned = round2(completedOrders.reduce((sum, o) => sum + Number(o.priceFact || 0), 0));
+    const contract = round2(gardenerOrders.reduce((sum, o) => sum + Number(o.priceContract || 0), 0));
+    const salary = round2(gardenerOrders.reduce((sum, o) => sum + Number(o.employeeSalary || 0), 0));
+    const share = round2(completedOrders
       .filter(o => o.isCash !== false)
       .reduce((sum, o) => {
         let sh = Number(o.companyShare || 0);
         if (sh <= 0) {
           const price = Number(o.priceFact || o.priceContract || 0);
-          const rawPercent = gardener.writeoffPercent && Number(gardener.writeoffPercent) > 0 ? Number(gardener.writeoffPercent) : 35;
-          const ratio = rawPercent > 1 ? rawPercent / 100 : rawPercent;
-          sh = price - Math.round(price * ratio);
+          const split = calculateOrderSplit(price, gardener.writeoffPercent);
+          sh = split.companyShare;
         }
-        return sum + sh;
-      }, 0);
-    const paidToGardener = completedOrders.reduce((sum, o) => {
+        return round2(sum + sh);
+      }, 0));
+    const paidToGardener = round2(completedOrders.reduce((sum, o) => {
       const targets = normalizePaidTargets(o.paidTo);
       const hasGardenerPayment = targets.includes('GARDENER') || (!targets.length && o.paid);
       return sum + (hasGardenerPayment ? Number(o.priceFact || o.priceContract || 0) : 0);
-    }, 0);
-    const paidToCompany = completedOrders.reduce((sum, o) => {
+    }, 0));
+    const paidToCompany = round2(completedOrders.reduce((sum, o) => {
       const targets = normalizePaidTargets(o.paidTo);
       return sum + (targets.includes('COMPANY') ? Number(o.priceFact || o.priceContract || 0) : 0);
-    }, 0);
-    const estimated = pendingOrders.reduce((sum, o) => {
+    }, 0));
+    const estimated = round2(pendingOrders.reduce((sum, o) => {
       const price = Number(o.priceContract || o.priceFact || 0);
       if (price <= 0) return sum;
-      if (o.companyShare > 0) return sum + Number(o.companyShare);
-      if (o.employeeSalary > 0) return sum + Math.max(price - Number(o.employeeSalary), 0);
-      const ratio = gardener.writeoffPercent > 1 ? gardener.writeoffPercent / 100 : gardener.writeoffPercent;
-      return sum + Math.round(price * (1 - ratio));
-    }, 0);
+      if (o.companyShare > 0) return round2(sum + Number(o.companyShare));
+      if (o.employeeSalary > 0) return round2(sum + Math.max(price - Number(o.employeeSalary), 0));
+      const split = calculateOrderSplit(price, gardener.writeoffPercent);
+      return round2(sum + split.companyShare);
+    }, 0));
 
     const ops = opsByGardener[gardener.id] || [];
     const bonusOps = ops.filter(op => op.type === 'bonus').reduce((s, o) => s + Number(o.amount || 0), 0);
@@ -165,17 +164,14 @@ export async function GET(req) {
     const price = Number(order.priceContract || order.priceFact || 0);
     if (price <= 0) return 0;
     if (order.companyShare > 0) return Number(order.companyShare);
-    if (order.employeeSalary > 0) return Math.max(price - Number(order.employeeSalary), 0);
+    if (order.employeeSalary > 0) return round2(Math.max(price - Number(order.employeeSalary), 0));
     const g = gardeners.find(item => item.id === order.gardenerId);
-    if (g && g.writeoffPercent) {
-      const ratio = g.writeoffPercent > 1 ? g.writeoffPercent / 100 : g.writeoffPercent;
-      return Math.round(price * (1 - ratio));
-    }
-    return price;
+    const split = calculateOrderSplit(price, g?.writeoffPercent);
+    return split.companyShare;
   };
 
   const pendingOrdersAll = orders.filter(o => !['Выполнен', 'Отменен', 'Отказ'].includes(o.status));
-  const forecastRevenue = pendingOrdersAll.reduce((sum, o) => sum + calcExpectedCompanyRevenue(o), 0);
+  const forecastRevenue = round2(pendingOrdersAll.reduce((sum, o) => sum + calcExpectedCompanyRevenue(o), 0));
 
   const daysInPeriod = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
   const avgDailyRevenue = daysInPeriod > 0 ? (totalRevenue - approvedExpenses) / daysInPeriod : 0;
@@ -222,13 +218,11 @@ export async function PUT(req) {
   });
 
   try {
-    const ratio = newPercent > 1 ? newPercent / 100 : newPercent;
     const gardenerOrders = await prisma.order.findMany({ where: { gardenerId: id } });
     for (const o of gardenerOrders) {
       const price = o.priceFact > 0 ? o.priceFact : o.priceContract > 0 ? o.priceContract : 0;
       if (price > 0) {
-        const employeeSalary = Math.round(price * ratio);
-        const companyShare = price - employeeSalary;
+        const { employeeSalary, companyShare } = calculateOrderSplit(price, newPercent);
         await prisma.order.update({
           where: { id: o.id },
           data: { employeeSalary, companyShare }

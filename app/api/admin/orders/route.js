@@ -5,6 +5,7 @@ import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi';
 import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
 import { sendToRoles, sendToUser, sendToAll } from '@/lib/webPush';
+import { calculateOrderSplit } from '@/lib/money';
 
 
 const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
@@ -79,6 +80,21 @@ export async function POST(req) {
   }
 
   try {
+    let sal = parseFloat(employeeSalary) || 0;
+    let share = parseFloat(companyShare) || 0;
+
+    if ((sal <= 0 || share <= 0) && gardenerId) {
+      const price = parseFloat(priceFact) || parseFloat(priceContract) || 0;
+      if (price > 0) {
+        const g = await prisma.gardener.findUnique({ where: { id: gardenerId } });
+        if (g) {
+          const split = calculateOrderSplit(price, g.writeoffPercent);
+          if (sal <= 0) sal = split.employeeSalary;
+          if (share <= 0) share = split.companyShare;
+        }
+      }
+    }
+
     const order = await prisma.order.create({
       data: {
         date: orderDate,
@@ -90,8 +106,8 @@ export async function POST(req) {
         description,
         priceContract: parseFloat(priceContract) || 0,
         priceFact: parseFloat(priceFact) || 0,
-        employeeSalary: parseFloat(employeeSalary) || 0,
-        companyShare: parseFloat(companyShare) || 0,
+        employeeSalary: sal,
+        companyShare: share,
         status: status || 'Новый заказ',
         comment,
         refusalReason: refusalReason || null,
@@ -321,8 +337,8 @@ export async function POST(req) {
                 description: `${description || ''} (Дубль/Напарник: ${g.name})`.trim(),
                 priceContract: parseFloat(priceContract) || 0,
                 priceFact: parseFloat(priceFact) || 0,
-                employeeSalary: parseFloat(employeeSalary) || 0,
-                companyShare: parseFloat(companyShare) || 0,
+                employeeSalary: sal,
+                companyShare: share,
                 status: status || 'Новый заказ',
                 comment,
                 refusalReason: refusalReason || null,
@@ -460,6 +476,27 @@ export async function PUT(req) {
   ['priceContract', 'priceFact', 'employeeSalary', 'companyShare'].forEach((key) => {
     if (updateData[key] !== undefined) updateData[key] = parseFloat(updateData[key]) || 0;
   });
+
+  const targetGardenerId = updateData.gardenerId !== undefined ? updateData.gardenerId : existing?.gardenerId;
+  const targetPriceFact = updateData.priceFact !== undefined ? parseFloat(updateData.priceFact) || 0 : existing?.priceFact || 0;
+  const targetPriceContract = updateData.priceContract !== undefined ? parseFloat(updateData.priceContract) || 0 : existing?.priceContract || 0;
+  const price = targetPriceFact > 0 ? targetPriceFact : targetPriceContract;
+
+  const hasManualSal = updateData.employeeSalary !== undefined && parseFloat(updateData.employeeSalary) > 0;
+  const hasManualShare = updateData.companyShare !== undefined && parseFloat(updateData.companyShare) > 0;
+
+  if ((!hasManualSal || !hasManualShare) && targetGardenerId && price > 0) {
+    try {
+      const g = await prisma.gardener.findUnique({ where: { id: targetGardenerId } });
+      if (g) {
+        const split = calculateOrderSplit(price, g.writeoffPercent);
+        if (!hasManualSal) updateData.employeeSalary = split.employeeSalary;
+        if (!hasManualShare) updateData.companyShare = split.companyShare;
+      }
+    } catch (e) {
+      console.error('Failed calculating order split in PUT /api/admin/orders:', e);
+    }
+  }
 
   try {
     const order = await prisma.order.update({

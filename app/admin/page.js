@@ -2343,10 +2343,11 @@ export default function AdminDashboard() {
                       let salary = formData.employeeSalary;
                       let share = formData.companyShare;
                       if (gardener && formData.priceFact > 0) {
-                        const gPercent = gardener.writeoffPercent || 0;
+                        const gPercent = gardener.writeoffPercent && Number(gardener.writeoffPercent) > 0 ? Number(gardener.writeoffPercent) : 64.5;
                         const ratio = gPercent > 1 ? gPercent / 100 : gPercent;
-                        salary = Math.round(formData.priceFact * ratio);
-                        share = formData.priceFact - salary;
+                        const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+                        salary = round2(formData.priceFact * ratio);
+                        share = round2(formData.priceFact - salary);
                       }
                       setFormData({ ...formData, gardenerId: gId, employeeSalary: salary, companyShare: share });
                     }}
