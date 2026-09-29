@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { toDateKey } from '@/lib/dates';
 
 
 const CORS_HEADERS = {
@@ -99,7 +100,7 @@ export async function GET(req) {
         // Заказы садовника на эту дату
         const gardenerOrdersOnDate = orders.filter((o) => {
           const matchGardener = o.gardenerId === g.id;
-          const orderDate = o.date.toISOString().split('T')[0];
+          const orderDate = toDateKey(o.date);
           return matchGardener && orderDate === dateStr;
         });
 
@@ -110,13 +111,13 @@ export async function GET(req) {
 
         const dayOff = dayOffs.find((d) => {
           const matchGardener = d.gardenerId === g.id;
-          const offDate = d.date.toISOString().split('T')[0];
+          const offDate = toDateKey(d.date);
           return matchGardener && offDate === dateStr;
         });
 
         const blocked = blockedDays.find((b) => {
           const matchGardener = b.gardenerId === g.id;
-          const blockDate = b.date.toISOString().split('T')[0];
+          const blockDate = toDateKey(b.date);
           return matchGardener && blockDate === dateStr;
         });
 
