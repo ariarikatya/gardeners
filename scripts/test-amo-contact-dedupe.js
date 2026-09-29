@@ -322,6 +322,127 @@ async function runTests() {
   } finally {
     global.fetch = originalFetch;
   }
+
+  // Test 3: Widget submission anti-flood deduplication
+  console.log('\nTest 3: Widget submission anti-flood deduplication logic');
+
+  const mockWebLeadsDb = [];
+
+  async function simulateWidgetSubmitAntiFlood(body, now = Date.now()) {
+    const { phone, serviceName, serviceId, preferredDate, preferredGardenerId, gardenerId } = body;
+    const phoneClean = String(phone || '').trim();
+    const normPhone = amoApi.normalizePhone(phoneClean);
+    const prefDate = preferredDate ? new Date(preferredDate) : null;
+    const finalGardenerId = preferredGardenerId || gardenerId || null;
+
+    const LEAD_DEDUPE_WINDOW_MINUTES = Number(process.env.LEAD_DEDUPE_WINDOW_MIN ?? 2);
+    const windowStart = new Date(now - LEAD_DEDUPE_WINDOW_MINUTES * 60 * 1000);
+
+    const recentLeads = mockWebLeadsDb.filter((l) => new Date(l.createdAt) >= windowStart);
+
+    const existingLead = recentLeads.find((l) => {
+      if (!normPhone || amoApi.normalizePhone(l.phone) !== normPhone) return false;
+
+      const lDate = l.preferredDate ? new Date(l.preferredDate).getTime() : null;
+      const reqDate = prefDate ? prefDate.getTime() : null;
+      if (lDate !== reqDate) return false;
+
+      const lGardener = l.preferredGardenerId ? String(l.preferredGardenerId) : null;
+      const reqGardener = finalGardenerId ? String(finalGardenerId) : null;
+      if (lGardener !== reqGardener) return false;
+
+      const sameName = serviceName && l.serviceName && String(serviceName).trim() === String(l.serviceName).trim();
+      const sameId = serviceId && l.serviceId && String(serviceId).trim() === String(l.serviceId).trim();
+      const bothNoService = !serviceName && !serviceId && !l.serviceName && !l.serviceId;
+
+      return sameName || sameId || bothNoService;
+    });
+
+    if (existingLead) {
+      return { success: true, id: existingLead.id, duplicate: true };
+    }
+
+    const newLead = {
+      id: `lead_${mockWebLeadsDb.length + 1}`,
+      phone: phoneClean,
+      serviceName: serviceName || null,
+      serviceId: serviceId || null,
+      preferredDate: prefDate,
+      preferredGardenerId: finalGardenerId,
+      createdAt: new Date(now),
+    };
+    mockWebLeadsDb.push(newLead);
+    return { success: true, id: newLead.id };
+  }
+
+  const baseTime = Date.now();
+
+  // 1. First submission
+  const w1 = await simulateWidgetSubmitAntiFlood({
+    phone: '+7 999 123-45-67',
+    serviceName: 'Обрезка деревьев',
+    preferredDate: '2026-10-01',
+  }, baseTime);
+  assert.strictEqual(w1.success, true);
+  assert.strictEqual(w1.duplicate, undefined);
+  assert.strictEqual(w1.id, 'lead_1');
+
+  // 2. Immediate duplicate submission within window (5 seconds later) -> duplicate: true
+  const w2 = await simulateWidgetSubmitAntiFlood({
+    phone: '+7 999 123-45-67',
+    serviceName: 'Обрезка деревьев',
+    preferredDate: '2026-10-01',
+  }, baseTime + 5000);
+  assert.strictEqual(w2.success, true);
+  assert.strictEqual(w2.duplicate, true);
+  assert.strictEqual(w2.id, 'lead_1');
+  console.log('  ✅ Two consecutive submissions within window correctly flagged as duplicate.');
+
+  // 3. Same submission outside 2-minute window (3 minutes later) -> new lead_2 created
+  const w3 = await simulateWidgetSubmitAntiFlood({
+    phone: '+7 999 123-45-67',
+    serviceName: 'Обрезка деревьев',
+    preferredDate: '2026-10-01',
+  }, baseTime + 3 * 60 * 1000);
+  assert.strictEqual(w3.success, true);
+  assert.strictEqual(w3.duplicate, undefined);
+  assert.strictEqual(w3.id, 'lead_2');
+  console.log('  ✅ Same submission outside anti-flood window allowed as new lead_2.');
+
+  // 4. Submission with different service within window -> new lead_3 created
+  const w4 = await simulateWidgetSubmitAntiFlood({
+    phone: '+7 999 123-45-67',
+    serviceName: 'Консервация автополива',
+    preferredDate: '2026-10-01',
+  }, baseTime + 3 * 60 * 1000 + 10000);
+  assert.strictEqual(w4.success, true);
+  assert.strictEqual(w4.duplicate, undefined);
+  assert.strictEqual(w4.id, 'lead_3');
+  console.log('  ✅ Different service within window allowed as new lead_3.');
+
+  // 5. Submission with different date within window -> new lead_4 created
+  const w5 = await simulateWidgetSubmitAntiFlood({
+    phone: '+7 999 123-45-67',
+    serviceName: 'Обрезка деревьев',
+    preferredDate: '2026-10-02',
+  }, baseTime + 3 * 60 * 1000 + 20000);
+  assert.strictEqual(w5.success, true);
+  assert.strictEqual(w5.duplicate, undefined);
+  assert.strictEqual(w5.id, 'lead_4');
+  console.log('  ✅ Different date within window allowed as new lead_4.');
+
+  // 6. Submission with different phone format ("8(999)1234567") for same date & service as w5 within window -> blocked as duplicate of lead_4
+  const w6 = await simulateWidgetSubmitAntiFlood({
+    phone: '8(999)1234567',
+    serviceName: 'Обрезка деревьев',
+    preferredDate: '2026-10-02',
+  }, baseTime + 3 * 60 * 1000 + 25000);
+  assert.strictEqual(w6.success, true);
+  assert.strictEqual(w6.duplicate, true);
+  assert.strictEqual(w6.id, 'lead_4');
+  console.log('  ✅ Different phone format within window matched normalized phone and blocked as duplicate.');
+
+  console.log('🎉 Widget anti-flood tests passed successfully!\n');
 }
 
 runTests().catch((err) => {
