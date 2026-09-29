@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { toDateKey } from '@/lib/dates';
 
 
 async function checkAdmin(req) {
@@ -41,12 +42,18 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Дата и ID садовника обязательны' }, { status: 400 });
     }
 
-    const targetDate = new Date(date);
+    const key = toDateKey(date);
+    if (!key) {
+      return NextResponse.json({ error: 'Невалидная дата' }, { status: 400 });
+    }
+    const gte = new Date(key + 'T00:00:00.000Z');
+    const lte = new Date(key + 'T23:59:59.999Z');
+
     // Ищем существующую блокировку
     const existing = await prisma.blockedDay.findFirst({
       where: {
         gardenerId,
-        date: targetDate,
+        date: { gte, lte },
       },
     });
 
@@ -60,7 +67,7 @@ export async function POST(req) {
       await prisma.blockedDay.create({
         data: {
           gardenerId,
-          date: targetDate,
+          date: new Date(date),
         },
       });
       isBlocked = true;

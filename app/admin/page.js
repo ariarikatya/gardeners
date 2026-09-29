@@ -2277,6 +2277,17 @@ export default function AdminDashboard() {
             <h3 className="text-xl font-bold text-slate-800 mb-4">
               {selectedOrder ? 'Редактировать / переместить заказ' : `Новая запись на ${selectedSlot.date}`}
             </h3>
+            {(() => {
+              if (!selectedOrder || !formData.date || !formData.gardenerId) return null;
+              const isBlocked = blockedDays.some(b => b.gardenerId === formData.gardenerId && (b.date.startsWith(formData.date) || toDateKey(b.date) === formData.date));
+              if (!isBlocked) return null;
+              return (
+                <div className="mb-4 text-xs font-semibold text-slate-600 bg-slate-100 p-2.5 rounded-lg border border-slate-200 flex items-center gap-2">
+                  <span>🛑</span>
+                  <span>день закрыт — можно только править, нельзя переносить других</span>
+                </div>
+              );
+            })()}
             {selectedOrder && selectedOrder.status === 'Перенос' && selectedOrder.transferRequestedDate && (
               <div className="mb-4 text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-100">
                 🗓 Садовник запросил перенос на <b>{new Date(selectedOrder.transferRequestedDate).toLocaleDateString('ru-RU')}</b>. Смените дату/садовника ниже и статус на «Новый заказ», либо назначьте другого свободного садовника.

@@ -6,6 +6,18 @@ import amoApi from '@/lib/amoApi';
 import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
 import { sendToRoles, sendToUser, sendToAll } from '@/lib/webPush';
 import { calculateOrderSplit } from '@/lib/money';
+import { toDateKey } from '@/lib/dates';
+
+async function getStopBlock(gardenerId, dateLike) {
+  if (!gardenerId || !dateLike) return null;
+  const key = toDateKey(dateLike);
+  if (!key) return null;
+  const gte = new Date(key + 'T00:00:00.000Z');
+  const lte = new Date(key + 'T23:59:59.999Z');
+  return prisma.blockedDay.findFirst({
+    where: { gardenerId, date: { gte, lte } },
+  });
+}
 
 
 const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
@@ -49,9 +61,7 @@ export async function POST(req) {
   const dayOfWeek = days[orderDate.getDay()];
 
   if (gardenerId) {
-    const isBlocked = await prisma.blockedDay.findFirst({
-      where: { gardenerId, date: orderDate }
-    });
+    const isBlocked = await getStopBlock(gardenerId, orderDate);
     if (isBlocked) {
       return NextResponse.json({ error: 'На этот день для данного мастера установлена блокировка ("СТОП"). Запись невозможна.' }, { status: 400 });
     }
@@ -401,15 +411,21 @@ export async function PUT(req) {
 
   const weekdayNames = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 
-  const checkGardenerId = updateData.gardenerId !== undefined ? updateData.gardenerId : existing?.gardenerId;
-  const checkDate = updateData.date ? new Date(updateData.date) : existing?.date;
+  const prevKey = toDateKey(existing?.date);
+  const nextKey = updateData.date !== undefined && updateData.date !== null && updateData.date !== ''
+    ? toDateKey(updateData.date)
+    : prevKey;
+  const nextGardenerId = (updateData.gardenerId !== undefined && updateData.gardenerId !== '' && updateData.gardenerId !== existing?.gardenerId)
+    ? updateData.gardenerId
+    : existing?.gardenerId;
 
-  if (checkGardenerId && checkDate) {
-    const isBlocked = await prisma.blockedDay.findFirst({
-      where: { gardenerId: checkGardenerId, date: checkDate }
-    });
-    if (isBlocked && (updateData.gardenerId !== undefined || updateData.date !== undefined)) {
-      return NextResponse.json({ error: 'На этот день для данного мастера установлена блокировка ("СТОП"). Запись невозможна.' }, { status: 400 });
+  const isMoveToOtherDay = !!prevKey && !!nextKey && prevKey !== nextKey;
+  const isReassign = !!updateData.gardenerId && updateData.gardenerId !== existing?.gardenerId;
+
+  if ((isMoveToOtherDay || isReassign) && nextKey && nextGardenerId) {
+    const blocked = await getStopBlock(nextGardenerId, nextKey);
+    if (blocked) {
+      return NextResponse.json({ error: 'На этот день для данного мастера установлена блокировка ("СТОП"). Перенос заказа на этот день невозможен.' }, { status: 400 });
     }
   }
 
@@ -424,7 +440,7 @@ export async function PUT(req) {
       updateData.status = updateData.status || 'Новый заказ';
       updateData.refusalReason = null;
     }
-    if (existing && existing.date && new Date(existing.date).toDateString() !== updateData.date.toDateString()) {
+    if (existing && existing.date && toDateKey(existing.date) !== toDateKey(updateData.date)) {
        if (existing.status !== 'Выполнен' && existing.status !== 'Отменен' && existing.status !== 'Отказ') {
           updateData.status = 'Новый заказ';
        }
@@ -453,13 +469,13 @@ export async function PUT(req) {
   if (updateData.district === '') updateData.district = null;
   delete updateData.fromLead;
 
-  if (updateData.date && existing && existing.amoDealId) {
+  if (updateData.date && existing && existing.amoDealId && toDateKey(existing.date) !== toDateKey(updateData.date)) {
     try {
       const svcId = updateData.serviceId !== undefined ? updateData.serviceId : existing.serviceId;
       const svc = svcId ? await prisma.service.findUnique({ where: { id: svcId } }) : null;
       const serviceName = svc ? svc.name : '';
 
-      await amoApi.addNoteToLead(existing.amoDealId, `Заказ перенесён диспетчером на ${updateData.date.toISOString().split('T')[0]}`);
+      await amoApi.addNoteToLead(existing.amoDealId, `Заказ перенесён диспетчером на ${toDateKey(updateData.date)}`);
       await amoApi.updateLeadStage(existing.amoDealId, serviceName, 'refusal');
     } catch (e) {
       console.error('Failed to handle amo transfer for date change:', e.message);
@@ -704,7 +720,7 @@ export async function PUT(req) {
         }
 
         // 3. Перенос заказа (смена даты)
-        const isDateChanged = updateData.date && existing && existing.date && new Date(existing.date).toDateString() !== new Date(updateData.date).toDateString();
+        const isDateChanged = updateData.date && existing && existing.date && toDateKey(existing.date) !== toDateKey(updateData.date);
         if (isDateChanged && order.gardenerId) {
           const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
           const newDateFormatted = new Date(order.date).toISOString().split('T')[0];
