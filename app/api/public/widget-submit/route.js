@@ -42,25 +42,47 @@ export async function POST(req) {
     }
 
     const phoneClean = String(phone).trim();
+    const normPhone = amoApi.normalizePhone(phoneClean);
     const prefDate = preferredDate ? new Date(preferredDate) : null;
 
     const finalGardenerId = preferredGardenerId || gardenerId || null;
     const finalGardenerName = preferredGardenerName || masterName || null;
     const finalInventory = preferredInventory || (Array.isArray(inventory) ? inventory.join(', ') : inventory) || null;
 
-    // Предотвращаем дубли: если за последние 60 минут уже была заявка с таким телефоном
-    // или если уже есть заявка с тем же телефоном и желаемой датой — считаем дублированной
-    let existingLead = null;
-    if (prefDate) {
-      existingLead = await prisma.webLead.findFirst({ where: { phone: phoneClean, preferredDate: prefDate } });
-    }
-    if (!existingLead) {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      existingLead = await prisma.webLead.findFirst({ where: { phone: phoneClean, createdAt: { gte: oneHourAgo } } });
-    }
+    // Анти-флуд защита (double-click): проверяем заявки за последние LEAD_DEDUPE_WINDOW_MINUTES
+    const LEAD_DEDUPE_WINDOW_MINUTES = Number(process.env.LEAD_DEDUPE_WINDOW_MIN ?? 2);
+    const windowStart = new Date(Date.now() - LEAD_DEDUPE_WINDOW_MINUTES * 60 * 1000);
+
+    const recentLeads = await prisma.webLead.findMany({
+      where: {
+        createdAt: { gte: windowStart },
+      },
+    });
+
+    const existingLead = recentLeads.find((l) => {
+      // 1. Сравнение нормализованного телефона
+      if (!normPhone || amoApi.normalizePhone(l.phone) !== normPhone) return false;
+
+      // 2. Сравнение желаемой даты
+      const lDate = l.preferredDate ? new Date(l.preferredDate).getTime() : null;
+      const reqDate = prefDate ? prefDate.getTime() : null;
+      if (lDate !== reqDate) return false;
+
+      // 3. Сравнение мастера/садовника
+      const lGardener = l.preferredGardenerId ? String(l.preferredGardenerId) : null;
+      const reqGardener = finalGardenerId ? String(finalGardenerId) : null;
+      if (lGardener !== reqGardener) return false;
+
+      // 4. Сравнение услуги (по serviceName или serviceId)
+      const sameName = serviceName && l.serviceName && String(serviceName).trim() === String(l.serviceName).trim();
+      const sameId = serviceId && l.serviceId && String(serviceId).trim() === String(l.serviceId).trim();
+      const bothNoService = !serviceName && !serviceId && !l.serviceName && !l.serviceId;
+
+      return sameName || sameId || bothNoService;
+    });
 
     if (existingLead) {
-      console.log('Найден дубликат заявки, пропуск отправки в amoCRM:', existingLead.id);
+      console.log('anti-flood: заблокирована повторная заявка (дубликат за окно флуда):', existingLead.id);
       console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ ==========');
       return NextResponse.json({ success: true, id: existingLead.id, duplicate: true }, { headers: CORS_HEADERS });
     }
