@@ -10,7 +10,8 @@
     "test:fines-logic": "node scripts/test-fines-logic.js",
     "test:amo-dedupe": "node scripts/test-amo-contact-dedupe.js",
     "test:money-split": "node scripts/test-money-split.js",
-    "test:stop-day-edit": "node scripts/test-stop-day-edit.js"
+    "test:stop-day-edit": "node scripts/test-stop-day-edit.js",
+    "test:fine-edit-delete": "node scripts/test-fine-edit-delete.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

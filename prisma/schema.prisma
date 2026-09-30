@@ -105,6 +105,7 @@ model Order {
   cardFilledAt          DateTime? // метка, что карточка заказа заполнена садовником
   clientCalledAt        DateTime? // метка, что садовник позвонил клиенту
   callStatus            String?   // статус звонка: "не дозвон" | "отказ" | "связался" | "написал смс"
+  completionComment     String?   // комментарий садовника при закрытии заказа
 
   // Предпочтения клиента из виджета
   preferredGardenerId   String?

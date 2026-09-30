@@ -2298,44 +2298,53 @@ export default function AdminDashboard() {
                 ✕ Садовник отказался: «{selectedOrder.refusalReason}». Назначьте другого садовника и смените статус на «Новый заказ».
               </div>
             )}
-            {selectedOrder && selectedOrder.status === 'Выполнен' && (selectedOrder.photoBefore || selectedOrder.photoAfter || selectedOrder.photoAct) && (
-              <div className="mb-4">
-                <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
-                <div className="flex gap-2">
-                  {(() => {
-                    const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
-                    try {
-                      const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
-                      return arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                          <span className="text-[10px] text-slate-400">До</span>
-                        </a>
-                      ));
-                    } catch (e) { return null; }
-                  })()}
+            {selectedOrder && selectedOrder.status === 'Выполнен' && (
+              <div className="mb-4 space-y-2">
+                {selectedOrder.completionComment && (
+                  <div className="text-xs text-emerald-900 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
+                    💬 <b>Комментарий садовника:</b> {selectedOrder.completionComment}
+                  </div>
+                )}
+                {(selectedOrder.photoBefore || selectedOrder.photoAfter || selectedOrder.photoAct) && (
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
+                    <div className="flex gap-2">
+                      {(() => {
+                        const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
+                        try {
+                          const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
+                          return arr.map((u, i) => (
+                            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
+                              <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                              <span className="text-[10px] text-slate-400">До</span>
+                            </a>
+                          ));
+                        } catch (e) { return null; }
+                      })()}
 
-                  {(() => {
-                    const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
-                    try {
-                      const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
-                      return arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                          <span className="text-[10px] text-slate-400">После</span>
-                        </a>
-                      ));
-                    } catch (e) { return null; }
-                  })()}
+                      {(() => {
+                        const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
+                        try {
+                          const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
+                          return arr.map((u, i) => (
+                            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
+                              <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                              <span className="text-[10px] text-slate-400">После</span>
+                            </a>
+                          ));
+                        } catch (e) { return null; }
+                      })()}
 
-                  {(() => {
-                    const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
-                    try {
-                      const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
-                      return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
-                    } catch (e) { return null; }
-                  })()}
-                </div>
+                      {(() => {
+                        const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
+                        try {
+                          const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
+                          return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
+                        } catch (e) { return null; }
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             <form onSubmit={handleSaveOrder} className="space-y-4">

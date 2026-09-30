@@ -42,7 +42,7 @@ export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt, callStatus, portfolioPhotos } = await req.json();
+  const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt, callStatus, portfolioPhotos, completionComment } = await req.json();
 
   const order = await prisma.order.findUnique({ where: { id } });
   if (!order || order.gardenerId !== payload.gardenerId) {
@@ -50,6 +50,7 @@ export async function PUT(req) {
   }
 
   let data = {};
+  let commentToNote = null;
 
   if (action === 'transfer') {
     if (!transferRequestedDate) {
@@ -86,6 +87,12 @@ export async function PUT(req) {
     const gardener = await prisma.gardener.findUnique({ where: { id: payload.gardenerId } });
     const { employeeSalary, companyShare } = calculateOrderSplit(amount, gardener?.writeoffPercent);
 
+    const commentTrimmed = typeof completionComment === 'string' ? completionComment.trim().slice(0, 2000) : '';
+    const finalComment = commentTrimmed.length > 0 ? commentTrimmed : (order.completionComment ?? null);
+    if (commentTrimmed.length > 0) {
+      commentToNote = commentTrimmed;
+    }
+
     data = {
       status: 'Выполнен',
       priceFact: amount,
@@ -93,7 +100,8 @@ export async function PUT(req) {
       employeeSalary,
       photoBefore: beforeVal,
       photoAfter: afterVal,
-      photoAct: actVal
+      photoAct: actVal,
+      completionComment: finalComment
     };
 
     // Обработка портфолио
@@ -154,6 +162,13 @@ export async function PUT(req) {
   } else if (action === 'mark_call') {
     data = { clientCalledAt: clientCalledAt ? new Date(clientCalledAt) : new Date() };
     if (callStatus !== undefined) data.callStatus = callStatus;
+  } else if (action === 'update_comment') {
+    const commentTrimmed = typeof completionComment === 'string' ? completionComment.trim().slice(0, 2000) : '';
+    const finalComment = commentTrimmed.length > 0 ? commentTrimmed : (order.completionComment ?? null);
+    if (commentTrimmed.length > 0) {
+      commentToNote = commentTrimmed;
+    }
+    data = { completionComment: finalComment };
   } else {
     return NextResponse.json({ error: 'Неизвестное действие' }, { status: 400 });
   }
@@ -174,6 +189,10 @@ export async function PUT(req) {
         if (data.transferRequestedDate) await amoApi.addNoteToLead(updated.amoDealId, 'Запрошен перенос на: ' + new Date(data.transferRequestedDate).toISOString().split('T')[0]);
       } else if (data.status === 'Новый заказ') {
         await amoApi.updateLeadStage(updated.amoDealId, svc, 'reset');
+      }
+
+      if (commentToNote) {
+        await amoApi.addNoteToLead(updated.amoDealId, 'Комментарий садовника: ' + commentToNote);
       }
     }
   } catch (e) {

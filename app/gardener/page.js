@@ -217,11 +217,16 @@ export default function GardenerDashboard() {
   const [transferDate, setTransferDate] = useState('');
   const [refusalText, setRefusalText] = useState('');
   const [factAmount, setFactAmount] = useState('');
+  const [completionText, setCompletionText] = useState('');
 
   // Храним объекты { id, url, inPortfolio } для независтмости
   const [photoBeforeItems, setPhotoBeforeItems] = useState([]);
   const [photoAfterItems, setPhotoAfterItems] = useState([]);
   const [photoActUrls, setPhotoActUrls] = useState([]);
+
+  const [editingCommentOrderId, setEditingCommentOrderId] = useState(null);
+  const [editCommentValue, setEditCommentValue] = useState('');
+  const [savingComment, setSavingComment] = useState(false);
 
   const [uploadingWhich, setUploadingWhich] = useState(null); // 'before' | 'after' | 'act' | null
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -337,6 +342,7 @@ export default function GardenerDashboard() {
     setTransferDate('');
     setRefusalText('');
     setFactAmount('');
+    setCompletionText(order.completionComment || '');
 
     // Инициализируем независимые массивы объектов с уникальными id
     try {
@@ -492,6 +498,7 @@ export default function GardenerDashboard() {
       payload.photoAfter = afterUrls;
       payload.photoAct = photoActUrls;
       payload.portfolioPhotos = selectedPortfolioUrls;
+      payload.completionComment = completionText;
     }
 
     try {
@@ -712,6 +719,63 @@ export default function GardenerDashboard() {
           {order.comment && (
             <div className="text-xs text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-100">
               📝 {order.comment}
+            </div>
+          )}
+          {order.status === 'Выполнен' && (
+            <div className="mt-2 space-y-1">
+              {order.completionComment && (
+                <div className="text-xs text-emerald-900 bg-emerald-50 p-2 rounded-lg border border-emerald-200">
+                  💬 <strong>Комментарий садовника:</strong> {order.completionComment}
+                </div>
+              )}
+              {editingCommentOrderId === order.id ? (
+                <div className="mt-2 space-y-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <textarea
+                    rows={3}
+                    maxLength={2000}
+                    value={editCommentValue}
+                    onChange={(e) => setEditCommentValue(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="Комментарий к выполнению..."
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setEditingCommentOrderId(null)}
+                      className="px-2.5 py-1 text-xs border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingComment}
+                      onClick={async () => {
+                        setSavingComment(true);
+                        try {
+                          await markOrderAction(order, 'update_comment', { completionComment: editCommentValue });
+                          setEditingCommentOrderId(null);
+                        } finally {
+                          setSavingComment(false);
+                        }
+                      }}
+                      className="px-2.5 py-1 text-xs bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {savingComment ? 'Сохраняю...' : 'Сохранить'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCommentOrderId(order.id);
+                    setEditCommentValue(order.completionComment || '');
+                  }}
+                  className="text-xs text-emerald-700 underline hover:text-emerald-800 font-medium"
+                >
+                  {order.completionComment ? 'Изменить комментарий' : '+ Добавить комментарий'}
+                </button>
+              )}
             </div>
           )}
           {order.status === 'Перенос' && order.transferRequestedDate && (
@@ -1439,6 +1503,18 @@ export default function GardenerDashboard() {
                         <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
                       </label>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500">Комментарий к выполнению (необязательно)</label>
+                    <textarea
+                      rows={3}
+                      maxLength={2000}
+                      value={completionText}
+                      onChange={e => setCompletionText(e.target.value)}
+                      className="mt-1 block w-full border border-slate-300 rounded-lg p-2 text-xs"
+                      placeholder="Например: Обрезали 3 яблони, клиент доволен..."
+                    />
                   </div>
 
                   <div>
