@@ -1035,6 +1035,7 @@ export default function GardenerDashboard() {
                           if (!files.length) return;
                           const targetWorkIdx = activeWorkIndexRef.current;
                           if (targetWorkIdx === null || targetWorkIdx === undefined) return;
+                          isUploadingRef.current = true;
                           setSavingWorks(true);
                           let successCount = 0;
                           let failCount = 0;
@@ -1071,6 +1072,7 @@ export default function GardenerDashboard() {
                           } catch (err) {
                             alert('Ошибка загрузки фото: ' + (err.message || 'Произошла ошибка'));
                           } finally {
+                            isUploadingRef.current = false;
                             setSavingWorks(false);
                             e.target.value = '';
                           }
@@ -1134,6 +1136,7 @@ export default function GardenerDashboard() {
                           }
                           const files = Array.from(e.target.files || []);
                           if (!files.length) return;
+                          isUploadingRef.current = true;
                           let successCount = 0;
                           let failCount = 0;
                           try {
@@ -1165,6 +1168,7 @@ export default function GardenerDashboard() {
                           } catch (err) {
                             alert('Ошибка при загрузке фото: ' + (err.message || 'Произошла ошибка'));
                           } finally {
+                            isUploadingRef.current = false;
                             e.target.value = '';
                           }
                         }}
