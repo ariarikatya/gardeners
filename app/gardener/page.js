@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import { clientNotify } from '@/lib/clientNotify';
@@ -232,6 +232,11 @@ export default function GardenerDashboard() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
+  const fileInputBeforeRef = useRef(null);
+  const fileInputAfterRef = useRef(null);
+  const fileInputActRef = useRef(null);
+  const isUploadingRef = useRef(false);
+
   // --- траты садовника ---
   const [operations, setOperations] = useState([]);
   const [expenseAmount, setExpenseAmount] = useState('');
@@ -250,6 +255,10 @@ export default function GardenerDashboard() {
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         document.title = '🌿 Мой Кабинет';
+        if (!isUploadingRef.current) {
+          setSubmitting(false);
+          setUploadingWhich(null);
+        }
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -401,6 +410,7 @@ export default function GardenerDashboard() {
   const handlePhotoSelect = async (e, which) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
+    isUploadingRef.current = true;
     setUploadingWhich(which);
     setUploadProgress(0);
     let successCount = 0;
@@ -456,6 +466,7 @@ export default function GardenerDashboard() {
     } catch (err) {
       alert('Не удалось загрузить фото: ' + (err.message || 'Произошла ошибка'));
     } finally {
+      isUploadingRef.current = false;
       setUploadingWhich(null);
       setUploadProgress(0);
       e.target.value = '';
@@ -1458,10 +1469,21 @@ export default function GardenerDashboard() {
                           </label>
                         </div>
                       ))}
-                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
+                      <button
+                        type="button"
+                        onClick={() => fileInputBeforeRef.current?.click()}
+                        className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-700 hover:bg-slate-50 min-h-[44px] w-full cursor-pointer font-medium select-none"
+                      >
                         {uploadingWhich === 'before' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото До'}
-                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'before')} disabled={uploadingWhich === 'before'} />
-                      </label>
+                      </button>
+                      <input
+                        ref={fileInputBeforeRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={e => handlePhotoSelect(e, 'before')}
+                        className="hidden"
+                      />
                     </div>
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «После»</label>
@@ -1489,19 +1511,41 @@ export default function GardenerDashboard() {
                           </label>
                         </div>
                       ))}
-                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
+                      <button
+                        type="button"
+                        onClick={() => fileInputAfterRef.current?.click()}
+                        className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-700 hover:bg-slate-50 min-h-[44px] w-full cursor-pointer font-medium select-none"
+                      >
                         {uploadingWhich === 'after' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото После'}
-                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'after')} disabled={uploadingWhich === 'after'} />
-                      </label>
+                      </button>
+                      <input
+                        ref={fileInputAfterRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={e => handlePhotoSelect(e, 'after')}
+                        className="hidden"
+                      />
                     </div>
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
                       {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
-                      <label className="relative flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-500 cursor-pointer hover:bg-slate-50 min-h-[64px]">
+                      <button
+                        type="button"
+                        onClick={() => fileInputActRef.current?.click()}
+                        className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-700 hover:bg-slate-50 min-h-[44px] w-full cursor-pointer font-medium select-none"
+                      >
                         {uploadingWhich === 'act' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото акта'}
-                        <input style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0 }} type="file" accept="image/*" multiple onChange={e => handlePhotoSelect(e, 'act')} disabled={uploadingWhich === 'act'} />
-                      </label>
+                      </button>
+                      <input
+                        ref={fileInputActRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={e => handlePhotoSelect(e, 'act')}
+                        className="hidden"
+                      />
                     </div>
                   </div>
 
