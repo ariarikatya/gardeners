@@ -213,8 +213,8 @@ export default function LeaderDashboard() {
 
   const closeOpsModal = () => { setOpsModalGardener(null); setOpsList([]); };
 
-  const deleteOperation = async (id) => {
-    if (!confirm('Удалить операцию?')) return;
+  const deleteOperation = async (id, confirmMsg = 'Удалить операцию?') => {
+    if (!confirm(confirmMsg)) return;
     try {
       const res = await fetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const json = await res.json();
@@ -602,6 +602,53 @@ export default function LeaderDashboard() {
                         {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-1"><img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200" /></a>}
                       </div>
 
+                      {op.type === 'fine' && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="number"
+                            defaultValue={op.amount}
+                            min="1"
+                            step="1"
+                            className="w-24 border rounded px-2 py-1 text-sm"
+                            id={`fine-amount-${op.id}`}
+                          />
+                          <input
+                            type="text"
+                            defaultValue={op.description || ''}
+                            className="w-32 border rounded px-2 py-1 text-xs"
+                            placeholder="Причина"
+                            id={`fine-desc-${op.id}`}
+                          />
+                          <button
+                            onClick={async () => {
+                              const amountEl = document.getElementById(`fine-amount-${op.id}`);
+                              const descEl = document.getElementById(`fine-desc-${op.id}`);
+                              const amount = amountEl ? Number(amountEl.value) : op.amount;
+                              const description = descEl ? descEl.value : (op.description || '');
+                              try {
+                                const res = await fetch('/api/leader/operations', {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ id: op.id, amount, description })
+                                });
+                                const json = await res.json();
+                                if (!res.ok) throw new Error(json.error || 'Ошибка');
+                                if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                await fetchData();
+                              } catch (err) {
+                                alert(err.message || 'Ошибка');
+                              }
+                            }}
+                            className="bg-emerald-600 text-white px-2 py-1 rounded text-xs"
+                          >
+                            Сохранить
+                          </button>
+                          <button onClick={() => deleteOperation(op.id, 'Удалить штраф?')} className="text-rose-600 text-xs">
+                            Удалить
+                          </button>
+                        </div>
+                      )}
+
                       {op.type === 'expense' && <div className="flex items-center gap-2">
                         <input type="number" defaultValue={op.approvedAmount ?? op.amount} min="0" className="w-24 border rounded px-2 py-1 text-sm" id={`approved-${op.id}`} />
                         <button
@@ -675,6 +722,7 @@ export default function LeaderDashboard() {
                             <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
                             {o.address && <div className="text-xs text-slate-600 mt-0.5">📍 <a href={`https://yandex.ru/maps/?text=${encodeURIComponent(o.district ? `${o.district}, ${o.address}` : o.address)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline font-medium">{o.district ? `${o.district} • ${o.address}` : o.address}</a></div>}
                             {o.refusalReason && <div className="text-xs text-rose-600 font-medium mt-0.5">Причина отказа: {o.refusalReason}</div>}
+                            {o.completionComment && <div className="text-xs text-emerald-800 font-medium mt-0.5">Комментарий садовника: {o.completionComment}</div>}
                             <div className="text-xs text-slate-500 mt-1">Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</div>
                             <div className="text-xs text-slate-500 mt-1">Текущий статус: {getPaymentTargetLabel(o.paidTo, o.paid)}</div>
                           </div>

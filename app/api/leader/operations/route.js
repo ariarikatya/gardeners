@@ -54,11 +54,30 @@ export async function POST(req) {
 export async function PUT(req) {
   if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const body = await req.json();
-  const { id, approved, approvedAmount } = body;
+  const { id, approved, approvedAmount, amount, description } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  const existing = await prisma.operation.findUnique({ where: { id } });
+  if (!existing) return NextResponse.json({ error: 'Операция не найдена' }, { status: 404 });
+
   const data = {};
+
+  if (existing.type === 'fine') {
+    if (amount !== undefined) {
+      const numAmount = Number(amount);
+      if (!Number.isFinite(numAmount) || numAmount <= 0 || numAmount > 1_000_000) {
+        return NextResponse.json({ error: 'Некорректная сумма штрафа' }, { status: 400 });
+      }
+      data.amount = numAmount;
+    }
+    if (description !== undefined) {
+      data.description = typeof description === 'string' ? description.trim().slice(0, 500) : '';
+    }
+  }
+
   if (approved !== undefined) data.approved = Boolean(approved);
   if (approvedAmount !== undefined) data.approvedAmount = approvedAmount === null ? null : Number(approvedAmount);
+
   try {
     const op = await prisma.operation.update({ where: { id }, data, include: { gardener: true } });
 
