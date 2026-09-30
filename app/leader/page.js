@@ -38,6 +38,16 @@ const normalizePaidTargets = (paidTo) => {
 };
 
 const getOperationTypeLabel = (type) => OPERATION_TYPE_LABELS[type] || type || 'Операция';
+
+function renderOperationDescription(op) {
+  if (!op || !op.description) return '';
+  let desc = op.description;
+  if (op.order && op.order.address) {
+    const loc = op.order.district ? `📍 ${op.order.district} • ${op.order.address}` : `📍 ${op.order.address}`;
+    desc = desc.replace(/\(?order:[^\s\)]+\)?/gi, loc);
+  }
+  return desc;
+}
 const getPaymentTargetLabel = (paidTo, paid) => {
   const targets = normalizePaidTargets(paidTo);
   if (targets.length > 0) {
@@ -594,97 +604,110 @@ export default function LeaderDashboard() {
               ) : (
                 <ul className="space-y-2 max-h-64 overflow-auto">
                   {opsList.map(op => (
-                    <li key={op.id} className="flex justify-between items-center border p-2 rounded">
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.type === 'expense' && (op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-[11px] ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded">Новая</span>)}</div>
-                        {op.description && <div className="text-xs text-slate-500">{op.description}</div>}
-                        <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
-                        {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-1"><img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200" /></a>}
-                      </div>
+                    <li key={op.id} className={`border rounded ${op.type === 'fine' ? 'px-2 py-1.5 flex flex-col gap-1' : 'p-2 flex justify-between items-center'}`}>
+                      {op.type === 'fine' ? (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <span className="text-sm font-medium">{getOperationTypeLabel(op.type)}</span>
+                              <span className="text-xs text-slate-400 ml-2">{new Date(op.createdAt).toLocaleString('ru-RU')}</span>
+                              {op.description && <div className="text-xs text-slate-500 mt-0.5">{renderOperationDescription(op)}</div>}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                defaultValue={op.amount}
+                                min="1"
+                                step="1"
+                                className="w-20 border rounded px-2 py-1 text-sm"
+                                id={`fine-amount-${op.id}`}
+                              />
+                              <input
+                                type="text"
+                                defaultValue={op.description || ''}
+                                className="w-36 border rounded px-2 py-1 text-xs"
+                                placeholder="Причина"
+                                id={`fine-desc-${op.id}`}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={async () => {
+                                const amountEl = document.getElementById(`fine-amount-${op.id}`);
+                                const descEl = document.getElementById(`fine-desc-${op.id}`);
+                                const amount = amountEl ? Number(amountEl.value) : op.amount;
+                                const description = descEl ? descEl.value : (op.description || '');
+                                try {
+                                  const res = await fetch('/api/leader/operations', {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id: op.id, amount, description })
+                                  });
+                                  const json = await res.json();
+                                  if (!res.ok) throw new Error(json.error || 'Ошибка');
+                                  if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                  await fetchData();
+                                } catch (err) {
+                                  alert(err.message || 'Ошибка');
+                                }
+                              }}
+                              className="bg-emerald-600 text-white px-2 py-0.5 rounded text-xs"
+                            >
+                              Сохранить
+                            </button>
+                            <button onClick={() => deleteOperation(op.id, 'Удалить штраф?')} className="text-rose-600 text-xs py-0.5">
+                              Удалить
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex-1">
+                            <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.type === 'expense' && (op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-[11px] ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded">Новая</span>)}</div>
+                            {op.description && <div className="text-xs text-slate-500">{renderOperationDescription(op)}</div>}
+                            <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
+                            {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-1"><img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200" /></a>}
+                          </div>
 
-                      {op.type === 'fine' && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            type="number"
-                            defaultValue={op.amount}
-                            min="1"
-                            step="1"
-                            className="w-24 border rounded px-2 py-1 text-sm"
-                            id={`fine-amount-${op.id}`}
-                          />
-                          <input
-                            type="text"
-                            defaultValue={op.description || ''}
-                            className="w-32 border rounded px-2 py-1 text-xs"
-                            placeholder="Причина"
-                            id={`fine-desc-${op.id}`}
-                          />
-                          <button
-                            onClick={async () => {
-                              const amountEl = document.getElementById(`fine-amount-${op.id}`);
-                              const descEl = document.getElementById(`fine-desc-${op.id}`);
-                              const amount = amountEl ? Number(amountEl.value) : op.amount;
-                              const description = descEl ? descEl.value : (op.description || '');
-                              try {
-                                const res = await fetch('/api/leader/operations', {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ id: op.id, amount, description })
-                                });
-                                const json = await res.json();
-                                if (!res.ok) throw new Error(json.error || 'Ошибка');
-                                if (opsModalGardener) await openOpsModal(opsModalGardener);
-                                await fetchData();
-                              } catch (err) {
-                                alert(err.message || 'Ошибка');
-                              }
-                            }}
-                            className="bg-emerald-600 text-white px-2 py-1 rounded text-xs"
-                          >
-                            Сохранить
-                          </button>
-                          <button onClick={() => deleteOperation(op.id, 'Удалить штраф?')} className="text-rose-600 text-xs">
-                            Удалить
-                          </button>
-                        </div>
+                          {op.type === 'expense' && <div className="flex items-center gap-2">
+                            <input type="number" defaultValue={op.approvedAmount ?? op.amount} min="0" className="w-24 border rounded px-2 py-1 text-sm" id={`approved-${op.id}`} />
+                            <button
+                              onClick={async () => {
+                                const el = document.getElementById(`approved-${op.id}`);
+                                const val = el ? Number(el.value || 0) : Number(op.amount || 0);
+                                try {
+                                  const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: true, approvedAmount: val }) });
+                                  const json = await res.json();
+                                  if (!res.ok) throw new Error(json.error || 'Ошибка');
+                                  // обновим список
+                                  if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                  await fetchData();
+                                  // если бот вк настроен, можно показать уведомление в UI
+                                  if (json.operation && json.operation.approved) alert('Трата утверждена и садовник должен получить уведомление во ВКонтакте (если указан vkId)');
+                                } catch (err) { alert(err.message || 'Ошибка'); }
+                              }}
+                              className="bg-emerald-600 text-white px-3 py-1 rounded text-sm"
+                            >Утвердить</button>
+
+                            <button
+                              onClick={async () => {
+                                // снять утверждение
+                                try {
+                                  const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: false, approvedAmount: null }) });
+                                  const json = await res.json();
+                                  if (!res.ok) throw new Error(json.error || 'Ошибка');
+                                  if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                  await fetchData();
+                                } catch (err) { alert(err.message || 'Ошибка'); }
+                              }}
+                              className="bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm"
+                            >Снять</button>
+
+                            <button onClick={() => deleteOperation(op.id)} className="text-rose-600 text-xs">Удалить</button>
+                          </div>}
+                        </>
                       )}
-
-                      {op.type === 'expense' && <div className="flex items-center gap-2">
-                        <input type="number" defaultValue={op.approvedAmount ?? op.amount} min="0" className="w-24 border rounded px-2 py-1 text-sm" id={`approved-${op.id}`} />
-                        <button
-                          onClick={async () => {
-                            const el = document.getElementById(`approved-${op.id}`);
-                            const val = el ? Number(el.value || 0) : Number(op.amount || 0);
-                            try {
-                              const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: true, approvedAmount: val }) });
-                              const json = await res.json();
-                              if (!res.ok) throw new Error(json.error || 'Ошибка');
-                              // обновим список
-                              if (opsModalGardener) await openOpsModal(opsModalGardener);
-                              await fetchData();
-                              // если бот вк настроен, можно показать уведомление в UI
-                              if (json.operation && json.operation.approved) alert('Трата утверждена и садовник должен получить уведомление во ВКонтакте (если указан vkId)');
-                            } catch (err) { alert(err.message || 'Ошибка'); }
-                          }}
-                          className="bg-emerald-600 text-white px-3 py-1 rounded text-sm"
-                        >Утвердить</button>
-
-                        <button
-                          onClick={async () => {
-                            // снять утверждение
-                            try {
-                              const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: false, approvedAmount: null }) });
-                              const json = await res.json();
-                              if (!res.ok) throw new Error(json.error || 'Ошибка');
-                              if (opsModalGardener) await openOpsModal(opsModalGardener);
-                              await fetchData();
-                            } catch (err) { alert(err.message || 'Ошибка'); }
-                          }}
-                          className="bg-slate-100 text-slate-700 px-2 py-1 rounded text-sm"
-                        >Снять</button>
-
-                        <button onClick={() => deleteOperation(op.id)} className="text-rose-600 text-xs">Удалить</button>
-                      </div>}
                     </li>
                   ))}
                 </ul>

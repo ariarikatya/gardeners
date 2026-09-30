@@ -33,8 +33,17 @@ export async function GET(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
+  const idParam = searchParams.get('id');
   const startParam = searchParams.get('start');
   const endParam = searchParams.get('end');
+
+  if (idParam) {
+    const order = await prisma.order.findUnique({
+      where: { id: idParam },
+      include: { gardener: true, service: true },
+    });
+    return NextResponse.json({ order, orders: order ? [order] : [] });
+  }
 
   const where = {};
   if (startParam || endParam) {
