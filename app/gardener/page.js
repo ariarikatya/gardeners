@@ -1001,6 +1001,10 @@ export default function GardenerDashboard() {
                                   accept="image/*"
                                   multiple
                                   onChange={async (e) => {
+                                    if (!isUploadingRef.current) {
+                                      setSubmitting(false);
+                                      setUploadingWhich(null);
+                                    }
                                     const files = Array.from(e.target.files || []);
                                     if (!files.length) return;
                                     setSavingWorks(true);
@@ -1041,7 +1045,7 @@ export default function GardenerDashboard() {
                                       e.target.value = '';
                                     }
                                   }}
-                                  className="absolute inset-0 opacity-0 cursor-pointer"
+                                  className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                                 />
                               </label>
                             </div>
@@ -1087,6 +1091,10 @@ export default function GardenerDashboard() {
                           accept="image/*"
                           multiple
                           onChange={async (e) => {
+                            if (!isUploadingRef.current) {
+                              setSubmitting(false);
+                              setUploadingWhich(null);
+                            }
                             const files = Array.from(e.target.files || []);
                             if (!files.length) return;
                             let successCount = 0;
@@ -1279,7 +1287,7 @@ export default function GardenerDashboard() {
                     ) : (
                       <label className="relative flex items-center gap-2 border border-dashed rounded p-2 text-sm text-slate-500 cursor-pointer">
                         📎 Загрузить чек
-                        <input type="file" accept="image/*" className="absolute inset-0 opacity-0" onChange={async (e) => {
+                        <input type="file" accept="image/*" className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none" onChange={async (e) => {
                           const f = e.target.files && e.target.files[0];
                           if (!f) return;
                           try {
@@ -1471,7 +1479,13 @@ export default function GardenerDashboard() {
                       ))}
                       <button
                         type="button"
-                        onClick={() => fileInputBeforeRef.current?.click()}
+                        onClick={() => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          fileInputBeforeRef.current?.click();
+                        }}
                         className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-700 hover:bg-slate-50 min-h-[44px] w-full cursor-pointer font-medium select-none"
                       >
                         {uploadingWhich === 'before' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото До'}
@@ -1482,7 +1496,7 @@ export default function GardenerDashboard() {
                         accept="image/*"
                         multiple
                         onChange={e => handlePhotoSelect(e, 'before')}
-                        className="hidden"
+                        className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                       />
                     </div>
 
@@ -1513,7 +1527,13 @@ export default function GardenerDashboard() {
                       ))}
                       <button
                         type="button"
-                        onClick={() => fileInputAfterRef.current?.click()}
+                        onClick={() => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          fileInputAfterRef.current?.click();
+                        }}
                         className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-700 hover:bg-slate-50 min-h-[44px] w-full cursor-pointer font-medium select-none"
                       >
                         {uploadingWhich === 'after' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото После'}
@@ -1524,7 +1544,7 @@ export default function GardenerDashboard() {
                         accept="image/*"
                         multiple
                         onChange={e => handlePhotoSelect(e, 'after')}
-                        className="hidden"
+                        className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                       />
                     </div>
 
@@ -1533,7 +1553,13 @@ export default function GardenerDashboard() {
                       {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
                       <button
                         type="button"
-                        onClick={() => fileInputActRef.current?.click()}
+                        onClick={() => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          fileInputActRef.current?.click();
+                        }}
                         className="flex items-center justify-center gap-2 border border-dashed border-slate-300 rounded-lg p-3 text-xs text-slate-700 hover:bg-slate-50 min-h-[44px] w-full cursor-pointer font-medium select-none"
                       >
                         {uploadingWhich === 'act' ? `Загружаю... ${uploadProgress > 0 ? uploadProgress + '%' : ''}` : '📷 Добавить фото акта'}
@@ -1544,7 +1570,7 @@ export default function GardenerDashboard() {
                         accept="image/*"
                         multiple
                         onChange={e => handlePhotoSelect(e, 'act')}
-                        className="hidden"
+                        className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                       />
                     </div>
                   </div>
