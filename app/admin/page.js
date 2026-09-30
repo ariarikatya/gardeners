@@ -1773,7 +1773,7 @@ export default function AdminDashboard() {
                             <div className="flex flex-wrap gap-2">
                               {services.map(s => (
                                 <label key={s.id} className={`text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer select-none transition-all ${editingGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
-                                  <input type="checkbox" className="hidden" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
+                                  <input type="checkbox" className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none" checked={editingGardener.serviceIds.includes(s.id)} onChange={() => toggleEditGardenerService(s.id)} />
                                   {s.name}
                                 </label>
                               ))}
@@ -1947,7 +1947,7 @@ export default function AdminDashboard() {
                       {services.length === 0 && <span className="text-xs text-slate-400">Сначала добавьте услуги во вкладке «Услуги»</span>}
                       {services.map(s => (
                         <label key={s.id} className={`text-xs px-2 py-1 rounded-lg border cursor-pointer ${newGardener.serviceIds.includes(s.id) ? 'bg-emerald-100 border-emerald-300 text-emerald-800' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                          <input type="checkbox" className="hidden" checked={newGardener.serviceIds.includes(s.id)} onChange={() => toggleNewGardenerService(s.id)} />
+                          <input type="checkbox" className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none" checked={newGardener.serviceIds.includes(s.id)} onChange={() => toggleNewGardenerService(s.id)} />
                           {s.name}
                         </label>
                       ))}
