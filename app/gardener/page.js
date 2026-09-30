@@ -235,6 +235,10 @@ export default function GardenerDashboard() {
   const fileInputBeforeRef = useRef(null);
   const fileInputAfterRef = useRef(null);
   const fileInputActRef = useRef(null);
+  const fileInputPortfolioRef = useRef(null);
+  const fileInputNewWorkRef = useRef(null);
+  const fileInputReceiptRef = useRef(null);
+  const activeWorkIndexRef = useRef(null);
   const isUploadingRef = useRef(false);
 
   // --- траты садовника ---
@@ -980,6 +984,7 @@ export default function GardenerDashboard() {
                                 <div key={pIdx} className="relative group">
                                   <img src={imgUrl} alt={`${work.title} ${pIdx+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
                                   <button
+                                    type="button"
                                     onClick={() => {
                                       const newImgs = imgList.filter((_, i) => i !== pIdx);
                                       const updated = myWorks.map((item, i) => i === wIdx ? { ...item, images: newImgs, image: newImgs[0] || '' } : item);
@@ -993,65 +998,81 @@ export default function GardenerDashboard() {
                                 </div>
                               ))}
 
-                              <label className="relative cursor-pointer flex flex-col items-center justify-center w-20 h-20 rounded-lg border border-dashed border-slate-300 bg-white hover:bg-slate-100 text-xs text-slate-500 text-center p-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!isUploadingRef.current) {
+                                    setSubmitting(false);
+                                    setUploadingWhich(null);
+                                  }
+                                  activeWorkIndexRef.current = wIdx;
+                                  fileInputPortfolioRef.current?.click();
+                                }}
+                                className="relative cursor-pointer flex flex-col items-center justify-center w-20 h-20 min-h-[44px] rounded-lg border border-dashed border-slate-300 bg-white hover:bg-slate-100 text-xs text-slate-500 text-center p-1"
+                              >
                                 <span className="font-bold text-lg text-emerald-600">+</span>
                                 <span className="text-[10px]">Фото</span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  multiple
-                                  onChange={async (e) => {
-                                    if (!isUploadingRef.current) {
-                                      setSubmitting(false);
-                                      setUploadingWhich(null);
-                                    }
-                                    const files = Array.from(e.target.files || []);
-                                    if (!files.length) return;
-                                    setSavingWorks(true);
-                                    let successCount = 0;
-                                    let failCount = 0;
-                                    try {
-                                      const uploaded = [];
-                                      for (const f of files) {
-                                        try {
-                                          const compressed = await compressImage(f);
-                                          const formData = new FormData();
-                                          formData.append('image', compressed, 'work.jpg');
-                                          formData.append('type', 'portfolio');
-                                          const data = await xhrUpload('/api/gardener/upload', formData);
-                                          if (data.url) {
-                                            uploaded.push(data.url);
-                                            successCount++;
-                                          } else {
-                                            failCount++;
-                                          }
-                                        } catch (err) {
-                                          console.error('Ошибка загрузки фото портфолио:', err);
-                                          failCount++;
-                                        }
-                                      }
-                                      if (uploaded.length > 0) {
-                                        const newImgs = [...imgList, ...uploaded];
-                                        const updated = myWorks.map((item, i) => i === wIdx ? { ...item, images: newImgs, image: newImgs[0] || '' } : item);
-                                        await handleSaveWorks(updated);
-                                      }
-                                      if (failCount > 0) {
-                                        alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
-                                      }
-                                    } catch (err) {
-                                      alert('Ошибка загрузки фото: ' + (err.message || 'Произошла ошибка'));
-                                    } finally {
-                                      setSavingWorks(false);
-                                      e.target.value = '';
-                                    }
-                                  }}
-                                  className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
-                                />
-                              </label>
+                              </button>
                             </div>
                           </div>
                         );
                       })}
+                      <input
+                        ref={fileInputPortfolioRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={async (e) => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          const files = Array.from(e.target.files || []);
+                          if (!files.length) return;
+                          const targetWorkIdx = activeWorkIndexRef.current;
+                          if (targetWorkIdx === null || targetWorkIdx === undefined) return;
+                          setSavingWorks(true);
+                          let successCount = 0;
+                          let failCount = 0;
+                          try {
+                            const uploaded = [];
+                            for (const f of files) {
+                              try {
+                                const compressed = await compressImage(f);
+                                const formData = new FormData();
+                                formData.append('image', compressed, 'work.jpg');
+                                formData.append('type', 'portfolio');
+                                const data = await xhrUpload('/api/gardener/upload', formData);
+                                if (data.url) {
+                                  uploaded.push(data.url);
+                                  successCount++;
+                                } else {
+                                  failCount++;
+                                }
+                              } catch (err) {
+                                console.error('Ошибка загрузки фото портфолио:', err);
+                                failCount++;
+                              }
+                            }
+                            if (uploaded.length > 0) {
+                              const currentWork = myWorks[targetWorkIdx];
+                              const imgList = currentWork ? (currentWork.images && Array.isArray(currentWork.images) ? currentWork.images : currentWork.image ? [currentWork.image] : []) : [];
+                              const newImgs = [...imgList, ...uploaded];
+                              const updated = myWorks.map((item, i) => i === targetWorkIdx ? { ...item, images: newImgs, image: newImgs[0] || '' } : item);
+                              await handleSaveWorks(updated);
+                            }
+                            if (failCount > 0) {
+                              alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
+                            }
+                          } catch (err) {
+                            alert('Ошибка загрузки фото: ' + (err.message || 'Произошла ошибка'));
+                          } finally {
+                            setSavingWorks(false);
+                            e.target.value = '';
+                          }
+                        }}
+                        className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
+                      />
                     </div>
                   )}
 
@@ -1084,56 +1105,67 @@ export default function GardenerDashboard() {
                     )}
 
                     <div className="flex items-center gap-2">
-                      <label className="cursor-pointer px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          fileInputNewWorkRef.current?.click();
+                        }}
+                        className="cursor-pointer px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1 min-h-[44px]"
+                      >
                         📷 Выбрать фото
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={async (e) => {
-                            if (!isUploadingRef.current) {
-                              setSubmitting(false);
-                              setUploadingWhich(null);
-                            }
-                            const files = Array.from(e.target.files || []);
-                            if (!files.length) return;
-                            let successCount = 0;
-                            let failCount = 0;
-                            try {
-                              const uploaded = [];
-                              for (const f of files) {
-                                try {
-                                  const compressed = await compressImage(f);
-                                  const formData = new FormData();
-                                  formData.append('image', compressed, 'work.jpg');
-                                  formData.append('type', 'portfolio');
-                                  const data = await xhrUpload('/api/gardener/upload', formData);
-                                  if (data.url) {
-                                    uploaded.push(data.url);
-                                    successCount++;
-                                  } else {
-                                    failCount++;
-                                  }
-                                } catch (err) {
-                                  console.error('Ошибка загрузки фото:', err);
+                      </button>
+                      <input
+                        ref={fileInputNewWorkRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={async (e) => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          const files = Array.from(e.target.files || []);
+                          if (!files.length) return;
+                          let successCount = 0;
+                          let failCount = 0;
+                          try {
+                            const uploaded = [];
+                            for (const f of files) {
+                              try {
+                                const compressed = await compressImage(f);
+                                const formData = new FormData();
+                                formData.append('image', compressed, 'work.jpg');
+                                formData.append('type', 'portfolio');
+                                const data = await xhrUpload('/api/gardener/upload', formData);
+                                if (data.url) {
+                                  uploaded.push(data.url);
+                                  successCount++;
+                                } else {
                                   failCount++;
                                 }
+                              } catch (err) {
+                                console.error('Ошибка загрузки фото:', err);
+                                failCount++;
                               }
-                              if (uploaded.length > 0) {
-                                setNewWorkImages(prev => [...prev, ...uploaded]);
-                              }
-                              if (failCount > 0) {
-                                alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
-                              }
-                            } catch (err) {
-                              alert('Ошибка при загрузке фото: ' + (err.message || 'Произошла ошибка'));
-                            } finally {
-                              e.target.value = '';
                             }
-                          }}
-                          className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
-                        />
-                      </label>
+                            if (uploaded.length > 0) {
+                              setNewWorkImages(prev => [...prev, ...uploaded]);
+                            }
+                            if (failCount > 0) {
+                              alert(`Загрузка завершена: успешно ${successCount}, ошибок ${failCount}`);
+                            }
+                          } catch (err) {
+                            alert('Ошибка при загрузке фото: ' + (err.message || 'Произошла ошибка'));
+                          } finally {
+                            e.target.value = '';
+                          }
+                        }}
+                        className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
+                      />
 
                       <button
                         type="button"
@@ -1285,19 +1317,19 @@ export default function GardenerDashboard() {
                         <button type="button" onClick={() => setExpenseReceiptUrl('')} className="text-xs text-rose-600">Удалить</button>
                       </div>
                     ) : (
-                      <label className="relative flex items-center gap-2 border border-dashed rounded p-2 text-sm text-slate-500 cursor-pointer">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!isUploadingRef.current) {
+                            setSubmitting(false);
+                            setUploadingWhich(null);
+                          }
+                          fileInputReceiptRef.current?.click();
+                        }}
+                        className="relative flex items-center gap-2 border border-dashed rounded p-2 text-sm text-slate-500 cursor-pointer min-h-[44px]"
+                      >
                         📎 Загрузить чек
-                        <input type="file" accept="image/*" className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none" onChange={async (e) => {
-                          const f = e.target.files && e.target.files[0];
-                          if (!f) return;
-                          try {
-                            setSubmittingExpense(true);
-                            const url = await uploadReceipt(f);
-                            setExpenseReceiptUrl(url);
-                          } catch (err) { alert(err.message || 'Ошибка загрузки'); }
-                          finally { setSubmittingExpense(false); e.target.value = ''; }
-                        }} />
-                      </label>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1306,6 +1338,31 @@ export default function GardenerDashboard() {
                   <button type="submit" disabled={submittingExpense} className="px-4 py-2 bg-emerald-600 text-white rounded-lg">{submittingExpense ? 'Отправляю...' : 'Отправить на утверждение'}</button>
                 </div>
               </form>
+
+              <input
+                ref={fileInputReceiptRef}
+                type="file"
+                accept="image/*"
+                className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
+                onChange={async (e) => {
+                  if (!isUploadingRef.current) {
+                    setSubmitting(false);
+                    setUploadingWhich(null);
+                  }
+                  const f = e.target.files && e.target.files[0];
+                  if (!f) return;
+                  try {
+                    setSubmittingExpense(true);
+                    const url = await uploadReceipt(f);
+                    setExpenseReceiptUrl(url);
+                  } catch (err) {
+                    alert(err.message || 'Ошибка загрузки');
+                  } finally {
+                    setSubmittingExpense(false);
+                    e.target.value = '';
+                  }
+                }}
+              />
             </div>
 
             <div>
