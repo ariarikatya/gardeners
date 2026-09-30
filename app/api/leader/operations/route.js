@@ -36,7 +36,11 @@ export async function GET(req) {
   };
   if (gardenerId) where.gardenerId = gardenerId;
 
-  const ops = await prisma.operation.findMany({ where, orderBy: { createdAt: 'desc' } });
+  const ops = await prisma.operation.findMany({
+    where,
+    include: { order: { select: { address: true, district: true } } },
+    orderBy: { createdAt: 'desc' }
+  });
   return NextResponse.json({ operations: ops });
 }
 
