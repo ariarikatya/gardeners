@@ -818,16 +818,16 @@ export default function GardenerDashboard() {
 
         {order.status === 'Новый заказ' && (
           <div className="flex gap-2 mt-3 flex-wrap">
-            <button onClick={() => markOrderAction(order, 'mark_card')} className="w-full text-xs bg-slate-100 text-slate-700 border border-slate-200 rounded-lg py-2 font-medium hover:bg-slate-200">
+            <button type="button" onClick={() => markOrderAction(order, 'mark_card')} className="w-full text-xs bg-slate-100 text-slate-700 border border-slate-200 rounded-lg py-2 font-medium hover:bg-slate-200">
               Карточка заполнена
             </button>
-            <button onClick={() => openAction(order, 'transfer')} className="flex-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-lg py-2 font-medium hover:bg-blue-100">
+            <button type="button" onClick={() => openAction(order, 'transfer')} className="flex-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-lg py-2 font-medium hover:bg-blue-100">
               Перенос
             </button>
-            <button onClick={() => openAction(order, 'refuse')} className="flex-1 text-xs bg-rose-50 text-rose-700 border border-rose-200 rounded-lg py-2 font-medium hover:bg-rose-100">
+            <button type="button" onClick={() => openAction(order, 'refuse')} className="flex-1 text-xs bg-rose-50 text-rose-700 border border-rose-200 rounded-lg py-2 font-medium hover:bg-rose-100">
               Отказ
             </button>
-            <button onClick={() => openAction(order, 'complete')} className="flex-1 text-xs bg-emerald-600 text-white rounded-lg py-2 font-medium hover:bg-emerald-700">
+            <button type="button" onClick={() => openAction(order, 'complete')} className="flex-1 text-xs bg-emerald-600 text-white rounded-lg py-2 font-medium hover:bg-emerald-700">
               Выполнено
             </button>
           </div>
@@ -883,7 +883,7 @@ export default function GardenerDashboard() {
       : 'border-slate-100';
 
     return (
-      <button
+      <button type="button"
         key={i}
         onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
         className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend && !isDayOff ? 'border-slate-300 bg-slate-50/50' : ''}`}
@@ -914,14 +914,14 @@ export default function GardenerDashboard() {
           <a href="tel:88452650206" className="text-xs bg-emerald-700 hover:bg-emerald-600 px-3 py-1.5 rounded-lg flex items-center gap-1">
             📞 Диспетчер
           </a>
-          <button onClick={handleLogout} className="text-xs bg-emerald-700 px-3 py-1.5 rounded-lg">Выйти</button>
+          <button type="button" onClick={handleLogout} className="text-xs bg-emerald-700 px-3 py-1.5 rounded-lg">Выйти</button>
         </div>
       </header>
 
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          <button onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
-          <button onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
+          <button type="button" onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
+          <button type="button" onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
             🔔 Аукцион
             {auctionOrders.length > 0 && (
               <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full font-bold">
@@ -929,8 +929,8 @@ export default function GardenerDashboard() {
               </span>
             )}
           </button>
-          <button onClick={() => setActiveSection('portfolio')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'portfolio' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>🖼️ Портфолио</button>
-          <button onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
+          <button type="button" onClick={() => setActiveSection('portfolio')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'portfolio' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>🖼️ Портфолио</button>
+          <button type="button" onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
         </div>
 
         {activeSection === 'portfolio' && (
@@ -1006,7 +1006,8 @@ export default function GardenerDashboard() {
 
                               <button
                                 type="button"
-                                onClick={() => {
+                                onClick={(e) => {
+                          e.preventDefault();
                                   if (!isUploadingRef.current) {
                                     setSubmitting(false);
                                     setUploadingWhich(null);
@@ -1115,7 +1116,8 @@ export default function GardenerDashboard() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
                           if (!isUploadingRef.current) {
                             setSubmitting(false);
                             setUploadingWhich(null);
@@ -1211,7 +1213,7 @@ export default function GardenerDashboard() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-xl font-bold text-emerald-900">Аукцион заказов</h2>
-                <button onClick={fetchAuction} className="text-xs text-emerald-700 underline">Обновить</button>
+                <button type="button" onClick={fetchAuction} className="text-xs text-emerald-700 underline">Обновить</button>
               </div>
               <p className="text-xs text-slate-500 mb-4">
                 Свободные заказы, которые диспетчер выставил на аукцион. Кто первый нажимает «Забрать заказ» — тот и становится исполнителем!
@@ -1237,7 +1239,7 @@ export default function GardenerDashboard() {
                       {order.priceContract > 0 && <div className="text-xs font-semibold text-emerald-800 mt-2">Сумма по договору: {order.priceContract} ₽</div>}
 
                       <div className="mt-4 flex justify-end">
-                        <button
+                        <button type="button"
                           disabled={claimingId === order.id}
                           onClick={() => handleClaimOrder(order.id)}
                           className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50 text-sm"
@@ -1258,7 +1260,7 @@ export default function GardenerDashboard() {
             <h2 className="text-xl font-bold text-emerald-900">Кошелёк</h2>
             <div className="flex gap-2 bg-slate-100 rounded-lg p-1">
               {['month', 'quarter', 'year'].map((scope) => (
-                <button
+                <button type="button"
                   key={scope}
                   onClick={() => setWalletRange(scope)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium ${walletRange === scope ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
@@ -1328,7 +1330,8 @@ export default function GardenerDashboard() {
                         <img src={expenseReceiptUrl} alt="Чек" className="w-16 h-16 object-cover rounded border" />
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={(e) => {
+                          e.preventDefault();
                             if (!isUploadingRef.current) {
                               setSubmitting(false);
                               setUploadingWhich(null);
@@ -1344,7 +1347,8 @@ export default function GardenerDashboard() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
                           if (!isUploadingRef.current) {
                             setSubmitting(false);
                             setUploadingWhich(null);
@@ -1427,13 +1431,13 @@ export default function GardenerDashboard() {
         {activeSection === 'records' && <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
           <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
-            <button
+            <button type="button"
               onClick={() => setViewMode('list')}
               className={`px-3 py-1.5 font-medium ${viewMode === 'list' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'}`}
             >
               Список
             </button>
-            <button
+            <button type="button"
               onClick={() => setViewMode('calendar')}
               className={`px-3 py-1.5 font-medium ${viewMode === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'}`}
             >
@@ -1441,7 +1445,7 @@ export default function GardenerDashboard() {
             </button>
           </div>
           <div className="ml-3">
-            <button onClick={() => setShowPastOrders(s => !s)} className="px-3 py-1.5 text-sm rounded-lg bg-white border border-slate-200">{showPastOrders ? 'Скрыть прошедшие' : 'Показать прошедшие'}</button>
+            <button type="button" onClick={() => setShowPastOrders(s => !s)} className="px-3 py-1.5 text-sm rounded-lg bg-white border border-slate-200">{showPastOrders ? 'Скрыть прошедшие' : 'Показать прошедшие'}</button>
           </div>
         </div>}
 
@@ -1467,9 +1471,9 @@ export default function GardenerDashboard() {
           <div>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 mb-4 max-w-sm mx-auto">
               <div className="flex items-center justify-between mb-3">
-                <button onClick={goToPrevMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">←</button>
+                <button type="button" onClick={goToPrevMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">←</button>
                 <div className="font-semibold text-slate-700 text-sm">{MONTH_LABELS[month]} {year}</div>
-                <button onClick={goToNextMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">→</button>
+                <button type="button" onClick={goToNextMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">→</button>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-1">
                 {['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(l => <div key={l}>{l}</div>)}
@@ -1563,7 +1567,8 @@ export default function GardenerDashboard() {
                       ))}
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
                           if (!isUploadingRef.current) {
                             setSubmitting(false);
                             setUploadingWhich(null);
@@ -1611,7 +1616,8 @@ export default function GardenerDashboard() {
                       ))}
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
                           if (!isUploadingRef.current) {
                             setSubmitting(false);
                             setUploadingWhich(null);
@@ -1637,7 +1643,8 @@ export default function GardenerDashboard() {
                       {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
                           if (!isUploadingRef.current) {
                             setSubmitting(false);
                             setUploadingWhich(null);
