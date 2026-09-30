@@ -262,6 +262,7 @@ export default function GardenerDashboard() {
         if (!isUploadingRef.current) {
           setSubmitting(false);
           setUploadingWhich(null);
+          setSubmittingExpense(false);
         }
       }
     };
@@ -324,6 +325,7 @@ export default function GardenerDashboard() {
     e.preventDefault();
     if (!expenseAmount || Number(expenseAmount) <= 0) return alert('Укажите сумму');
     setSubmittingExpense(true);
+    isUploadingRef.current = true;
     try {
       let receipt = expenseReceiptUrl;
       if (!receipt) {
@@ -339,6 +341,7 @@ export default function GardenerDashboard() {
     } catch (err) {
       alert(err.message || 'Ошибка');
     } finally {
+      isUploadingRef.current = false;
       setSubmittingExpense(false);
     }
   };
@@ -967,6 +970,7 @@ export default function GardenerDashboard() {
                                 placeholder="Название работы / адрес"
                               />
                               <button
+                                type="button"
                                 onClick={() => {
                                   if (confirm('Удалить этой работу из портфолио?')) {
                                     const updated = myWorks.filter((_, i) => i !== wIdx);
@@ -1312,8 +1316,21 @@ export default function GardenerDashboard() {
                   <label className="block text-xs text-slate-500">Чек / фото</label>
                   <div className="flex items-center gap-2 mt-1">
                     {expenseReceiptUrl ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <img src={expenseReceiptUrl} alt="Чек" className="w-16 h-16 object-cover rounded border" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isUploadingRef.current) {
+                              setSubmitting(false);
+                              setUploadingWhich(null);
+                            }
+                            fileInputReceiptRef.current?.click();
+                          }}
+                          className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1 min-h-[44px]"
+                        >
+                          📷 Заменить фото
+                        </button>
                         <button type="button" onClick={() => setExpenseReceiptUrl('')} className="text-xs text-rose-600">Удалить</button>
                       </div>
                     ) : (
