@@ -418,6 +418,7 @@ export default function GardenerDashboard() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     isUploadingRef.current = true;
+    setSubmitting(true);
     setUploadingWhich(which);
     setUploadProgress(0);
     let successCount = 0;
@@ -474,6 +475,7 @@ export default function GardenerDashboard() {
       alert('Не удалось загрузить фото: ' + (err.message || 'Произошла ошибка'));
     } finally {
       isUploadingRef.current = false;
+      setSubmitting(false);
       setUploadingWhich(null);
       setUploadProgress(0);
       e.target.value = '';
