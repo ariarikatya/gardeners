@@ -1131,7 +1131,7 @@ export default function GardenerDashboard() {
                               e.target.value = '';
                             }
                           }}
-                          className="hidden"
+                          className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                         />
                       </label>
 
