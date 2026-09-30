@@ -1137,6 +1137,7 @@ export default function GardenerDashboard() {
                           const files = Array.from(e.target.files || []);
                           if (!files.length) return;
                           isUploadingRef.current = true;
+                          setSavingWorks(true);
                           let successCount = 0;
                           let failCount = 0;
                           try {
@@ -1169,6 +1170,7 @@ export default function GardenerDashboard() {
                             alert('Ошибка при загрузке фото: ' + (err.message || 'Произошла ошибка'));
                           } finally {
                             isUploadingRef.current = false;
+                            setSavingWorks(false);
                             e.target.value = '';
                           }
                         }}
@@ -1546,12 +1548,12 @@ export default function GardenerDashboard() {
                               ×
                             </button>
                           </div>
-                          <label className="flex items-center gap-1 mt-1 bg-white/90 px-1 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
+                          <label className="flex items-center justify-center min-h-[44px] px-2 gap-1 mt-1 bg-white/90 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={item.inPortfolio}
                               onChange={() => toggleBeforePortfolio(item.id)}
-                              className="rounded text-emerald-600 focus:ring-0 w-3 h-3"
+                              className="rounded text-emerald-600 focus:ring-0 w-5 h-5"
                             />
                             <span>В портфолио</span>
                           </label>
@@ -1594,12 +1596,12 @@ export default function GardenerDashboard() {
                               ×
                             </button>
                           </div>
-                          <label className="flex items-center gap-1 mt-1 bg-white/90 px-1 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
+                          <label className="flex items-center justify-center min-h-[44px] px-2 gap-1 mt-1 bg-white/90 py-0.5 rounded border text-[10px] text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={item.inPortfolio}
                               onChange={() => toggleAfterPortfolio(item.id)}
-                              className="rounded text-emerald-600 focus:ring-0 w-3 h-3"
+                              className="rounded text-emerald-600 focus:ring-0 w-5 h-5"
                             />
                             <span>В портфолио</span>
                           </label>

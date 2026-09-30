@@ -2442,8 +2442,8 @@ export default function AdminDashboard() {
                 <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {services.map(s => {
                       const checked = (formData.serviceIds || []).includes(s.id);
-                      return <label key={s.id} className={`flex items-center gap-2 rounded-lg border px-2 py-2 text-sm cursor-pointer ${checked ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'border-slate-200 text-slate-600'}`}>
-                        <input type="checkbox" checked={checked} onChange={e => setFormData(prev => { const nextIds = e.target.checked ? [...new Set([...(prev.serviceIds || []), s.id])] : (prev.serviceIds || []).filter(id => id !== s.id); return { ...prev, serviceIds: nextIds, serviceId: nextIds[0] || '' }; })} />
+                      return <label key={s.id} className={`relative flex items-center gap-2 rounded-lg border px-2.5 py-2 text-sm cursor-pointer min-h-[44px] select-none transition-all ${checked ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                        <input type="checkbox" className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none" checked={checked} onChange={e => setFormData(prev => { const nextIds = e.target.checked ? [...new Set([...(prev.serviceIds || []), s.id])] : (prev.serviceIds || []).filter(id => id !== s.id); return { ...prev, serviceIds: nextIds, serviceId: nextIds[0] || '' }; })} />
                         {s.name}
                       </label>;
                     })}
@@ -2474,7 +2474,7 @@ export default function AdminDashboard() {
                 </div>
               </div>
               <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <label className="flex items-center gap-2 text-sm font-medium">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer min-h-[44px]">
                   <input type="checkbox" checked={formData.isCash ?? true} onChange={e => setFormData({...formData, isCash: e.target.checked})} className="w-4 h-4" /> 
                   <span>Оплата: {formData.isCash ?? true ? 'Нал (садовник сдает % фирме)' : 'Безнал (фирма платит садовнику отдельно)'}</span>
                 </label>
