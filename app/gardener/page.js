@@ -1368,6 +1368,7 @@ export default function GardenerDashboard() {
                   }
                   const f = e.target.files && e.target.files[0];
                   if (!f) return;
+                  isUploadingRef.current = true;
                   try {
                     setSubmittingExpense(true);
                     const url = await uploadReceipt(f);
@@ -1375,6 +1376,7 @@ export default function GardenerDashboard() {
                   } catch (err) {
                     alert(err.message || 'Ошибка загрузки');
                   } finally {
+                    isUploadingRef.current = false;
                     setSubmittingExpense(false);
                     e.target.value = '';
                   }
