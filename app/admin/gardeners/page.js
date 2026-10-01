@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import GardenerModalEditor from '@/components/GardenerModalEditor';
+import { uploadImageWithRetry } from '@/lib/uploadClient';
 
 export default function AdminGardenersPage() {
   const router = useRouter();
@@ -38,24 +39,19 @@ export default function AdminGardenersPage() {
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result.split(',')[1];
-        const uploadRes = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64 }),
-        });
-        const data = await uploadRes.json();
-        if (uploadRes.ok && data.url) {
+        const { ok, url, error } = await uploadImageWithRetry(base64);
+        if (ok && url) {
           await fetch('/api/admin/gardeners', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               id: gardenerId,
-              photo: data.url
+              photo: url
             }),
           });
-          setGardeners(gardeners.map(item => item.id === gardenerId ? { ...item, photo: data.url, photoUrl: data.url, videoUrl: data.url } : item));
+          setGardeners(gardeners.map(item => item.id === gardenerId ? { ...item, photo: url, photoUrl: url, videoUrl: url } : item));
         } else {
-          alert(data.error || 'Ошибка загрузки изображения');
+          alert(error || 'Ошибка загрузки изображения');
         }
       };
       reader.readAsDataURL(file);
@@ -109,16 +105,11 @@ export default function AdminGardenersPage() {
     reader.onload = async (evt) => {
       const base64 = evt.target.result.split(',')[1];
       try {
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64 }),
-        });
-        const data = await res.json();
-        if (res.ok && data.url) {
-          setEditingGardener(prev => ({ ...prev, photoUrl: data.url }));
+        const { ok, url, error } = await uploadImageWithRetry(base64);
+        if (ok && url) {
+          setEditingGardener(prev => ({ ...prev, photoUrl: url }));
         } else {
-          alert(data.error || 'Не удалось загрузить изображение');
+          alert(error || 'Не удалось загрузить изображение');
         }
       } catch (err) {
         alert('Ошибка при загрузке фото');

@@ -1,7 +1,6 @@
 'use client';
-import { useState } from 'react';
-
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { uploadImageWithRetry } from '@/lib/uploadClient';
 
 export default function GardenerModalEditor({ gardener, type, onClose, onSave }) {
   // type: 'skills' | 'inventory' | 'preparations' | 'works' | 'reviews'
@@ -62,6 +61,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
     setUploading(true);
     try {
       const uploadedUrls = [];
+      let lastErr = null;
       for (const file of files) {
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -70,21 +70,19 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
           reader.readAsDataURL(file);
         });
 
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64 })
-        });
-        const data = await res.json();
-        if (res.ok && data.url) {
-          uploadedUrls.push(data.url);
+        const { ok, url, error } = await uploadImageWithRetry(base64);
+        if (ok && url) {
+          uploadedUrls.push(url);
         } else {
-          alert(data.error || 'Ошибка загрузки фото');
+          lastErr = error;
         }
       }
 
       if (uploadedUrls.length > 0) {
         setImageCallback(uploadedUrls);
+      }
+      if (lastErr && uploadedUrls.length < files.length) {
+        alert(lastErr || 'Ошибка загрузки фото');
       }
     } catch (err) {
       console.error(err);
