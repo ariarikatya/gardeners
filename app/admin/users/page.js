@@ -18,6 +18,7 @@ export default function AdminUsersPage() {
   const [savingId, setSavingId] = useState(null);
   const [savingGardenerId, setSavingGardenerId] = useState(null);
   const [warnings, setWarnings] = useState({}); // id => warning text
+  const [pendingUploads, setPendingUploads] = useState({}); // gardenerId/key => { base64, loading, retryable, error }
 
   // Форма добавления нового диспетчера
   const [newName, setNewName] = useState('');
@@ -33,29 +34,63 @@ export default function AdminUsersPage() {
     checkRoleAndFetchUsers();
   }, []);
 
-  const handleGardenerPhotoUpload = async (gardenerId, file) => {
+  const doUploadGardenerPhoto = async (gardenerId, base64) => {
+    setPendingUploads(prev => ({
+      ...prev,
+      [gardenerId]: { ...prev[gardenerId], base64, loading: true, retryable: false, error: null }
+    }));
+
+    try {
+      const { ok, url, retryable, error } = await uploadImageWithRetry(base64);
+      if (ok && url) {
+        await fetch('/api/admin/gardeners', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: gardenerId, photo: url })
+        });
+        setGardeners(gardeners.map(g => g.id === gardenerId ? { ...g, photo: url, photoUrl: url, videoUrl: url } : g));
+        setPendingUploads(prev => {
+          const copy = { ...prev };
+          delete copy[gardenerId];
+          return copy;
+        });
+      } else if (retryable) {
+        setPendingUploads(prev => ({
+          ...prev,
+          [gardenerId]: { base64, loading: false, retryable: true, error: 'Фотосервис временно недоступен. Фото не потеряно — попробуйте загрузить ещё раз.' }
+        }));
+      } else {
+        setPendingUploads(prev => {
+          const copy = { ...prev };
+          delete copy[gardenerId];
+          return copy;
+        });
+        alert(error || 'Ошибка загрузки фото');
+      }
+    } catch (err) {
+      console.error('Upload error:', err);
+      setPendingUploads(prev => {
+        const copy = { ...prev };
+        delete copy[gardenerId];
+        return copy;
+      });
+      alert('Ошибка соединения при загрузке фото');
+    }
+  };
+
+  const handleGardenerPhotoUpload = (gardenerId, file) => {
     if (!file) return;
     console.log('Загрузка фото для садовника:', gardenerId, file);
     try {
       const reader = new FileReader();
-      reader.onloadend = async () => {
+      reader.onloadend = () => {
         const base64 = reader.result.split(',')[1];
-        const { ok, url, error } = await uploadImageWithRetry(base64);
-        if (ok && url) {
-          await fetch('/api/admin/gardeners', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: gardenerId, photo: url })
-          });
-          setGardeners(gardeners.map(g => g.id === gardenerId ? { ...g, photo: url, photoUrl: url, videoUrl: url } : g));
-        } else {
-          alert(error || 'Ошибка загрузки фото');
-        }
+        doUploadGardenerPhoto(gardenerId, base64);
       };
       reader.readAsDataURL(file);
     } catch (err) {
       console.error('Upload error:', err);
-      alert('Ошибка соединения при загрузке фото');
+      alert('Ошибка чтения файла');
     }
   };
 
@@ -293,23 +328,52 @@ export default function AdminUsersPage() {
     }));
   };
 
-  const handleFileUpload = async (e) => {
+  const doUploadEditGardenerPhoto = async (base64) => {
+    setPendingUploads(prev => ({
+      ...prev,
+      editingGardener: { ...prev.editingGardener, base64, loading: true, retryable: false, error: null }
+    }));
+
+    try {
+      const { ok, url, retryable, error } = await uploadImageWithRetry(base64);
+      if (ok && url) {
+        setEditingGardener(prev => ({ ...prev, photoUrl: url }));
+        setPendingUploads(prev => {
+          const copy = { ...prev };
+          delete copy.editingGardener;
+          return copy;
+        });
+      } else if (retryable) {
+        setPendingUploads(prev => ({
+          ...prev,
+          editingGardener: { base64, loading: false, retryable: true, error: 'Фотосервис временно недоступен. Фото не потеряно — попробуйте загрузить ещё раз.' }
+        }));
+      } else {
+        setPendingUploads(prev => {
+          const copy = { ...prev };
+          delete copy.editingGardener;
+          return copy;
+        });
+        alert(error || 'Не удалось загрузить изображение');
+      }
+    } catch (err) {
+      setPendingUploads(prev => {
+        const copy = { ...prev };
+        delete copy.editingGardener;
+        return copy;
+      });
+      alert('Ошибка при загрузке фото');
+    }
+  };
+
+  const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (evt) => {
+    reader.onload = (evt) => {
       const base64 = evt.target.result;
-      try {
-        const { ok, url, error } = await uploadImageWithRetry(base64);
-        if (ok && url) {
-          setEditingGardener(prev => ({ ...prev, photoUrl: url }));
-        } else {
-          alert(error || 'Не удалось загрузить изображение');
-        }
-      } catch (err) {
-        alert('Ошибка при загрузке фото');
-      }
+      doUploadEditGardenerPhoto(base64);
     };
     reader.readAsDataURL(file);
   };
@@ -556,6 +620,19 @@ export default function AdminUsersPage() {
                         onChange={(e) => handleGardenerPhotoUpload(g.id, e.target.files?.[0])}
                         className="text-[10px] sm:text-xs text-slate-500 file:mr-1 file:py-0.5 file:px-1.5 file:rounded file:border-0 file:text-[10px] file:bg-emerald-50 file:text-emerald-700"
                       />
+                      {pendingUploads[g.id] && pendingUploads[g.id].retryable && (
+                        <div className="mt-1 text-[11px] text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200 flex flex-col gap-1">
+                          <span>{pendingUploads[g.id].error}</span>
+                          <button
+                            type="button"
+                            disabled={pendingUploads[g.id].loading}
+                            onClick={() => doUploadGardenerPhoto(g.id, pendingUploads[g.id].base64)}
+                            className="self-start px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold disabled:opacity-50"
+                          >
+                            {pendingUploads[g.id].loading ? 'Загрузка...' : '🔄 Повторить'}
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="p-2 font-semibold text-amber-600 whitespace-nowrap">
                       ★ {g.rating ?? 4.5}
@@ -687,6 +764,19 @@ export default function AdminUsersPage() {
                     onChange={handleFileUpload}
                     className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
                   />
+                  {pendingUploads.editingGardener && pendingUploads.editingGardener.retryable && (
+                    <div className="mt-1 text-xs text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center justify-between gap-2">
+                      <span>{pendingUploads.editingGardener.error}</span>
+                      <button
+                        type="button"
+                        disabled={pendingUploads.editingGardener.loading}
+                        onClick={() => doUploadEditGardenerPhoto(pendingUploads.editingGardener.base64)}
+                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {pendingUploads.editingGardener.loading ? 'Загрузка...' : '🔄 Повторить'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

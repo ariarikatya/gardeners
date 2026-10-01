@@ -793,6 +793,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
   const [desc, setDesc] = useState('');
   const [image, setImage] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [pendingCatalogUpload, setPendingCatalogUpload] = useState(null); // { base64, loading, retryable, error }
 
   const [selectedItemIds, setSelectedItemIds] = useState([]);
   const [selectedGardenerIds, setSelectedGardenerIds] = useState([]);
@@ -813,11 +814,34 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
     setSelectedItemIds([]);
   }, [catalogType]);
 
+  const doUploadCatalogImage = async (base64) => {
+    setUploading(true);
+    setPendingCatalogUpload(prev => prev ? { ...prev, loading: true, retryable: false, error: null } : { base64, loading: true, retryable: false, error: null });
+
+    try {
+      const { ok, url, retryable, error } = await uploadImageWithRetry(base64);
+      if (ok && url) {
+        setImage(url);
+        setPendingCatalogUpload(null);
+      } else if (retryable) {
+        setPendingCatalogUpload({ base64, loading: false, retryable: true, error: 'Фотосервис временно недоступен. Фото не потеряно — попробуйте загрузить ещё раз.' });
+      } else {
+        setPendingCatalogUpload(null);
+        alert(error || 'Ошибка загрузки фото');
+      }
+    } catch (err) {
+      console.error(err);
+      setPendingCatalogUpload(null);
+      alert('Ошибка при загрузке изображения');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    setUploading(true);
     try {
       const file = files[0];
       const base64 = await new Promise((resolve, reject) => {
@@ -827,17 +851,10 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
         reader.readAsDataURL(file);
       });
 
-      const { ok, url, error } = await uploadImageWithRetry(base64);
-      if (ok && url) {
-        setImage(url);
-      } else {
-        alert(error || 'Ошибка загрузки фото');
-      }
+      doUploadCatalogImage(base64);
     } catch (err) {
       console.error(err);
-      alert('Ошибка при загрузке изображения');
-    } finally {
-      setUploading(false);
+      alert('Ошибка чтения файла');
     }
   };
 
@@ -995,6 +1012,19 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
                 className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 disabled:opacity-50"
               />
             </div>
+            {pendingCatalogUpload && pendingCatalogUpload.retryable && (
+              <div className="mt-2 text-xs text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center justify-between gap-2">
+                <span>{pendingCatalogUpload.error}</span>
+                <button
+                  type="button"
+                  disabled={uploading || pendingCatalogUpload.loading}
+                  onClick={() => doUploadCatalogImage(pendingCatalogUpload.base64)}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold disabled:opacity-50 whitespace-nowrap"
+                >
+                  {pendingCatalogUpload.loading ? 'Загрузка...' : '🔄 Повторить'}
+                </button>
+              </div>
+            )}
           </div>
           <button
             type="submit" disabled={loading || uploading}
