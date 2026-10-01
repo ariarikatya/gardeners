@@ -16,6 +16,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
   const [items, setItems] = useState(parseItems(gardener[type]));
   const [uploading, setUploading] = useState(false);
   const [catalogItems, setCatalogItems] = useState([]);
+  const [pendingUploads, setPendingUploads] = useState([]); // Array of { base64, callbackKey, loading, retryable, error }
 
   useEffect(() => {
     if (type === 'inventory' || type === 'preparations') {
@@ -54,14 +55,41 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
     reviews: 'Отзывы'
   };
 
+  const processUploadItem = async (pendingItem, setImageCallback) => {
+    setUploading(true);
+    setPendingUploads(prev => prev.map(p => p === pendingItem ? { ...p, loading: true, retryable: false, error: null } : p));
+
+    try {
+      const { ok, url, retryable, error } = await uploadImageWithRetry(pendingItem.base64);
+      if (ok && url) {
+        setImageCallback([url]);
+        setPendingUploads(prev => prev.filter(p => p !== pendingItem));
+      } else if (retryable) {
+        setPendingUploads(prev => prev.map(p => p === pendingItem ? {
+          ...p,
+          loading: false,
+          retryable: true,
+          error: 'Фотосервис временно недоступен. Фото не потеряно — попробуйте загрузить ещё раз.',
+          setImageCallback
+        } : p));
+      } else {
+        setPendingUploads(prev => prev.filter(p => p !== pendingItem));
+        alert(error || 'Ошибка загрузки фото');
+      }
+    } catch (err) {
+      console.error(err);
+      setPendingUploads(prev => prev.filter(p => p !== pendingItem));
+      alert('Ошибка при загрузке изображения');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleFileUpload = async (e, setImageCallback) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    setUploading(true);
     try {
-      const uploadedUrls = [];
-      let lastErr = null;
       for (const file of files) {
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -70,25 +98,13 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
           reader.readAsDataURL(file);
         });
 
-        const { ok, url, error } = await uploadImageWithRetry(base64);
-        if (ok && url) {
-          uploadedUrls.push(url);
-        } else {
-          lastErr = error;
-        }
-      }
-
-      if (uploadedUrls.length > 0) {
-        setImageCallback(uploadedUrls);
-      }
-      if (lastErr && uploadedUrls.length < files.length) {
-        alert(lastErr || 'Ошибка загрузки фото');
+        const pendingItem = { id: Math.random().toString(36).substr(2, 9), base64, loading: true, retryable: false, error: null, setImageCallback };
+        setPendingUploads(prev => [...prev, pendingItem]);
+        await processUploadItem(pendingItem, setImageCallback);
       }
     } catch (err) {
       console.error(err);
-      alert('Ошибка при загрузке изображения');
-    } finally {
-      setUploading(false);
+      alert('Ошибка при чтении файла');
     }
   };
 
@@ -211,6 +227,24 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
             ✕
           </button>
         </div>
+
+        {pendingUploads.some(p => p.retryable) && (
+          <div className="mb-4 space-y-2">
+            {pendingUploads.filter(p => p.retryable).map((pending) => (
+              <div key={pending.id} className="p-2.5 text-xs text-amber-800 bg-amber-50 rounded-xl border border-amber-200 flex items-center justify-between gap-2">
+                <span>{pending.error}</span>
+                <button
+                  type="button"
+                  disabled={uploading || pending.loading}
+                  onClick={() => processUploadItem(pending, pending.setImageCallback)}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs disabled:opacity-50 whitespace-nowrap"
+                >
+                  {pending.loading ? 'Загрузка...' : '🔄 Повторить'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Список элементов */}
         <div className="mb-6 space-y-3">
