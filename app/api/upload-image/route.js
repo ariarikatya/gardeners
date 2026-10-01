@@ -32,7 +32,6 @@ export async function POST(req) {
     // Remove data URL prefix if present
     const cleanBase64 = image ? String(image).replace(/^data:image\/[a-zA-Z]+;base64,/, '') : '';
 
-    console.log('ImgBB API Key:', process.env.IMGBB_API_KEY ? 'exists' : 'NOT SET');
     console.log('Request body:', { image: cleanBase64 ? cleanBase64.substring(0, 50) + '...' : 'EMPTY' });
 
     if (!cleanBase64) {
@@ -40,6 +39,8 @@ export async function POST(req) {
     }
 
     const apiKey = process.env.IMGBB_API_KEY || '';
+    console.log('ImgBB config:', apiKey ? 'ok' : 'missing');
+
     if (!apiKey) {
       console.error('ImgBB API error: IMGBB_API_KEY environment variable is missing');
       return NextResponse.json({ error: 'IMGBB_API_KEY environment variable is missing' }, { status: 500 });
