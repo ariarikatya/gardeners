@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { uploadImageWithRetry } from '@/lib/uploadClient';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -826,16 +827,11 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
         reader.readAsDataURL(file);
       });
 
-      const res = await fetch('/api/upload-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64 })
-      });
-      const data = await res.json();
-      if (res.ok && data.url) {
-        setImage(data.url);
+      const { ok, url, error } = await uploadImageWithRetry(base64);
+      if (ok && url) {
+        setImage(url);
       } else {
-        alert(data.error || 'Ошибка загрузки фото');
+        alert(error || 'Ошибка загрузки фото');
       }
     } catch (err) {
       console.error(err);
