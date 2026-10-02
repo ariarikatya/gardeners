@@ -22,17 +22,34 @@ export default function PushButton({ className = '' }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const isStandalone = Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
+    const checkIsIosNonPwa = () => {
+      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const isStandalone = Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
+      return isIos && !isStandalone;
+    };
 
-    if (isIos && !isStandalone) {
+    if (checkIsIosNonPwa()) {
       setIsIosNonPwa(true);
       setShowIosPushHint(true);
+    } else {
+      setIsIosNonPwa(false);
     }
+
+    const updateIosStatus = () => {
+      if (!checkIsIosNonPwa()) {
+        setIsIosNonPwa(false);
+      }
+    };
+
+    window.addEventListener('focus', updateIosStatus);
+    document.addEventListener('visibilitychange', updateIosStatus);
 
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushState('unsupported');
-      return;
+      return () => {
+        window.removeEventListener('focus', updateIosStatus);
+        document.removeEventListener('visibilitychange', updateIosStatus);
+      };
     }
 
     if (Notification.permission === 'denied') {
@@ -54,15 +71,26 @@ export default function PushButton({ className = '' }) {
         setPushState('disabled');
       });
     }
+
+    return () => {
+      window.removeEventListener('focus', updateIosStatus);
+      document.removeEventListener('visibilitychange', updateIosStatus);
+    };
   }, []);
 
   const handleTogglePush = async () => {
     if (pushLoading) return;
 
     if (isIosNonPwa) {
-      setShowIosPushHint(true);
-      alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
-      return;
+      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const isStandalone = Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
+      if (isIos && !isStandalone) {
+        setShowIosPushHint(true);
+        alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+        return;
+      } else {
+        setIsIosNonPwa(false);
+      }
     }
 
     setPushLoading(true);
@@ -163,7 +191,7 @@ export default function PushButton({ className = '' }) {
   return (
     <>
       {showIosPushHint && (
-        <div className="fixed top-2 left-2 right-2 z-50 bg-amber-100 border border-amber-300 text-amber-950 px-3.5 py-2.5 rounded-xl text-xs flex justify-between items-start shadow-xl">
+        <div className="fixed top-2 left-2 right-2 z-50 bg-emerald-50 border border-emerald-300 text-slate-900 px-3.5 py-2.5 rounded-xl text-xs flex justify-between items-start shadow-xl">
           <div className="leading-relaxed">
             <div className="font-bold mb-1">📲 Настройка уведомлений на iPhone:</div>
             <ol className="list-decimal list-inside space-y-0.5 text-[11px]">
@@ -173,7 +201,7 @@ export default function PushButton({ className = '' }) {
               <li>Нажмите «Включить уведомления» здесь ещё раз</li>
             </ol>
           </div>
-          <button onClick={() => setShowIosPushHint(false)} className="text-amber-800 font-bold ml-2 text-sm p-1">✕</button>
+          <button onClick={() => setShowIosPushHint(false)} className="text-slate-900 font-bold ml-2 text-sm p-1">✕</button>
         </div>
       )}
 
@@ -200,8 +228,8 @@ export default function PushButton({ className = '' }) {
         <button
           type="button"
           onClick={handleTogglePush}
-          disabled={pushLoading || pushState === 'loading' || isIosNonPwa}
-          className={className || `flex items-center gap-1.5 ${isIosNonPwa ? 'bg-slate-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-500'} text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs`}
+          disabled={pushLoading || pushState === 'loading'}
+          className={className || "flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
           title={isIosNonPwa ? 'Добавьте приложение на экран Домой на iPhone' : undefined}
         >
           🔔 {pushLoading ? '...' : 'Включить уведомления'}

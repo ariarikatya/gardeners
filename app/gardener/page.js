@@ -663,6 +663,8 @@ export default function GardenerDashboard() {
             const phoneDigits = formatPhoneDigits(order.clientPhone);
             const maskedPhone = maskPhone(order.clientPhone);
 
+            const mskHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Moscow', hour: 'numeric', hourCycle: 'h23' }).format(now), 10);
+
             const isTomorrowOrder = (() => {
               const tom = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
               tom.setHours(0,0,0,0);
@@ -698,9 +700,15 @@ export default function GardenerDashboard() {
                     )}
                   </div>
                 ) : isTomorrowOrder ? (
-                  <div className="text-[11px] bg-amber-50 text-amber-900 border border-amber-200 p-2 rounded-lg font-medium flex items-center gap-1">
-                    <span>⚠️ Не связался — после 20:00 штраф 1000 ₽</span>
-                  </div>
+                  mskHour >= 20 ? (
+                    <div className="text-[11px] bg-rose-50 text-rose-900 border border-rose-200 p-2 rounded-lg font-medium flex items-center gap-1">
+                      <span>🔴 ШТРАФ 1000 ₽: не позвонил клиенту до 20:00</span>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] bg-emerald-50 text-slate-900 border border-emerald-200 p-2 rounded-lg font-medium flex items-center gap-1">
+                      <span>🔔 Напоминание (это НЕ штраф): позвонить клиенту по завтрашнему заказу сегодня до 20:00.</span>
+                    </div>
+                  )
                 ) : null}
 
                 <div className="flex gap-2">
