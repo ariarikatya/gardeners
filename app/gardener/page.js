@@ -124,6 +124,7 @@ export default function GardenerDashboard() {
   });
   const [selectedDateStr, setSelectedDateStr] = useState(null);
   const [showPastOrders, setShowPastOrders] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeSection, setActiveSection] = useState('records');
   const [auctionOrders, setAuctionOrders] = useState([]);
   const [loadingAuction, setLoadingAuction] = useState(false);
@@ -634,6 +635,16 @@ export default function GardenerDashboard() {
 
   const formatMoney = (value) => currency.format(Number(value || 0));
 
+  const matchesSearch = (order) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    const fields = [order.clientName, order.clientPhone, order.address, order.district, order.description, order.comment];
+    const phoneDigitsQ = q.replace(/\D/g, '');
+    const phoneDigits = String(order.clientPhone || '').replace(/\D/g, '');
+    return fields.some(f => String(f || '').toLowerCase().includes(q)) ||
+           (!!phoneDigitsQ && phoneDigits.includes(phoneDigitsQ));
+  };
+
   const renderOrderCard = (order) => (
     <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 relative overflow-hidden">
       <div className={`absolute left-0 top-0 bottom-0 w-2 ${statusStyle(order.status)}`}></div>
@@ -853,6 +864,7 @@ export default function GardenerDashboard() {
 
   const ordersByDate = {};
   orders.forEach(o => {
+    if (!matchesSearch(o)) return;
     const key = o.date.split('T')[0];
     if (!ordersByDate[key]) ordersByDate[key] = [];
     ordersByDate[key].push(o);
@@ -1437,26 +1449,50 @@ export default function GardenerDashboard() {
 
         </>}
 
-        {activeSection === 'records' && <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
-          <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
-            <button type="button"
-              onClick={() => setViewMode('list')}
-              className={`px-3 py-1.5 font-medium ${viewMode === 'list' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'}`}
-            >
-              Список
-            </button>
-            <button type="button"
-              onClick={() => setViewMode('calendar')}
-              className={`px-3 py-1.5 font-medium ${viewMode === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'}`}
-            >
-              Календарь
-            </button>
+        {activeSection === 'records' && (
+          <div className="mb-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-xl font-bold text-emerald-900">Мои заказы</h2>
+              <div className="flex items-center gap-2">
+                <div className="flex bg-white border border-slate-200 rounded-lg overflow-hidden text-sm">
+                  <button type="button"
+                    onClick={() => setViewMode('list')}
+                    className={`px-3 py-1.5 font-medium ${viewMode === 'list' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'}`}
+                  >
+                    Список
+                  </button>
+                  <button type="button"
+                    onClick={() => setViewMode('calendar')}
+                    className={`px-3 py-1.5 font-medium ${viewMode === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'}`}
+                  >
+                    Календарь
+                  </button>
+                </div>
+                <button type="button" onClick={() => setShowPastOrders(s => !s)} className="px-3 py-1.5 text-sm rounded-lg bg-white border border-slate-200 text-slate-700 whitespace-nowrap">{showPastOrders ? 'Скрыть прошедшие' : 'Показать прошедшие'}</button>
+              </div>
+            </div>
+
+            <div className="relative">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Поиск по телефону, имени, адресу или описанию…"
+                className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 pr-9"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-lg leading-none p-1"
+                  title="Очистить"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
-          <div className="ml-3">
-            <button type="button" onClick={() => setShowPastOrders(s => !s)} className="px-3 py-1.5 text-sm rounded-lg bg-white border border-slate-200">{showPastOrders ? 'Скрыть прошедшие' : 'Показать прошедшие'}</button>
-          </div>
-        </div>}
+        )}
 
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
@@ -1471,8 +1507,15 @@ export default function GardenerDashboard() {
               const visible = orders.filter(o => {
                 if (!showPastOrders && new Date(o.date) < today) return false;
                 if (o.status === 'Перенос' || o.status === 'Отказ' || o.status === 'Перенесен') return false;
-                return true;
+                return matchesSearch(o);
               });
+              if (visible.length === 0 && searchQuery.trim()) {
+                return (
+                  <div className="col-span-full text-center text-slate-500 py-8 bg-white border border-slate-200 rounded-xl">
+                    Ничего не найдено по запросу «{searchQuery}»
+                  </div>
+                );
+              }
               return visible.map(renderOrderCard);
             })()}
           </div>
@@ -1492,9 +1535,13 @@ export default function GardenerDashboard() {
               </div>
             </div>
 
-            {selectedDateStr && (
+            {selectedDateStr ? (
               (ordersByDate[selectedDateStr] || []).length === 0 ? (
-                <p className="text-sm text-slate-400 text-center">В этот день заказов нет</p>
+                <p className="text-sm text-slate-400 text-center">
+                  {searchQuery.trim()
+                    ? `Ничего не найдено по запросу «${searchQuery}»`
+                    : 'В этот день заказов нет'}
+                </p>
               ) : ordersByDate[selectedDateStr].length === 1 ? (
                 <div className="flex justify-center">
                   <div className="w-full md:max-w-md">{renderOrderCard(ordersByDate[selectedDateStr][0])}</div>
@@ -1504,7 +1551,11 @@ export default function GardenerDashboard() {
                   {ordersByDate[selectedDateStr].map(renderOrderCard)}
                 </div>
               )
-            )}
+            ) : searchQuery.trim() && Object.keys(ordersByDate).length === 0 ? (
+              <div className="text-center text-slate-500 py-8 bg-white border border-slate-200 rounded-xl">
+                Ничего не найдено по запросу «{searchQuery}»
+              </div>
+            ) : null}
           </div>
         ))}
       </main>
