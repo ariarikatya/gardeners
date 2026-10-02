@@ -477,6 +477,8 @@ export async function PUT(req) {
   if (updateData.serviceId === '') updateData.serviceId = null;
   if (updateData.district === '') updateData.district = null;
   delete updateData.fromLead;
+  delete updateData._isDuplicateSync;
+  delete updateData._isDuplicate;
 
   if (updateData.date && existing && existing.amoDealId && toDateKey(existing.date) !== toDateKey(updateData.date)) {
     try {
@@ -609,7 +611,7 @@ export async function PUT(req) {
     if (!body._isDuplicateSync) {
       const linkedId = order.linkedOrderId || existing?.linkedOrderId;
       if (linkedId) {
-        const partnerUpdate = { _isDuplicateSync: true };
+        const partnerUpdate = {};
         if (updateData.date) partnerUpdate.date = updateData.date;
         if (updateData.status) partnerUpdate.status = updateData.status;
         if (updateData.refusalReason) partnerUpdate.refusalReason = updateData.refusalReason;
