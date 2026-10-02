@@ -1537,11 +1537,13 @@ export default function GardenerDashboard() {
 
             {selectedDateStr ? (
               (ordersByDate[selectedDateStr] || []).length === 0 ? (
-                <p className="text-sm text-slate-400 text-center">
-                  {searchQuery.trim()
-                    ? `Ничего не найдено по запросу «${searchQuery}»`
-                    : 'В этот день заказов нет'}
-                </p>
+                searchQuery.trim() ? (
+                  <div className="text-center text-slate-500 py-8 bg-white border border-slate-200 rounded-xl">
+                    Ничего не найдено по запросу «{searchQuery}»
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400 text-center">В этот день заказов нет</p>
+                )
               ) : ordersByDate[selectedDateStr].length === 1 ? (
                 <div className="flex justify-center">
                   <div className="w-full md:max-w-md">{renderOrderCard(ordersByDate[selectedDateStr][0])}</div>
