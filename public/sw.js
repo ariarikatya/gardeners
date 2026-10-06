@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v4';
+const CACHE_NAME = 'anemon-agro-v5';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -30,10 +30,28 @@ self.addEventListener('fetch', (event) => {
   // Данные и API — всегда только из сети, не кэшируем
   if (url.pathname.startsWith('/api/')) return;
 
-  // Навигационные запросы (HTML) — только из сети, фоллбэк на /login если оффлайн
+  // Навигационные запросы (HTML) — из сети, кэшируем /gardener, фоллбэк на закешированный /gardener или /login если оффлайн
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/login'))
+      fetch(request)
+        .then((res) => {
+          if (res && res.status === 200 && url.pathname.startsWith('/gardener')) {
+            const resClone = res.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              try { cache.put('/gardener', resClone); } catch (e) {}
+            }).catch(() => {});
+          }
+          return res;
+        })
+        .catch(async () => {
+          if (url.pathname.startsWith('/gardener')) {
+            const cachedGardener = await caches.match('/gardener');
+            if (cachedGardener) return cachedGardener;
+          }
+          const cachedLogin = await caches.match('/login');
+          if (cachedLogin) return cachedLogin;
+          return caches.match(request);
+        })
     );
     return;
   }

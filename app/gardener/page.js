@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import { clientNotify } from '@/lib/clientNotify';
+import { saveCache, getCache, filterOrdersForOffline } from '@/lib/offlineStore';
+import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -79,7 +81,6 @@ function xhrUpload(url, formData, onProgress) {
   });
 }
 
-// Сжимаем фото перед загрузкой, чтобы не упереться в лимит размера запроса
 function compressImage(file, maxWidth = 1600, quality = 0.8) {
   return new Promise((resolve) => {
     if (!file || !(file instanceof Blob)) return resolve(file);
@@ -130,6 +131,13 @@ export default function GardenerDashboard() {
   const [loadingAuction, setLoadingAuction] = useState(false);
   const [claimingId, setClaimingId] = useState(null);
 
+  // Оффлайн состояние
+  const [isOffline, setIsOffline] = useState(false);
+  const [lastCacheTime, setLastCacheTime] = useState(null);
+  const [queueCount, setQueueCount] = useState(0);
+  const [isSyncingQueue, setIsSyncingQueue] = useState(false);
+  const [conflictError, setConflictError] = useState(null);
+
   // Портфолио садовника
   const [gardenerProfile, setGardenerProfile] = useState(null);
   const [myWorks, setMyWorks] = useState([]);
@@ -137,80 +145,6 @@ export default function GardenerDashboard() {
   const [savingWorks, setSavingWorks] = useState(false);
   const [newWorkTitle, setNewWorkTitle] = useState('');
   const [newWorkImages, setNewWorkImages] = useState([]);
-
-  const fetchAuction = async () => {
-    setLoadingAuction(true);
-    try {
-      const res = await fetch('/api/gardener/auction');
-      const data = await res.json();
-      setAuctionOrders(data.orders || []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingAuction(false);
-    }
-  };
-
-  const fetchProfile = async () => {
-    setLoadingWorks(true);
-    try {
-      const res = await fetch('/api/gardener/profile');
-      const data = await res.json();
-      if (res.ok && data.gardener) {
-        setGardenerProfile(data.gardener);
-        setMyWorks(data.gardener.works || []);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingWorks(false);
-    }
-  };
-
-  const handleSaveWorks = async (updatedWorks) => {
-    setSavingWorks(true);
-    try {
-      const res = await fetch('/api/gardener/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ works: updatedWorks })
-      });
-      const data = await res.json();
-      if (res.ok && data.gardener) {
-        const works = Array.isArray(data.gardener.works) ? data.gardener.works : (typeof data.gardener.works === 'string' ? JSON.parse(data.gardener.works) : []);
-        setMyWorks(works);
-      } else {
-        alert(data.error || 'Не удалось сохранить портфолио');
-      }
-    } catch (e) {
-      alert('Ошибка при сохранении портфолио');
-    } finally {
-      setSavingWorks(false);
-    }
-  };
-
-  const handleClaimOrder = async (orderId) => {
-    setClaimingId(orderId);
-    try {
-      const res = await fetch('/api/gardener/auction', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Не удалось забрать заказ');
-        await fetchAuction();
-        return;
-      }
-      alert('Поздравляем! Заказ успешно забран и добавлен в ваши заказы.');
-      await Promise.all([fetchOrders(), fetchAuction()]);
-    } catch (e) {
-      alert('Ошибка при попытке забрать заказ');
-    } finally {
-      setClaimingId(null);
-    }
-  };
 
   // Модалка действия по заказу
   const [actionOrder, setActionOrder] = useState(null);
@@ -220,10 +154,11 @@ export default function GardenerDashboard() {
   const [factAmount, setFactAmount] = useState('');
   const [completionText, setCompletionText] = useState('');
 
-  // Храним объекты { id, url, inPortfolio } для независтмости
+  // Храним объекты { id, url, fileBlob, inPortfolio }
   const [photoBeforeItems, setPhotoBeforeItems] = useState([]);
   const [photoAfterItems, setPhotoAfterItems] = useState([]);
   const [photoActUrls, setPhotoActUrls] = useState([]);
+  const [photoActBlobs, setPhotoActBlobs] = useState([]);
 
   const [editingCommentOrderId, setEditingCommentOrderId] = useState(null);
   const [editCommentValue, setEditCommentValue] = useState('');
@@ -247,33 +182,114 @@ export default function GardenerDashboard() {
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseDesc, setExpenseDesc] = useState('');
   const [expenseReceiptUrl, setExpenseReceiptUrl] = useState('');
+  const [expenseReceiptBlob, setExpenseReceiptBlob] = useState(null);
   const [submittingExpense, setSubmittingExpense] = useState(false);
 
-  useEffect(() => {
-    fetchOrders();
-    fetchProfile();
+  const formatLastUpdated = (timestamp) => {
+    if (!timestamp) return null;
+    const d = new Date(timestamp);
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
 
-    const interval = setInterval(() => {
-      fetchOrders(true);
-    }, 45000);
+  const applyQueueToOrders = (ordersList, queueItems) => {
+    if (!Array.isArray(ordersList)) return [];
+    if (!Array.isArray(queueItems) || !queueItems.length) return ordersList;
 
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        document.title = '🌿 Мой Кабинет';
-        if (!isUploadingRef.current) {
-          setSubmitting(false);
-          setUploadingWhich(null);
-          setSubmittingExpense(false);
+    const queueMap = new Map();
+    queueItems.forEach((q) => {
+      if (q.actionType === 'ORDER_PUT' && q.payload && q.payload.id) {
+        queueMap.set(q.payload.id, q);
+      }
+    });
+
+    return ordersList.map((ord) => {
+      const qItem = queueMap.get(ord.id);
+      if (!qItem) return ord;
+      const p = qItem.payload || {};
+      let updated = { ...ord, isPendingSync: true, pendingSyncStatus: qItem.status, pendingSyncError: qItem.errorMsg };
+
+      if (p.action === 'complete') {
+        updated.status = 'Выполнен';
+        if (p.priceFact) updated.priceFact = p.priceFact;
+        if (p.completionComment) updated.completionComment = p.completionComment;
+      } else if (p.action === 'transfer') {
+        updated.status = 'Перенос';
+        if (p.transferRequestedDate) updated.transferRequestedDate = p.transferRequestedDate;
+      } else if (p.action === 'refuse') {
+        updated.status = 'Отказ';
+        if (p.refusalReason) updated.refusalReason = p.refusalReason;
+      } else if (p.action === 'mark_card') {
+        updated.cardFilledAt = p.cardFilledAt || new Date().toISOString();
+      } else if (p.action === 'mark_call') {
+        updated.clientCalledAt = p.clientCalledAt || new Date().toISOString();
+        if (p.callStatus !== undefined) updated.callStatus = p.callStatus;
+      } else if (p.action === 'update_comment') {
+        if (p.completionComment) updated.completionComment = p.completionComment;
+      }
+      return updated;
+    });
+  };
+
+  const loadFromCache = async () => {
+    try {
+      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, pendingQueue] = await Promise.all([
+        getCache('orders'),
+        getCache('profile'),
+        getCache('operations'),
+        getQueue(),
+      ]);
+
+      if (cachedOrdersObj && cachedOrdersObj.data) {
+        const rawOrders = cachedOrdersObj.data.orders || [];
+        const dayOffs = cachedOrdersObj.data.dayOffs || [];
+        const merged = applyQueueToOrders(rawOrders, pendingQueue);
+        setOrders(merged);
+        setMyDayOffs(dayOffs);
+        setLoading(false);
+        if (cachedOrdersObj.updatedAt) {
+          setLastCacheTime(formatLastUpdated(cachedOrdersObj.updatedAt));
         }
       }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
+      if (cachedProfileObj && cachedProfileObj.data) {
+        setGardenerProfile(cachedProfileObj.data);
+        setMyWorks(cachedProfileObj.data.works || []);
+      }
+
+      if (cachedOpsObj && cachedOpsObj.data) {
+        setOperations(cachedOpsObj.data || []);
+      }
+
+      const activeQueueCount = (pendingQueue || []).filter(i => i.status !== 'conflict').length;
+      setQueueCount(activeQueueCount);
+    } catch (e) {
+      console.error('Error loading offline cache:', e);
+    }
+  };
+
+  const handleSyncQueue = async () => {
+    if ((typeof window !== 'undefined' && !navigator.onLine) || isSyncingQueue) return;
+    setIsSyncingQueue(true);
+    try {
+      const result = await syncQueue(
+        (syncedItem, resData) => {
+          // Действие отправлено
+        },
+        (failedItem, errorMsg) => {
+          setConflictError(`Заказ изменён или не удалось отправить: ${errorMsg}`);
+        }
+      );
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      if (result.syncedCount > 0) {
+        await Promise.all([fetchOrders(true), fetchProfile()]);
+      }
+    } catch (e) {
+      console.error('handleSyncQueue error:', e);
+    } finally {
+      setIsSyncingQueue(false);
+    }
+  };
 
   const fetchOrders = async (silent = false) => {
     try {
@@ -281,6 +297,12 @@ export default function GardenerDashboard() {
         fetch('/api/gardener/orders'),
         fetch('/api/gardener/operations')
       ]);
+
+      if (!resOrders.ok && !resOps.ok) {
+        setIsOffline(true);
+        return;
+      }
+
       const data = resOrders.ok ? await resOrders.json() : {};
       const ops = resOps.ok ? await resOps.json() : {};
       const incomingOrders = data.orders || [];
@@ -298,15 +320,197 @@ export default function GardenerDashboard() {
         }
       }
 
-      setOrders(incomingOrders);
+      const pendingQueue = await getQueue();
+      const merged = applyQueueToOrders(incomingOrders, pendingQueue);
+
+      setOrders(merged);
       setMyDayOffs(data.dayOffs || []);
       setOperations(ops.operations || []);
+      setIsOffline(false);
+
+      const now = Date.now();
+      setLastCacheTime(formatLastUpdated(now));
+
+      // Кэшируем данные
+      const ordersToCache = filterOrdersForOffline(incomingOrders);
+      saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] });
+      saveCache('operations', ops.operations || []);
     } catch (e) {
-      console.error(e);
+      console.error('fetchOrders network error:', e);
+      setIsOffline(true);
     } finally {
       if (!silent) setLoading(false);
     }
   };
+
+  const fetchAuction = async () => {
+    if (typeof window !== 'undefined' && !navigator.onLine) return;
+    setLoadingAuction(true);
+    try {
+      const res = await fetch('/api/gardener/auction');
+      const data = await res.json();
+      setAuctionOrders(data.orders || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingAuction(false);
+    }
+  };
+
+  const fetchProfile = async () => {
+    setLoadingWorks(true);
+    try {
+      const res = await fetch('/api/gardener/profile');
+      const data = await res.json();
+      if (res.ok && data.gardener) {
+        setGardenerProfile(data.gardener);
+        setMyWorks(data.gardener.works || []);
+        saveCache('profile', data.gardener);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingWorks(false);
+    }
+  };
+
+  const handleSaveWorks = async (updatedWorks) => {
+    setSavingWorks(true);
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      await enqueueAction({
+        actionType: 'PROFILE_PUT',
+        url: '/api/gardener/profile',
+        method: 'PUT',
+        payload: { works: updatedWorks }
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setMyWorks(updatedWorks);
+      setSavingWorks(false);
+      alert('Изменения портфолио сохранены локально и будут отправлены при подключении');
+      return;
+    }
+    try {
+      const res = await fetch('/api/gardener/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ works: updatedWorks })
+      });
+      const data = await res.json();
+      if (res.ok && data.gardener) {
+        const works = Array.isArray(data.gardener.works) ? data.gardener.works : (typeof data.gardener.works === 'string' ? JSON.parse(data.gardener.works) : []);
+        setMyWorks(works);
+        saveCache('profile', data.gardener);
+      } else {
+        alert(data.error || 'Не удалось сохранить портфолио');
+      }
+    } catch (e) {
+      await enqueueAction({
+        actionType: 'PROFILE_PUT',
+        url: '/api/gardener/profile',
+        method: 'PUT',
+        payload: { works: updatedWorks }
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setMyWorks(updatedWorks);
+      alert('Ошибка соединения. Изменения портфолио сохранены в очередь.');
+    } finally {
+      setSavingWorks(false);
+    }
+  };
+
+  const handleClaimOrder = async (orderId) => {
+    setClaimingId(orderId);
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      await enqueueAction({
+        actionType: 'AUCTION_CLAIM',
+        url: '/api/gardener/auction',
+        method: 'POST',
+        payload: { orderId }
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      alert('Запрос забрать заказ с аукциона сохранён и будет отправлен при подключении.');
+      setClaimingId(null);
+      return;
+    }
+    try {
+      const res = await fetch('/api/gardener/auction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Не удалось забрать заказ');
+        await fetchAuction();
+        return;
+      }
+      alert('Поздравляем! Заказ успешно забран и добавлен в ваши заказы.');
+      await Promise.all([fetchOrders(), fetchAuction()]);
+    } catch (e) {
+      await enqueueAction({
+        actionType: 'AUCTION_CLAIM',
+        url: '/api/gardener/auction',
+        method: 'POST',
+        payload: { orderId }
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      alert('Сетевая ошибка. Действие добавлено в очередь синхронизации.');
+    } finally {
+      setClaimingId(null);
+    }
+  };
+
+  useEffect(() => {
+    loadFromCache();
+    fetchOrders();
+    fetchProfile();
+
+    const interval = setInterval(() => {
+      if (typeof window !== 'undefined' && navigator.onLine) {
+        fetchOrders(true);
+        handleSyncQueue();
+      }
+    }, 45000);
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      fetchOrders(true);
+      handleSyncQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        document.title = '🌿 Мой Кабинет';
+        if (typeof window !== 'undefined' && navigator.onLine) {
+          handleSyncQueue();
+        }
+        if (!isUploadingRef.current) {
+          setSubmitting(false);
+          setUploadingWhich(null);
+          setSubmittingExpense(false);
+        }
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const uploadReceipt = async (file, onProgress) => {
     try {
@@ -327,26 +531,79 @@ export default function GardenerDashboard() {
     if (!expenseAmount || Number(expenseAmount) <= 0) return alert('Укажите сумму');
     setSubmittingExpense(true);
     isUploadingRef.current = true;
-    try {
-      let receipt = expenseReceiptUrl;
-      if (!receipt) {
-        // ничего не загрузили — можно отправить без чека
+
+    const payload = {
+      type: 'expense',
+      amount: Number(expenseAmount),
+      description: expenseDesc || '',
+      receiptUrl: expenseReceiptUrl || null
+    };
+
+    if (typeof window !== 'undefined' && (!navigator.onLine || expenseReceiptBlob)) {
+      const photoArray = [];
+      if (expenseReceiptBlob) {
+        photoArray.push({ field: 'receiptUrl', blob: expenseReceiptBlob, fileName: 'receipt.jpg' });
       }
-      const res = await fetch('/api/gardener/operations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'expense', amount: Number(expenseAmount), description: expenseDesc || '', receiptUrl: receipt || null }) });
+
+      await enqueueAction({
+        actionType: 'EXPENSE_POST',
+        url: '/api/gardener/operations',
+        method: 'POST',
+        payload,
+        photos: photoArray
+      });
+
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+
+      // Оптимистично добавляем операцию в список
+      const optOp = {
+        id: 'opt_' + Date.now(),
+        type: 'expense',
+        amount: Number(expenseAmount),
+        description: expenseDesc || '',
+        receiptUrl: expenseReceiptUrl || null,
+        approved: false,
+        createdAt: new Date().toISOString()
+      };
+      setOperations(prev => [optOp, ...prev]);
+
+      setExpenseAmount(''); setExpenseDesc(''); setExpenseReceiptUrl(''); setExpenseReceiptBlob(null);
+      alert('Трата сохранена и будет отправлена при подключении к сети.');
+      isUploadingRef.current = false;
+      setSubmittingExpense(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/gardener/operations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
-      // сбросим форму и обновим список
-      setExpenseAmount(''); setExpenseDesc(''); setExpenseReceiptUrl('');
+      setExpenseAmount(''); setExpenseDesc(''); setExpenseReceiptUrl(''); setExpenseReceiptBlob(null);
       await fetchOrders();
       alert('Трата отправлена на рассмотрение');
     } catch (err) {
-      alert(err.message || 'Ошибка');
+      // Сетевой фоллбэк
+      const photoArray = [];
+      if (expenseReceiptBlob) {
+        photoArray.push({ field: 'receiptUrl', blob: expenseReceiptBlob, fileName: 'receipt.jpg' });
+      }
+      await enqueueAction({
+        actionType: 'EXPENSE_POST',
+        url: '/api/gardener/operations',
+        method: 'POST',
+        payload,
+        photos: photoArray
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setExpenseAmount(''); setExpenseDesc(''); setExpenseReceiptUrl(''); setExpenseReceiptBlob(null);
+      alert('Ошибка сети. Трата добавлена в очередь отправки.');
     } finally {
       isUploadingRef.current = false;
       setSubmittingExpense(false);
     }
   };
-
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -361,7 +618,6 @@ export default function GardenerDashboard() {
     setFactAmount('');
     setCompletionText(order.completionComment || '');
 
-    // Инициализируем независимые массивы объектов с уникальными id
     try {
       const parseUrls = (val) => {
         if (!val) return [];
@@ -393,10 +649,12 @@ export default function GardenerDashboard() {
       })));
 
       setPhotoActUrls(actUrls);
+      setPhotoActBlobs([]);
     } catch (e) {
       setPhotoBeforeItems([]);
       setPhotoAfterItems([]);
       setPhotoActUrls(order.photoAct ? [order.photoAct] : []);
+      setPhotoActBlobs([]);
     }
   };
 
@@ -406,13 +664,43 @@ export default function GardenerDashboard() {
   };
 
   const markOrderAction = async (order, action, extraPayload = {}) => {
-    const res = await fetch('/api/gardener/orders', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: order.id, action, ...extraPayload }),
-    });
-    if (res.ok) fetchOrders();
-    else alert((await res.json()).error || 'Не удалось сохранить действие');
+    const payload = { id: order.id, action, ...extraPayload };
+
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      await enqueueAction({
+        actionType: 'ORDER_PUT',
+        url: '/api/gardener/orders',
+        method: 'PUT',
+        payload
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setOrders(prev => applyQueueToOrders(prev, q));
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/gardener/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        fetchOrders();
+      } else {
+        alert((await res.json()).error || 'Не удалось сохранить действие');
+      }
+    } catch (e) {
+      await enqueueAction({
+        actionType: 'ORDER_PUT',
+        url: '/api/gardener/orders',
+        method: 'PUT',
+        payload
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setOrders(prev => applyQueueToOrders(prev, q));
+    }
   };
 
   const handlePhotoSelect = async (e, which) => {
@@ -422,6 +710,46 @@ export default function GardenerDashboard() {
     setSubmitting(true);
     setUploadingWhich(which);
     setUploadProgress(0);
+
+    const isOfflineNow = typeof window !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineNow) {
+      // Оффлайн-режим: сжимаем через canvas в Blob и создаем локальный preview URL
+      for (const file of files) {
+        try {
+          const compressedBlob = await compressImageToBlob(file, 1280, 0.7);
+          const previewUrl = URL.createObjectURL(compressedBlob);
+
+          if (which === 'before') {
+            setPhotoBeforeItems(prev => [...prev, {
+              id: 'before_' + Math.random().toString(36).substr(2, 9),
+              url: previewUrl,
+              fileBlob: compressedBlob,
+              inPortfolio: false
+            }]);
+          } else if (which === 'after') {
+            setPhotoAfterItems(prev => [...prev, {
+              id: 'after_' + Math.random().toString(36).substr(2, 9),
+              url: previewUrl,
+              fileBlob: compressedBlob,
+              inPortfolio: false
+            }]);
+          } else if (which === 'act') {
+            setPhotoActUrls(prev => [...prev, previewUrl]);
+            setPhotoActBlobs(prev => [...prev, { field: 'photoAct', blob: compressedBlob, fileName: 'act.jpg' }]);
+          }
+        } catch (err) {
+          console.error('Ошибка подготовки оффлайн фото:', err);
+        }
+      }
+      isUploadingRef.current = false;
+      setSubmitting(false);
+      setUploadingWhich(null);
+      setUploadProgress(0);
+      e.target.value = '';
+      return;
+    }
+
     let successCount = 0;
     let failCount = 0;
     try {
@@ -506,20 +834,60 @@ export default function GardenerDashboard() {
     if (actionType === 'transfer') payload.transferRequestedDate = transferDate;
     if (actionType === 'refuse') payload.refusalReason = refusalText;
     if (actionType === 'complete') {
-      const beforeUrls = photoBeforeItems.map(item => item.url);
-      const afterUrls = photoAfterItems.map(item => item.url);
+      const beforeUrls = photoBeforeItems.map(item => item.url).filter(u => u && !u.startsWith('blob:'));
+      const afterUrls = photoAfterItems.map(item => item.url).filter(u => u && !u.startsWith('blob:'));
+      const actUrls = photoActUrls.filter(u => u && !u.startsWith('blob:'));
 
       const selectedPortfolioUrls = [
-        ...photoBeforeItems.filter(item => item.inPortfolio).map(item => item.url),
-        ...photoAfterItems.filter(item => item.inPortfolio).map(item => item.url)
+        ...photoBeforeItems.filter(item => item.inPortfolio && item.url && !item.url.startsWith('blob:')).map(item => item.url),
+        ...photoAfterItems.filter(item => item.inPortfolio && item.url && !item.url.startsWith('blob:')).map(item => item.url)
       ];
 
       payload.priceFact = factAmount;
       payload.photoBefore = beforeUrls;
       payload.photoAfter = afterUrls;
-      payload.photoAct = photoActUrls;
+      payload.photoAct = actUrls;
       payload.portfolioPhotos = selectedPortfolioUrls;
       payload.completionComment = completionText;
+    }
+
+    // Собираем оффлайн фото-блобы
+    const photosToUpload = [];
+    if (actionType === 'complete') {
+      photoBeforeItems.forEach((item) => {
+        if (item.fileBlob) {
+          photosToUpload.push({ field: 'photoBefore', blob: item.fileBlob, fileName: 'before.jpg' });
+        }
+      });
+      photoAfterItems.forEach((item) => {
+        if (item.fileBlob) {
+          photosToUpload.push({ field: 'photoAfter', blob: item.fileBlob, fileName: 'after.jpg' });
+        }
+      });
+      photoActBlobs.forEach((item) => {
+        if (item.blob) {
+          photosToUpload.push({ field: 'photoAct', blob: item.blob, fileName: 'act.jpg' });
+        }
+      });
+    }
+
+    const isOfflineNow = typeof window !== 'undefined' && (!navigator.onLine || photosToUpload.length > 0);
+
+    if (isOfflineNow) {
+      await enqueueAction({
+        actionType: 'ORDER_PUT',
+        url: '/api/gardener/orders',
+        method: 'PUT',
+        payload,
+        photos: photosToUpload,
+      });
+
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setOrders(prev => applyQueueToOrders(prev, q));
+      closeAction();
+      setSubmitting(false);
+      return;
     }
 
     try {
@@ -535,6 +903,19 @@ export default function GardenerDashboard() {
         const data = await res.json();
         alert(data.error);
       }
+    } catch (err) {
+      await enqueueAction({
+        actionType: 'ORDER_PUT',
+        url: '/api/gardener/orders',
+        method: 'PUT',
+        payload,
+        photos: photosToUpload,
+      });
+
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setOrders(prev => applyQueueToOrders(prev, q));
+      closeAction();
     } finally {
       setSubmitting(false);
     }
@@ -577,14 +958,11 @@ export default function GardenerDashboard() {
     let paidToCompany = 0;
     let pending = 0;
 
-    // Завершённые заказы — считаем заработанное, долг садовника фирме и уже отмеченные выплаты
     orders.forEach((order) => {
       const orderDate = new Date(order.date);
       if (orderDate < start || orderDate > end) return;
 
       const gross = Number(order.priceFact || 0);
-      // Если безналичный расчет - фирма получает всю сумму, садовник не должен фирме долю
-      // Если наличный - садовник должен отдать долю фирмы (companyShare)
       const isCash = order.isCash !== undefined ? order.isCash : true;
       const companyShare = isCash ? Number(order.companyShare || 0) : 0;
       const paidTargets = getPaidTargets(order.paidTo);
@@ -660,7 +1038,6 @@ export default function GardenerDashboard() {
 
         <div className="space-y-2 text-sm text-slate-600">
           <div>📍 <a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" className="font-medium text-emerald-700 underline hover:text-emerald-800">{order.district ? `${order.district} • ${order.address}` : order.address}</a></div>
-          {/* Телефон доступен с дня подготовки до завершения дня заказа. */}
           {(() => {
             const now = new Date();
             const orderDate = new Date(order.date);
@@ -702,7 +1079,6 @@ export default function GardenerDashboard() {
                   </select>
                 </div>
 
-                {/* Бейдж со временем и статусом звонка / предупреждение о штрафе */}
                 {order.clientCalledAt || order.callStatus ? (
                   <div className="text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 p-2 rounded-lg flex items-center justify-between">
                     <span>📞 {order.callStatus ? `Статус: ${order.callStatus}` : 'Звонок зафиксирован'}</span>
@@ -833,6 +1209,13 @@ export default function GardenerDashboard() {
               <span>Факт: <strong className="text-emerald-700">{order.priceFact} ₽</strong></span>
             )}
           </div>
+
+          {order.isPendingSync && (
+            <div className="text-xs bg-amber-100 text-amber-900 border border-amber-300 p-2 rounded-lg font-medium flex items-center justify-between mt-2">
+              <span>⏳ будет отправлено при подключении</span>
+              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">В очереди</span>
+            </div>
+          )}
         </div>
 
         {order.status === 'Новый заказ' && (
@@ -855,11 +1238,10 @@ export default function GardenerDashboard() {
     </div>
   );
 
-  // --- Данные для вида "Календарь" ---
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
   const firstDay = new Date(year, month, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7; // понедельник — первый день недели
+  const startOffset = (firstDay.getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const ordersByDate = {};
@@ -928,7 +1310,22 @@ export default function GardenerDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <header className="bg-emerald-800 text-white py-4 px-4 flex justify-between items-center shadow">
-        <h1 className="text-lg font-bold flex items-center gap-1">🌿 Мой Кабинет</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold flex items-center gap-1">🌿 Мой Кабинет</h1>
+          {isSyncingQueue ? (
+            <span className="text-xs bg-amber-600/90 border border-amber-400 text-white px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-pulse">
+              ⚡ Отправка очереди ({queueCount})…
+            </span>
+          ) : isOffline || (typeof window !== 'undefined' && !navigator.onLine) ? (
+            <span className="text-xs bg-amber-600/90 border border-amber-400 text-white px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+              📡 Оффлайн {lastCacheTime ? `— данные от ${lastCacheTime}` : ''}
+            </span>
+          ) : (
+            <span className="text-xs bg-emerald-700/80 border border-emerald-500 text-emerald-100 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+              🟢 В сети
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <PushButton className="text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
           <a href="tel:88452650206" className="text-xs bg-emerald-700 hover:bg-emerald-600 px-3 py-1.5 rounded-lg flex items-center gap-1">
@@ -937,6 +1334,34 @@ export default function GardenerDashboard() {
           <button type="button" onClick={handleLogout} className="text-xs bg-emerald-700 px-3 py-1.5 rounded-lg">Выйти</button>
         </div>
       </header>
+
+      {/* Оффлайн баннер */}
+      {isOffline && (
+        <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2">
+          <span>📡 Нет сети — показаны сохранённые заказы</span>
+          {lastCacheTime && <span className="opacity-90 font-normal">(последнее обновление: {lastCacheTime})</span>}
+        </div>
+      )}
+
+      {/* Уведомление об ошибке конфликта */}
+      {conflictError && (
+        <div className="bg-rose-600 text-white text-xs font-semibold px-4 py-2 text-center flex items-center justify-between gap-2 shadow">
+          <span>⚠️ {conflictError}</span>
+          <button type="button" onClick={() => setConflictError(null)} className="px-2 py-0.5 bg-rose-700 hover:bg-rose-800 rounded text-xs font-bold">
+            Закрыть
+          </button>
+        </div>
+      )}
+
+      {/* Панель очереди */}
+      {!isOffline && queueCount > 0 && (
+        <div className="bg-amber-100 border-b border-amber-200 text-amber-900 text-xs px-4 py-1.5 flex items-center justify-between font-medium">
+          <span>⏳ Неотправленных действий: {queueCount}</span>
+          <button type="button" onClick={handleSyncQueue} disabled={isSyncingQueue} className="underline hover:text-amber-950 font-bold">
+            {isSyncingQueue ? 'Отправка...' : 'Отправить сейчас'}
+          </button>
+        </div>
+      )}
 
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
@@ -1001,7 +1426,7 @@ export default function GardenerDashboard() {
                                 }}
                                 className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-xs rounded-lg transition-colors flex-shrink-0"
                               >
-                                Удалить работа
+                                Удалить работу
                               </button>
                             </div>
 
@@ -1027,7 +1452,7 @@ export default function GardenerDashboard() {
                               <button
                                 type="button"
                                 onClick={(e) => {
-                          e.preventDefault();
+                                  e.preventDefault();
                                   if (!isUploadingRef.current) {
                                     setSubmitting(false);
                                     setUploadingWhich(null);
@@ -1274,6 +1699,7 @@ export default function GardenerDashboard() {
             </div>
           </div>
         )}
+
         {activeSection === 'finance' && <>
         <div className="mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
@@ -1351,7 +1777,7 @@ export default function GardenerDashboard() {
                         <button
                           type="button"
                           onClick={(e) => {
-                          e.preventDefault();
+                            e.preventDefault();
                             if (!isUploadingRef.current) {
                               setSubmitting(false);
                               setUploadingWhich(null);
@@ -1362,7 +1788,7 @@ export default function GardenerDashboard() {
                         >
                           📷 Заменить фото
                         </button>
-                        <button type="button" onClick={() => setExpenseReceiptUrl('')} className="text-xs text-rose-600">Удалить</button>
+                        <button type="button" onClick={() => { setExpenseReceiptUrl(''); setExpenseReceiptBlob(null); }} className="text-xs text-rose-600">Удалить</button>
                       </div>
                     ) : (
                       <button
@@ -1402,12 +1828,41 @@ export default function GardenerDashboard() {
                   const f = e.target.files && e.target.files[0];
                   if (!f) return;
                   isUploadingRef.current = true;
+
+                  const isOfflineNow = typeof window !== 'undefined' && !navigator.onLine;
+
+                  if (isOfflineNow) {
+                    try {
+                      setSubmittingExpense(true);
+                      const compressedBlob = await compressImageToBlob(f, 1280, 0.7);
+                      const previewUrl = URL.createObjectURL(compressedBlob);
+                      setExpenseReceiptUrl(previewUrl);
+                      setExpenseReceiptBlob(compressedBlob);
+                    } catch (err) {
+                      alert('Ошибка подготовки чека оффлайн');
+                    } finally {
+                      isUploadingRef.current = false;
+                      setSubmittingExpense(false);
+                      e.target.value = '';
+                    }
+                    return;
+                  }
+
                   try {
                     setSubmittingExpense(true);
                     const url = await uploadReceipt(f);
                     setExpenseReceiptUrl(url);
+                    setExpenseReceiptBlob(null);
                   } catch (err) {
-                    alert(err.message || 'Ошибка загрузки');
+                    // Оффлайн фоллбэк
+                    try {
+                      const compressedBlob = await compressImageToBlob(f, 1280, 0.7);
+                      const previewUrl = URL.createObjectURL(compressedBlob);
+                      setExpenseReceiptUrl(previewUrl);
+                      setExpenseReceiptBlob(compressedBlob);
+                    } catch (e2) {
+                      alert(err.message || 'Ошибка загрузки');
+                    }
                   } finally {
                     isUploadingRef.current = false;
                     setSubmittingExpense(false);
@@ -1503,7 +1958,6 @@ export default function GardenerDashboard() {
             {(() => {
               const today = new Date();
               today.setHours(0,0,0,0);
-              // Показываем заказы, которые не в статусе "Перенос", "Отказ" или "Перенесен" (они уже обработаны диспетчером)
               const visible = orders.filter(o => {
                 if (!showPastOrders && new Date(o.date) < today) return false;
                 if (o.status === 'Перенос' || o.status === 'Отказ' || o.status === 'Перенесен') return false;
@@ -1702,7 +2156,7 @@ export default function GardenerDashboard() {
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoActUrls.map((url, index) => <div key={url} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
+                      {photoActUrls.map((url, index) => <div key={url || index} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
                       <button
                         type="button"
                         onClick={(e) => {

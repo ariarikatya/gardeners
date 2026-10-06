@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { notifyDispatchers } from '@/lib/vkApi';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkGardener(req) {
@@ -33,6 +34,12 @@ export async function POST(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  if (cached) {
+    return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   try {
     const { orderId } = await req.json();
     if (!orderId) {
@@ -45,6 +52,11 @@ export async function POST(req) {
     }
 
     if (order.status !== 'Аукцион') {
+      if (order.gardenerId === payload.gardenerId) {
+        const responseBody = { success: true, order };
+        setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+        return NextResponse.json(responseBody);
+      }
       return NextResponse.json({ error: 'Заказ уже забран другим садовником' }, { status: 400 });
     }
 
@@ -70,7 +82,9 @@ export async function POST(req) {
       }
     })();
 
-    return NextResponse.json({ success: true, order: updated });
+    const responseBody = { success: true, order: updated };
+    setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+    return NextResponse.json(responseBody);
   } catch (e) {
     console.error('Error claiming auction order:', e);
     return NextResponse.json({ error: 'Не удалось забрать заказ' }, { status: 500 });

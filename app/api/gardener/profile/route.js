@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkGardener(req) {
@@ -37,6 +38,12 @@ export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  if (cached) {
+    return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json();
   const { works } = body;
 
@@ -45,5 +52,7 @@ export async function PUT(req) {
     data: { works: Array.isArray(works) ? works : [] }
   });
 
-  return NextResponse.json({ gardener: updated });
+  const responseBody = { gardener: updated };
+  setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+  return NextResponse.json(responseBody);
 }
