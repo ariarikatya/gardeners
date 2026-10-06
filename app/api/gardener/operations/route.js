@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function getGardenerIdFromToken(req) {
@@ -38,11 +39,20 @@ export async function GET(req) {
 export async function POST(req) {
   const gardenerId = await getGardenerIdFromToken(req);
   if (!gardenerId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  if (cached) {
+    return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json();
   const { type, amount, description, receiptUrl, orderId } = body;
   if (!type || typeof amount === 'undefined') return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
   const data = { gardenerId, type: String(type), amount: Number(amount), description: description || '', receiptUrl: receiptUrl || null, approved: false };
   if (orderId) data.orderId = orderId;
   const op = await prisma.operation.create({ data });
-  return NextResponse.json({ operation: op });
+  const responseBody = { operation: op };
+  setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+  return NextResponse.json(responseBody);
 }

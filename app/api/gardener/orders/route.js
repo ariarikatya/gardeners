@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import amoApi from '@/lib/amoApi';
 import { calculateOrderSplit } from '@/lib/money';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkGardener(req) {
@@ -41,6 +42,12 @@ export async function GET(req) {
 export async function PUT(req) {
   const payload = await checkGardener(req);
   if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  if (cached) {
+    return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   const { id, action, transferRequestedDate, refusalReason, priceFact, photoBefore, photoAfter, photoAct, cardFilledAt, clientCalledAt, callStatus, portfolioPhotos, completionComment } = await req.json();
 
@@ -199,5 +206,7 @@ export async function PUT(req) {
     console.error('Failed updating amo lead on gardener action:', e.message);
   }
 
-  return NextResponse.json({ order: updated });
+  const responseBody = { order: updated };
+  setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+  return NextResponse.json(responseBody);
 }

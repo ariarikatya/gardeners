@@ -11,7 +11,8 @@
     "test:amo-dedupe": "node scripts/test-amo-contact-dedupe.js",
     "test:money-split": "node scripts/test-money-split.js",
     "test:stop-day-edit": "node scripts/test-stop-day-edit.js",
-    "test:fine-edit-delete": "node scripts/test-fine-edit-delete.js"
+    "test:fine-edit-delete": "node scripts/test-fine-edit-delete.js",
+    "test:offline-queue": "node scripts/test-offline-queue.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
