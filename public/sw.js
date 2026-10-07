@@ -1,13 +1,15 @@
-const CACHE_NAME = 'anemon-agro-v5';
+const CACHE_NAME = 'anemon-agro-v7';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
+// === INSTALL: сразу берём контроль ===
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
   );
-  self.skipWaiting();
 });
 
+// === ACTIVATE: чистим всё старое ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -17,46 +19,58 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// === MESSAGE: ручное обновление ===
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
+// === FETCH: умное кэширование ===
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Данные и API — всегда только из сети, не кэшируем
+  // API — только сеть, никогда не кэшируем
   if (url.pathname.startsWith('/api/')) return;
 
-  // Навигационные запросы (HTML) — из сети, кэшируем /gardener, фоллбэк на закешированный /gardener или /login если оффлайн
+  // === НАВИГАЦИЯ (HTML страницы): ТОЛЬКО сеть, без fallback на старый HTML ===
+  // Это главное исправление: больше не будет белого экрана от устаревших страниц
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((res) => {
-          if (res && res.status === 200 && url.pathname.startsWith('/gardener')) {
+          // Обновляем кэш свежей копией для офлайн-доступа садовников
+          if (res && res.status === 200) {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              try { cache.put('/gardener', resClone); } catch (e) {}
+              try {
+                if (url.pathname.startsWith('/gardener')) cache.put('/gardener', resClone);
+                else if (url.pathname === '/login' || url.pathname.startsWith('/login')) cache.put('/login', resClone);
+              } catch (e) {}
             }).catch(() => {});
           }
           return res;
         })
         .catch(async () => {
+          // Оффлайн: показываем только если это /gardener или /login
           if (url.pathname.startsWith('/gardener')) {
-            const cachedGardener = await caches.match('/gardener');
-            if (cachedGardener) return cachedGardener;
+            const cached = await caches.match('/gardener');
+            if (cached) return cached;
           }
           const cachedLogin = await caches.match('/login');
           if (cachedLogin) return cachedLogin;
-          return caches.match(request);
+          // Иначе — стандартная ошибка сети браузера (НЕ старый мусорный HTML)
+          return new Response('Оффлайн. Проверьте подключение к интернету.', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          });
         })
     );
     return;
   }
 
-  // Статические ресурсы _next/static (с хэшами) — Cache First
+  // === СТАТИКА _next/static/ (с хэшами): Cache First ===
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
       caches.match(request).then((cached) => {
@@ -65,9 +79,7 @@ self.addEventListener('fetch', (event) => {
           if (res && res.status === 200 && res.type !== 'error') {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
-              try {
-                cache.put(request, resClone);
-              } catch (e) {}
+              try { cache.put(request, resClone); } catch (e) {}
             }).catch(() => {});
           }
           return res;
@@ -77,16 +89,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Все остальные ресурсы — Network First с обновлением кэша
+  // === Остальное: Network First ===
   event.respondWith(
     fetch(request)
       .then((res) => {
         if (res && res.status === 200 && res.type !== 'error') {
           const resClone = res.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            try {
-              cache.put(request, resClone);
-            } catch (e) {}
+            try { cache.put(request, resClone); } catch (e) {}
           }).catch(() => {});
         }
         return res;
@@ -95,16 +105,12 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// === PUSH: без изменений ===
 self.addEventListener('push', (event) => {
   let data = {};
   if (event.data) {
-    try {
-      data = event.data.json();
-    } catch (e) {
-      data = { body: event.data.text() };
-    }
+    try { data = event.data.json(); } catch (e) { data = { body: event.data.text() }; }
   }
-
   const title = data.title || '🌿 Новое уведомление';
   const options = {
     body: data.body || '',
@@ -114,39 +120,28 @@ self.addEventListener('push', (event) => {
     requireInteraction: true,
     data: { url: data.url || '/admin' },
   };
-
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
   const targetUrl = event.notification.data?.url || '/admin';
-
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (targetUrl.startsWith('/gardener') && client.url.includes('/gardener')) {
-          if ('focus' in client) {
-            return client.focus();
-          }
+          if ('focus' in client) return client.focus();
         } else if (targetUrl.startsWith('/admin') && client.url.includes('/admin')) {
           if ('focus' in client) {
             client.focus();
-            if ('postMessage' in client) {
-              client.postMessage({ type: 'OPEN_WEBLEADS_TAB', url: targetUrl });
-            }
+            if ('postMessage' in client) client.postMessage({ type: 'OPEN_WEBLEADS_TAB', url: targetUrl });
             return;
           }
         } else if (client.url === targetUrl || client.url.endsWith(targetUrl)) {
-          if ('focus' in client) {
-            return client.focus();
-          }
+          if ('focus' in client) return client.focus();
         }
       }
-      if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
-      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })
   );
 });
