@@ -215,3 +215,15 @@ model PushSubscription {
   userId    String?
   createdAt DateTime @default(now())
 }
+
+model ClientPushLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  event         String
+  clientVersion String?
+  payload       Json
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}

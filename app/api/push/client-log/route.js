@@ -43,6 +43,18 @@ export async function POST(req) {
 
     console.log('[ClientPushLog]', JSON.stringify(logMessage));
 
+    // Save to DB asynchronously (best effort)
+    prisma.clientPushLog.create({
+      data: {
+        userId,
+        event: payload.event || 'unknown',
+        clientVersion: payload.clientVersion || 'unknown',
+        payload,
+      },
+    }).catch((dbErr) => {
+      console.error('[ClientPushLog] Failed to persist log to DB:', dbErr.message);
+    });
+
     return NextResponse.json({ ok: true, receivedAt: new Date().toISOString() });
   } catch (err) {
     console.error('Error in /api/push/client-log:', err);
