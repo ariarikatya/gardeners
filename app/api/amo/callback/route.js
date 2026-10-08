@@ -67,7 +67,7 @@ export async function GET(req) {
         }
       }
     } else {
-      console.error('❌ Ошибка получения токенов amoCRM:', tokenRes.status, tokenText);
+      console.error('❌ [external-amocrm] Ошибка получения токенов amoCRM:', tokenRes.status, tokenText);
       return new Response(`
         <html><body><h3>Ошибка авторизации amoCRM: ${tokenRes.status}</h3></body></html>
       `, { status: tokenRes.status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
@@ -80,7 +80,7 @@ export async function GET(req) {
     </script><p>Подключение успешно!</p></body></html>
   `, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   } catch (error) {
-    console.error('❌ Ошибка при обработке /api/amo/callback:', error);
+    console.error('❌ [external-amocrm] Ошибка при обработке /api/amo/callback:', error);
     return new Response(`
     <html><body><h3>Ошибка: ${error.message}</h3></body></html>
   `, { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
