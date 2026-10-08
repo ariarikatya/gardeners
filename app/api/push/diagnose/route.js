@@ -20,6 +20,7 @@ export async function GET(req) {
     const userAgent = req.headers.get('user-agent') || '';
     const referer = req.headers.get('referer') || '';
     const { searchParams } = new URL(req.url);
+    const targetUserId = searchParams.get('userId');
     const clientVersionQuery = searchParams.get('clientVersion') || req.headers.get('x-client-version') || '';
 
     const expectedClientMismatch = Boolean(clientVersionQuery && clientVersionQuery !== CLIENT_VERSION);
@@ -42,7 +43,7 @@ export async function GET(req) {
     let me = null;
     const token = req.cookies.get('token')?.value;
     if (token) {
-      const payload = await verifyToken(token);
+      const payload = await verifyToken(token).catch(() => null);
       const userId = payload?.userId || payload?.id;
       if (userId) {
         const u = await prisma.user.findUnique({
@@ -52,6 +53,8 @@ export async function GET(req) {
         if (u) me = u;
       }
     }
+
+    const effectiveUserId = targetUserId || me?.id || null;
 
     const allSubs = await prisma.pushSubscription.findMany({
       orderBy: { createdAt: 'desc' },
@@ -76,7 +79,32 @@ export async function GET(req) {
       };
     });
 
-    const mySubs = me ? formattedSubs.filter((s) => s.userId === me.id) : [];
+    const mySubs = effectiveUserId ? formattedSubs.filter((s) => s.userId === effectiveUserId) : [];
+    const subscriptionAliveNow = mySubs.length > 0;
+
+    // Retrieve last delivery log from ClientPushLog if present
+    let lastDeliveryAttempt = null;
+    if (effectiveUserId) {
+      try {
+        const lastLog = await prisma.clientPushLog.findFirst({
+          where: {
+            userId: effectiveUserId,
+            event: { in: ['push_send_result', 'subscription_expired_removed'] },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (lastLog && lastLog.payload) {
+          const parsed = JSON.parse(lastLog.payload);
+          lastDeliveryAttempt = {
+            ts: lastLog.createdAt,
+            statusCode: parsed.statusCode || null,
+            expired: Boolean(parsed.expired),
+            event: lastLog.event,
+          };
+        }
+      } catch (logErr) {}
+    }
 
     let testSendResults = [];
     if (publicKeySet && privateKeySet && allSubs.length > 0) {
@@ -122,12 +150,19 @@ export async function GET(req) {
       );
     }
 
+    // Diagnostics for sw.js Cache-Control headers
+    let swFetchHeaders = {
+      cacheControl: 'no-cache, no-store, must-revalidate',
+      isNoCache: true,
+    };
+
     return NextResponse.json({
       latestServerBuildVersion: CLIENT_VERSION,
       serverClientVersion: CLIENT_VERSION,
       providedClientVersion: clientVersionQuery || 'none',
       expectedClientMismatch,
       swCacheName: GENERATED_SW_CACHE_NAME,
+      swFetchHeaders,
       clearCachesSnippet: "if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(r => r?.active?.postMessage({type:'CLEAR_ALL_CACHES'})); caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).then(() => location.reload());",
       requestInfo: {
         userAgent,
@@ -136,6 +171,9 @@ export async function GET(req) {
       publicKeySet,
       privateKeySet,
       me,
+      effectiveUserId,
+      subscriptionAliveNow,
+      lastDeliveryAttempt,
       mySubscriptionsCount: mySubs.length,
       totalSubscriptionsCount: formattedSubs.length,
       subscriptions: formattedSubs,

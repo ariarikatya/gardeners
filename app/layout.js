@@ -1,5 +1,6 @@
 import './globals.css';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
+import BuildVersionWatcher from '@/components/BuildVersionWatcher';
 
 export const metadata = {
   title: 'Анемон Агро',
@@ -19,6 +20,7 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         {children}
+        <BuildVersionWatcher />
         <ServiceWorkerRegister />
       </body>
     </html>

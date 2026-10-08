@@ -2,12 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import { clientLog } from '@/lib/clientLog';
+import { getQueue } from '@/lib/offlineQueue';
 
 export default function ServiceWorkerRegister() {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
+  const [hasPendingOps, setHasPendingOps] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    let autoReloadTimer = null;
 
     const handleRegister = () => {
       navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -18,11 +22,39 @@ export default function ServiceWorkerRegister() {
 
             clientLog('sw_update_detected', { state: installingWorker.state });
 
-            installingWorker.addEventListener('statechange', () => {
+            installingWorker.addEventListener('statechange', async () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
                 clientLog('sw_update_available', { state: 'installed' });
                 installingWorker.postMessage({ type: 'SKIP_WAITING' });
-                setShowUpdateBanner(true);
+
+                let pendingOps = 0;
+                try {
+                  const queue = await getQueue();
+                  pendingOps = (queue || []).filter(item => item.status !== 'conflict').length;
+                } catch (e) {}
+
+                if (pendingOps > 0) {
+                  setHasPendingOps(true);
+                  setShowUpdateBanner(true);
+                  clientLog('sw_auto_reload_deferred', { pendingOfflineOps: pendingOps });
+                } else {
+                  setShowUpdateBanner(true);
+
+                  const triggerAutoReload = () => {
+                    if (sessionStorage.getItem('push_flow_active') === '1') return;
+                    clientLog('sw_auto_reload', { pendingOfflineOps: 0 });
+                    window.location.reload();
+                  };
+
+                  const handleVisibility = () => {
+                    if (document.visibilityState === 'visible') {
+                      triggerAutoReload();
+                    }
+                  };
+
+                  document.addEventListener('visibilitychange', handleVisibility);
+                  autoReloadTimer = setTimeout(triggerAutoReload, 60000);
+                }
               }
             });
           });
@@ -37,15 +69,23 @@ export default function ServiceWorkerRegister() {
       handleRegister();
     } else {
       window.addEventListener('load', handleRegister);
-      return () => window.removeEventListener('load', handleRegister);
     }
+
+    return () => {
+      window.removeEventListener('load', handleRegister);
+      if (autoReloadTimer) clearTimeout(autoReloadTimer);
+    };
   }, []);
 
   if (!showUpdateBanner) return null;
 
   return (
     <div className="fixed bottom-3 right-3 z-50 bg-slate-900 text-white px-3.5 py-2 rounded-xl text-xs flex items-center gap-2.5 shadow-2xl border border-slate-700">
-      <span>✨ Доступна новая версия</span>
+      <span>
+        {hasPendingOps
+          ? '✨ Доступно обновление (есть непереданные оффлайн-данные)'
+          : '✨ Доступна новая версия'}
+      </span>
       <button
         type="button"
         onClick={() => {

@@ -6,6 +6,7 @@
     "prebuild": "node scripts/gen-sw-version.js",
     "dev": "node scripts/gen-sw-version.js && next dev",
     "build": "prisma generate && prisma db push --accept-data-loss && next build",
+    "deploy": "npm run build && pm2 restart anemon --update-env",
     "start": "next start",
     "postinstall": "prisma generate",
     "test:fines-logic": "node scripts/test-fines-logic.js",
@@ -13,7 +14,10 @@
     "test:money-split": "node scripts/test-money-split.js",
     "test:stop-day-edit": "node scripts/test-stop-day-edit.js",
     "test:fine-edit-delete": "node scripts/test-fine-edit-delete.js",
-    "test:offline-queue": "node scripts/test-offline-queue.js"
+    "test:offline-queue": "node scripts/test-offline-queue.js",
+    "test:push-sw-version": "node scripts/test-push-sw-version.js",
+    "test:push-pwa-env": "node scripts/test-push-pwa-env.js",
+    "test:push-logs": "node scripts/test-push-logs.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

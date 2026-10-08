@@ -266,6 +266,7 @@ export default function AdminDashboard() {
   const [filterServiceIds, setFilterServiceIds] = useState([]);
   const [filterDistrict, setFilterDistrict] = useState('');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Поиск ближайшего окна под запрос клиента
   const [showQuickSearch, setShowQuickSearch] = useState(false);
@@ -1058,7 +1059,26 @@ export default function AdminDashboard() {
     ));
   }
 
+  const matchesSearch = (order) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    const fields = [
+      order.clientName,
+      order.clientPhone,
+      order.address,
+      order.district,
+      order.description,
+      order.comment,
+      order.refusalReason,
+    ];
+    const phoneDigitsQ = q.replace(/\D/g, '');
+    const phoneDigits = String(order.clientPhone || '').replace(/\D/g, '');
+    return fields.some(f => String(f || '').toLowerCase().includes(q)) ||
+           (!!phoneDigitsQ && phoneDigits.includes(phoneDigitsQ));
+  };
+
   const filteredOrders = (orders || []).filter(o => {
+    if (!matchesSearch(o)) return false;
     if (filterStatus !== 'all' && o.status !== filterStatus) return false;
 
     if (hasGardenerFilter || hasServiceFilter) {
@@ -1078,7 +1098,7 @@ export default function AdminDashboard() {
 
   const displayGardeners = visibleGardeners.filter(g => !(hiddenGardenerIds || []).includes(g.id));
 
-  const isFilterActive = hasGardenerFilter || hasServiceFilter || filterStatus !== 'all' || !!filterDistrict.trim();
+  const isFilterActive = hasGardenerFilter || hasServiceFilter || filterStatus !== 'all' || !!filterDistrict.trim() || !!searchQuery.trim();
   const isEmptyFilterResult = displayGardeners.length === 0 || (isFilterActive && filteredOrders.length === 0);
 
   // Предпочтительный список районов — подсчитываем наиболее частые значения из заказов
@@ -1514,6 +1534,28 @@ export default function AdminDashboard() {
 
               {/* Фильтры отображения календаря */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 mb-2 flex flex-wrap gap-4 items-end text-xs">
+                <div className="relative min-w-[220px] flex-1">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">🔍 Поиск по заказам</label>
+                  <div className="relative">
+                    <input
+                      type="search"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Имя, телефон, адрес, описание…"
+                      className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-emerald-500 pr-7"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-sm leading-none p-0.5"
+                        title="Очистить"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <MultiSelectFilter
                   label="Мастер (садовник)"
                   items={gardeners}
@@ -1633,7 +1675,7 @@ export default function AdminDashboard() {
                               </span>
                             </td>
                             {displayGardeners.map(g => {
-                              const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
+                              const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && matchesSearch(o) && (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru'))));
                               const dayOrders = filterStatus === 'all'
                                 ? dayOrdersAll
                                 : dayOrdersAll.filter(o => o.status === filterStatus);

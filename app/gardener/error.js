@@ -2,19 +2,19 @@
 
 import { useEffect } from 'react';
 
-export default function Error({ error, reset }) {
+export default function GardenerError({ error, reset }) {
   useEffect(() => {
-    console.error('App level error boundary caught:', error);
+    console.error('Gardener level error boundary caught:', error);
 
     try {
       fetch('/api/client-error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: error?.message || 'Unknown render error',
+          message: error?.message || 'Gardener render error',
           stack: error?.stack || '',
           digest: error?.digest || '',
-          pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+          pathname: typeof window !== 'undefined' ? window.location.pathname : '/gardener',
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
         }),
       }).catch(() => {});
@@ -37,7 +37,6 @@ export default function Error({ error, reset }) {
           }
         }
         sessionStorage.clear();
-        localStorage.clear();
       }
     } catch (e) {
       console.error('Failed to clear caches:', e);
@@ -47,12 +46,12 @@ export default function Error({ error, reset }) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg border border-slate-200 p-6 text-center space-y-4">
-        <div className="text-4xl">⚠️</div>
-        <h1 className="text-xl font-bold text-slate-800">Что-то сломалось</h1>
+    <div className="min-h-screen bg-emerald-950 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-emerald-100 p-6 text-center space-y-4">
+        <div className="text-4xl">🌿</div>
+        <h1 className="text-xl font-bold text-slate-800">Что-то сломалось у садовника</h1>
         <p className="text-sm text-slate-600 leading-relaxed">
-          К сожалению, возникла ошибка при отображении страницы. Нажмите кнопку ниже, чтобы обновить страницу.
+          Произошла ошибка загрузки кабинета. Нажмите «Обновить страницу», чтобы продолжить работу.
         </p>
 
         {error?.message && (
@@ -67,7 +66,7 @@ export default function Error({ error, reset }) {
             onClick={() => (reset ? reset() : window.location.reload())}
             className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
           >
-            🔄 Перезагрузить страницу
+            🔄 Обновить страницу
           </button>
           <button
             type="button"

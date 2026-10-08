@@ -26,6 +26,7 @@ const IOS_NON_PWA_ALERT_MSG =
 export default function PushButton({ className = '' }) {
   const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'orphan' | 'unsupported'
   const [pushLoading, setPushLoading] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
   const [showIosPushHint, setShowIosPushHint] = useState(false);
   const [isIosNonPwa, setIsIosNonPwa] = useState(false);
   const [envInfo, setEnvInfo] = useState(() => detectPwaEnv());
@@ -37,10 +38,10 @@ export default function PushButton({ className = '' }) {
     const updateEnvStatus = () => {
       const freshEnv = detectPwaEnv();
       setEnvInfo(freshEnv);
-      const nonPwa = freshEnv.isIos && !freshEnv.isStandalone;
+      const nonPwa = freshEnv.isIos && !freshEnv.isStandalone && !freshEnv.probableStandalone;
       setIsIosNonPwa(nonPwa);
 
-      if (freshEnv.isStandalone || freshEnv.notificationPermission === 'granted') {
+      if (freshEnv.isStandalone || freshEnv.probableStandalone || freshEnv.notificationPermission === 'granted') {
         setShowIosPushHint(false);
       }
     };
@@ -76,7 +77,6 @@ export default function PushButton({ className = '' }) {
             setShowIosPushHint(false);
             clientLog('mount', { state: 'enabled', endpointPrefix: sub.endpoint.slice(0, 40) });
           } else {
-            // Check if user previously had permission granted
             if (Notification.permission === 'granted') {
               setPushState('orphan');
               clientLog('orphan_subscription_detected', {
@@ -129,6 +129,25 @@ export default function PushButton({ className = '' }) {
     }
   };
 
+  const handleSendTestPush = async () => {
+    if (testingPush) return;
+    setTestingPush(true);
+    clientLog('send_test_push_click');
+    try {
+      const res = await fetch('/api/push/test', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        alert(`✅ Тестовое push-уведомление отправлено! (${data.subscriptions || 1} подписка(и))`);
+      } else {
+        alert(`⚠️ Ошибка отправки тестового push: ${data.error || 'Подписка не найдена или протухла'}`);
+      }
+    } catch (e) {
+      alert(`Ошибка при отправке теста: ${e.message}`);
+    } finally {
+      setTestingPush(false);
+    }
+  };
+
   const handleReSubscribe = async () => {
     clientLog('re_subscribe_click');
     try {
@@ -157,15 +176,15 @@ export default function PushButton({ className = '' }) {
     setEnvInfo(freshEnv);
     clientLog('toggle_click', { pushState, forceReSubscribe, freshEnv });
 
-    // Mark push flow as active so ServiceWorkerRegister defers reloading page during setup
     sessionStorage.setItem('push_flow_active', '1');
 
-    // iOS non-PWA check prior to requesting subscription
-    if (freshEnv.isIos && !freshEnv.isStandalone && Notification.permission !== 'granted') {
+    // Instruction gate condition: iOS non-PWA and not probableStandalone
+    if (freshEnv.isIos && !freshEnv.isStandalone && !freshEnv.probableStandalone && Notification.permission !== 'granted') {
       clientLog('ios_gate_shown', {
         reason: 'click_recheck_not_standalone',
         evidence: {
           displayMode: freshEnv.displayMode,
+          probableStandalone: freshEnv.probableStandalone,
           notificationApiAvailable: freshEnv.notificationApiAvailable,
           standaloneNavigator: typeof navigator !== 'undefined' ? navigator.standalone : undefined,
         },
@@ -230,11 +249,6 @@ export default function PushButton({ className = '' }) {
           hasController: Boolean(navigator.serviceWorker.controller),
         });
 
-        if (reg.pushManager.permissionState) {
-          const pmState = await reg.pushManager.permissionState({ userVisibleOnly: true }).catch(() => 'unknown');
-          clientLog('permission_state', { pmState });
-        }
-
         let sub = null;
         try {
           sub = await reg.pushManager.subscribe({
@@ -246,39 +260,19 @@ export default function PushButton({ className = '' }) {
           const recheckEnv = detectPwaEnv();
 
           if (subErr.name === 'NotAllowedError') {
-            if (recheckEnv.isIos && !recheckEnv.isStandalone && Notification.permission !== 'granted') {
-              clientLog('ios_gate_shown', {
-                reason: 'subscribe_error_not_allowed_non_pwa',
-                evidence: {
-                  displayMode: recheckEnv.displayMode,
-                  notificationApiAvailable: recheckEnv.notificationApiAvailable,
-                  standaloneNavigator: typeof navigator !== 'undefined' ? navigator.standalone : undefined,
-                },
-              });
+            if (recheckEnv.isIos && !recheckEnv.isStandalone && !recheckEnv.probableStandalone && Notification.permission !== 'granted') {
               setShowIosPushHint(true);
               alert(IOS_NON_PWA_ALERT_MSG);
             } else {
-              clientLog('subscribe_error_not_allowed_standalone');
-              alert('iOS отклонила подписку на push-уведомления. Пожалуйста, проверьте в Настройки iPhone -> Уведомления -> Anemon Agro, что уведомления разрешены, и попробуйте ещё раз.\n\n💡 Если на экране несколько иконок приложения — удалите дубликаты.');
+              alert('iOS отклонила подписку на push-уведомления. Пожалуйста, проверьте в Настройки iPhone -> Уведомления -> Anemon Agro, что уведомления разрешены.');
             }
-          } else if (subErr.name === 'AbortError' || subErr.name === 'NotSupportedError' || subErr.name === 'InvalidStateError') {
-            alert(`Не удалось оформить подписку (${subErr.name}: ${subErr.message || 'Ошибка браузера'}). Перезапустите приложение и попробуйте снова.`);
           } else {
-            alert(`Ошибка при настройке уведомлений: ${subErr.message || subErr.name || 'Ошибка push-сервиса'}. Подождите пару секунд и повторите попытку.`);
+            alert(`Ошибка при настройке уведомлений: ${subErr.message || subErr.name || 'Ошибка push-сервиса'}.`);
           }
 
           setPushLoading(false);
           return;
         }
-
-        // Re-verify subscription from PushManager to confirm endpoint match
-        const confirmedSub = await reg.pushManager.getSubscription().catch(() => null);
-        clientLog('get_subscription_confirmed', {
-          matched: confirmedSub && confirmedSub.endpoint === sub.endpoint,
-          endpointPrefix: sub.endpoint.slice(0, 40),
-        });
-
-        clientLog('subscribe_success', { endpointPrefix: sub.endpoint.slice(0, 40) });
 
         const subRes = await fetch('/api/push/subscribe', {
           method: 'POST',
@@ -294,8 +288,6 @@ export default function PushButton({ className = '' }) {
           setPushLoading(false);
           return;
         }
-
-        clientLog('server_subscribe_ok', { subData });
 
         setPushState('enabled');
         setShowIosPushHint(false);
@@ -342,9 +334,6 @@ export default function PushButton({ className = '' }) {
             <div className="mt-1.5 text-[10px] text-emerald-800 font-medium">
               💡 Если на Домашнем экране несколько иконок — удалите все старые и откройте с последней.
             </div>
-            <div className="mt-1 text-[9px] font-mono text-slate-500">
-              Окружение: mode={envInfo.displayMode}, perm={envInfo.notificationPermission}, api={envInfo.notificationApiAvailable ? 'yes' : 'no'}
-            </div>
           </div>
           <button onClick={() => setShowIosPushHint(false)} className="text-slate-900 font-bold ml-2 text-sm p-1">✕</button>
         </div>
@@ -352,15 +341,26 @@ export default function PushButton({ className = '' }) {
 
       <div className="flex items-center gap-1.5 flex-wrap">
         {pushState === 'enabled' ? (
-          <button
-            type="button"
-            onClick={() => handleTogglePush(false)}
-            disabled={pushLoading}
-            className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-            title={`Нажмите, чтобы отключить push-уведомления (${statusSelfTestStr})`}
-          >
-            🔔 {pushLoading ? '...' : 'Уведомления вкл'}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => handleTogglePush(false)}
+              disabled={pushLoading}
+              className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
+              title={`Нажмите, чтобы отключить push-уведомления (${statusSelfTestStr})`}
+            >
+              🔔 {pushLoading ? '...' : 'Уведомления вкл'}
+            </button>
+            <button
+              type="button"
+              onClick={handleSendTestPush}
+              disabled={testingPush}
+              className="flex items-center gap-1 bg-sky-700 hover:bg-sky-600 text-white font-medium rounded-lg px-2 py-1 transition-all whitespace-nowrap text-xs"
+              title="Отправить тестовое push-уведомление на это устройство"
+            >
+              🧪 {testingPush ? '...' : 'Отправить тест'}
+            </button>
+          </>
         ) : pushState === 'orphan' ? (
           <button
             type="button"
@@ -428,10 +428,6 @@ export default function PushButton({ className = '' }) {
           </div>
         </div>
       )}
-
-      <span className="text-[9px] text-slate-400 font-mono hidden sm:inline opacity-70">
-        {statusSelfTestStr}
-      </span>
     </div>
   );
 }
