@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { CLIENT_VERSION } from '@/lib/pwa-env';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,11 +46,19 @@ export async function GET(req) {
       where.event = eventFilter;
     }
 
-    const logs = await prisma.clientPushLog.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
+    let logs = [];
+    let dbWarning = null;
+
+    try {
+      logs = await prisma.clientPushLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
+    } catch (dbErr) {
+      console.error('[GET /api/push/logs] Database query failed:', dbErr.message);
+      dbWarning = 'Table ClientPushLog might be missing in database. Run prisma db push/migrate.';
+    }
 
     // Compute user telemetry summary
     let lastClientVersion = null;
@@ -77,8 +86,12 @@ export async function GET(req) {
       }
     }
 
+    const staleClientDetected = Boolean(lastClientVersion && lastClientVersion !== CLIENT_VERSION);
+
     const summary = {
+      latestServerBuildVersion: CLIENT_VERSION,
       lastClientVersion,
+      staleClientDetected,
       lastDisplayMode,
       lastNotifPermission,
       iosGateShownRecently,
@@ -89,12 +102,13 @@ export async function GET(req) {
       const textLines = [
         `=== CLIENT PUSH LOGS SUMMARY ===`,
         `Count: ${logs.length}`,
-        `Summary: Version=${lastClientVersion}, Mode=${lastDisplayMode}, Perm=${lastNotifPermission}, IosGateRecent=${iosGateShownRecently}`,
+        `Warning: ${dbWarning || 'none'}`,
+        `Summary: Version=${lastClientVersion} (stale:${staleClientDetected}), ServerVersion=${CLIENT_VERSION}, Mode=${lastDisplayMode}, Perm=${lastNotifPermission}, IosGateRecent=${iosGateShownRecently}`,
         `LastSubscribeError: ${lastSubscribeError || 'none'}`,
         `=================================`,
         ...logs.map(
           (l) =>
-            `[${l.createdAt.toISOString()}] [${l.userId || 'anon'}] [${l.event}] ver:${l.clientVersion || ''} ${JSON.stringify(
+            `[${l.createdAt ? new Date(l.createdAt).toISOString() : ''}] [${l.userId || 'anon'}] [${l.event}] ver:${l.clientVersion || ''} ${JSON.stringify(
               l.payload || {}
             )}`
         ),
@@ -106,6 +120,7 @@ export async function GET(req) {
 
     return NextResponse.json({
       count: logs.length,
+      warning: dbWarning,
       queryUserId: where.userId || 'all',
       summary,
       logs,

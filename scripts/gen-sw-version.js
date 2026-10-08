@@ -1,13 +1,29 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const pkgPath = path.join(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 
 const version = pkg.version || '1.0.0';
 const todayCode = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-const swCacheName = `anemon-agro-v${version}-${todayCode}`;
-const clientVersion = `v${version}-${todayCode}`;
+
+let gitSha = '';
+try {
+  gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+} catch (e) {
+  gitSha = process.env.COMMIT_REF
+    || process.env.VERCEL_GIT_COMMIT_SHA
+    || process.env.NETLIFY_BUILD_ID
+    || Date.now().toString(36).slice(-6);
+}
+
+if (!gitSha) {
+  gitSha = 'dev';
+}
+
+const swCacheName = `anemon-agro-v${version}-${todayCode}-${gitSha}`;
+const clientVersion = `v${version}-${todayCode}-${gitSha}`;
 
 // 1. Generate lib/swVersion.generated.js
 const generatedJsContent = `// Auto-generated build version file. Do not edit manually.
