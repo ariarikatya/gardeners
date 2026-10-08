@@ -19,6 +19,10 @@ export async function GET(req) {
   try {
     const userAgent = req.headers.get('user-agent') || '';
     const referer = req.headers.get('referer') || '';
+    const { searchParams } = new URL(req.url);
+    const clientVersionQuery = searchParams.get('clientVersion') || req.headers.get('x-client-version') || '';
+
+    const expectedClientMismatch = Boolean(clientVersionQuery && clientVersionQuery !== CLIENT_VERSION);
 
     const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
     const privateKey = process.env.VAPID_PRIVATE_KEY;
@@ -119,7 +123,10 @@ export async function GET(req) {
     }
 
     return NextResponse.json({
+      latestServerBuildVersion: CLIENT_VERSION,
       serverClientVersion: CLIENT_VERSION,
+      providedClientVersion: clientVersionQuery || 'none',
+      expectedClientMismatch,
       swCacheName: GENERATED_SW_CACHE_NAME,
       clearCachesSnippet: "if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(r => r?.active?.postMessage({type:'CLEAR_ALL_CACHES'})); caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).then(() => location.reload());",
       requestInfo: {
