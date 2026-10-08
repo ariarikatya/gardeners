@@ -3,6 +3,7 @@ import webpush from 'web-push';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
+import { GENERATED_SW_CACHE_NAME } from '@/lib/swVersion.generated';
 
 export const dynamic = 'force-dynamic';
 
@@ -119,7 +120,7 @@ export async function GET(req) {
 
     return NextResponse.json({
       serverClientVersion: CLIENT_VERSION,
-      swCacheName: 'anemon-agro-v8',
+      swCacheName: GENERATED_SW_CACHE_NAME,
       clearCachesSnippet: "if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(r => r?.active?.postMessage({type:'CLEAR_ALL_CACHES'})); caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).then(() => location.reload());",
       requestInfo: {
         userAgent,

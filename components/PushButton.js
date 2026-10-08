@@ -24,7 +24,7 @@ const IOS_NON_PWA_ALERT_MSG =
   '💡 Важно: если на Домашнем экране несколько иконок Анемон Агро — удалите все старые и откройте приложение по последней иконке; настройки уведомлений iOS хранятся отдельно для каждой иконки.';
 
 export default function PushButton({ className = '' }) {
-  const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'unsupported'
+  const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'orphan' | 'unsupported'
   const [pushLoading, setPushLoading] = useState(false);
   const [showIosPushHint, setShowIosPushHint] = useState(false);
   const [isIosNonPwa, setIsIosNonPwa] = useState(false);
@@ -76,8 +76,17 @@ export default function PushButton({ className = '' }) {
             setShowIosPushHint(false);
             clientLog('mount', { state: 'enabled', endpointPrefix: sub.endpoint.slice(0, 40) });
           } else {
-            setPushState('disabled');
-            clientLog('mount', { state: 'disabled' });
+            // Check if user previously had permission granted
+            if (Notification.permission === 'granted') {
+              setPushState('orphan');
+              clientLog('orphan_subscription_detected', {
+                notifPerm: Notification.permission,
+                displayMode: envInfo.displayMode,
+              });
+            } else {
+              setPushState('disabled');
+              clientLog('mount', { state: 'disabled' });
+            }
           }
         } catch (err) {
           console.error('[PushButton] Error checking push subscription:', err);
@@ -122,6 +131,21 @@ export default function PushButton({ className = '' }) {
 
   const handleReSubscribe = async () => {
     clientLog('re_subscribe_click');
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const oldSub = await reg.pushManager.getSubscription();
+      if (oldSub) {
+        await fetch('/api/push/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: oldSub.endpoint }),
+        }).catch(() => {});
+        await oldSub.unsubscribe().catch(() => {});
+        clientLog('re_subscribe_unsubscribed_old', { oldEndpointPrefix: oldSub.endpoint.slice(0, 40) });
+      }
+    } catch (e) {
+      console.warn('Re-subscribe unsubscribe old error:', e);
+    }
     setPushState('disabled');
     await handleTogglePush(true);
   };
@@ -301,7 +325,7 @@ export default function PushButton({ className = '' }) {
 
   if (pushState === 'unsupported') return null;
 
-  const statusSelfTestStr = `${CLIENT_VERSION} | mode: ${envInfo.displayMode} | perm: ${envInfo.notificationPermission} | sub: ${pushState === 'enabled' ? 'yes' : 'no'}`;
+  const statusSelfTestStr = `${CLIENT_VERSION} | mode: ${envInfo.displayMode} | perm: ${envInfo.notificationPermission} | sub: ${pushState === 'enabled' ? 'yes' : pushState === 'orphan' ? 'lost' : 'no'}`;
 
   return (
     <div className="inline-flex flex-col items-start gap-1">
@@ -336,6 +360,16 @@ export default function PushButton({ className = '' }) {
             title={`Нажмите, чтобы отключить push-уведомления (${statusSelfTestStr})`}
           >
             🔔 {pushLoading ? '...' : 'Уведомления вкл'}
+          </button>
+        ) : pushState === 'orphan' ? (
+          <button
+            type="button"
+            onClick={handleReSubscribe}
+            disabled={pushLoading}
+            className={className || "flex items-center gap-1.5 bg-amber-700 hover:bg-amber-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
+            title={`Подписка на устройстве не найдена, разрешите заново (${statusSelfTestStr})`}
+          >
+            ⚠️ {pushLoading ? '...' : 'Восстановить подписку'}
           </button>
         ) : pushState === 'denied' ? (
           <button
@@ -374,7 +408,7 @@ export default function PushButton({ className = '' }) {
             {statusSelfTestStr}
           </div>
           <div className="flex gap-2 pt-1">
-            {pushState === 'enabled' && (
+            {(pushState === 'enabled' || pushState === 'orphan') && (
               <button
                 type="button"
                 onClick={handleReSubscribe}
