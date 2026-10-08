@@ -120,6 +120,7 @@ export async function GET(req) {
     return NextResponse.json({
       serverClientVersion: CLIENT_VERSION,
       swCacheName: 'anemon-agro-v8',
+      clearCachesSnippet: "if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(r => r?.active?.postMessage({type:'CLEAR_ALL_CACHES'})); caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))).then(() => location.reload());",
       requestInfo: {
         userAgent,
         referer,

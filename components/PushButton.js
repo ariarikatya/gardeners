@@ -28,14 +28,15 @@ export default function PushButton({ className = '' }) {
   const [pushLoading, setPushLoading] = useState(false);
   const [showIosPushHint, setShowIosPushHint] = useState(false);
   const [isIosNonPwa, setIsIosNonPwa] = useState(false);
+  const [envInfo, setEnvInfo] = useState(() => detectPwaEnv());
+  const [showTools, setShowTools] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const env = detectPwaEnv();
-
     const updateEnvStatus = () => {
       const freshEnv = detectPwaEnv();
+      setEnvInfo(freshEnv);
       const nonPwa = freshEnv.isIos && !freshEnv.isStandalone;
       setIsIosNonPwa(nonPwa);
 
@@ -96,18 +97,55 @@ export default function PushButton({ className = '' }) {
     };
   }, []);
 
-  const handleTogglePush = async () => {
+  const handleClearAllCaches = async () => {
+    clientLog('clear_caches_click');
+    try {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        const activeSw = reg?.active || reg?.waiting || reg?.installing;
+        if (activeSw) {
+          activeSw.postMessage({ type: 'CLEAR_ALL_CACHES' });
+          clientLog('clear_caches_sent');
+        }
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      alert('✅ Кэш приложения сброшен. Страница будет обновлена.');
+      window.location.reload();
+    } catch (e) {
+      console.error('Failed to clear cache:', e);
+      alert('Ошибка при сбросе кэша: ' + e.message);
+    }
+  };
+
+  const handleReSubscribe = async () => {
+    clientLog('re_subscribe_click');
+    setPushState('disabled');
+    await handleTogglePush(true);
+  };
+
+  const handleTogglePush = async (forceReSubscribe = false) => {
     if (pushLoading) return;
 
     const freshEnv = detectPwaEnv();
-    clientLog('toggle_click', { pushState, freshEnv });
+    setEnvInfo(freshEnv);
+    clientLog('toggle_click', { pushState, forceReSubscribe, freshEnv });
 
     // Mark push flow as active so ServiceWorkerRegister defers reloading page during setup
     sessionStorage.setItem('push_flow_active', '1');
 
     // iOS non-PWA check prior to requesting subscription
     if (freshEnv.isIos && !freshEnv.isStandalone && Notification.permission !== 'granted') {
-      clientLog('ios_gate_shown', { reason: 'click_recheck_not_standalone' });
+      clientLog('ios_gate_shown', {
+        reason: 'click_recheck_not_standalone',
+        evidence: {
+          displayMode: freshEnv.displayMode,
+          notificationApiAvailable: freshEnv.notificationApiAvailable,
+          standaloneNavigator: typeof navigator !== 'undefined' ? navigator.standalone : undefined,
+        },
+      });
       setShowIosPushHint(true);
       alert(IOS_NON_PWA_ALERT_MSG);
       sessionStorage.removeItem('push_flow_active');
@@ -119,7 +157,7 @@ export default function PushButton({ className = '' }) {
     setPushLoading(true);
 
     try {
-      if (pushState === 'enabled') {
+      if (pushState === 'enabled' && !forceReSubscribe) {
         clientLog('unsubscribe_start');
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
@@ -134,9 +172,11 @@ export default function PushButton({ className = '' }) {
         setPushState('disabled');
         clientLog('unsubscribe_success');
       } else {
-        clientLog('permission_requested');
+        const permBefore = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+        clientLog('permission_before', { permBefore });
+
         const permission = await Notification.requestPermission();
-        clientLog('permission_result', { permission });
+        clientLog('permission_result', { permBefore, permissionResult: permission });
 
         if (permission === 'denied') {
           setPushState('denied');
@@ -183,7 +223,14 @@ export default function PushButton({ className = '' }) {
 
           if (subErr.name === 'NotAllowedError') {
             if (recheckEnv.isIos && !recheckEnv.isStandalone && Notification.permission !== 'granted') {
-              clientLog('ios_gate_shown', { reason: 'subscribe_error_not_allowed_non_pwa' });
+              clientLog('ios_gate_shown', {
+                reason: 'subscribe_error_not_allowed_non_pwa',
+                evidence: {
+                  displayMode: recheckEnv.displayMode,
+                  notificationApiAvailable: recheckEnv.notificationApiAvailable,
+                  standaloneNavigator: typeof navigator !== 'undefined' ? navigator.standalone : undefined,
+                },
+              });
               setShowIosPushHint(true);
               alert(IOS_NON_PWA_ALERT_MSG);
             } else {
@@ -199,6 +246,13 @@ export default function PushButton({ className = '' }) {
           setPushLoading(false);
           return;
         }
+
+        // Re-verify subscription from PushManager to confirm endpoint match
+        const confirmedSub = await reg.pushManager.getSubscription().catch(() => null);
+        clientLog('get_subscription_confirmed', {
+          matched: confirmedSub && confirmedSub.endpoint === sub.endpoint,
+          endpointPrefix: sub.endpoint.slice(0, 40),
+        });
 
         clientLog('subscribe_success', { endpointPrefix: sub.endpoint.slice(0, 40) });
 
@@ -247,8 +301,10 @@ export default function PushButton({ className = '' }) {
 
   if (pushState === 'unsupported') return null;
 
+  const statusSelfTestStr = `${CLIENT_VERSION} | mode: ${envInfo.displayMode} | perm: ${envInfo.notificationPermission} | sub: ${pushState === 'enabled' ? 'yes' : 'no'}`;
+
   return (
-    <>
+    <div className="inline-flex flex-col items-start gap-1">
       {showIosPushHint && (
         <div className="fixed top-2 left-2 right-2 z-50 bg-emerald-50 border border-emerald-300 text-slate-900 px-3.5 py-2.5 rounded-xl text-xs flex justify-between items-start shadow-xl">
           <div className="leading-relaxed">
@@ -262,44 +318,86 @@ export default function PushButton({ className = '' }) {
             <div className="mt-1.5 text-[10px] text-emerald-800 font-medium">
               💡 Если на Домашнем экране несколько иконок — удалите все старые и откройте с последней.
             </div>
+            <div className="mt-1 text-[9px] font-mono text-slate-500">
+              Окружение: mode={envInfo.displayMode}, perm={envInfo.notificationPermission}, api={envInfo.notificationApiAvailable ? 'yes' : 'no'}
+            </div>
           </div>
           <button onClick={() => setShowIosPushHint(false)} className="text-slate-900 font-bold ml-2 text-sm p-1">✕</button>
         </div>
       )}
 
-      {pushState === 'enabled' ? (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {pushState === 'enabled' ? (
+          <button
+            type="button"
+            onClick={() => handleTogglePush(false)}
+            disabled={pushLoading}
+            className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
+            title={`Нажмите, чтобы отключить push-уведомления (${statusSelfTestStr})`}
+          >
+            🔔 {pushLoading ? '...' : 'Уведомления вкл'}
+          </button>
+        ) : pushState === 'denied' ? (
+          <button
+            type="button"
+            onClick={() => alert('Уведомления заблокированы браузером. Разрешите их в настройках сайта.')}
+            className={className || "flex items-center gap-1.5 bg-rose-700 hover:bg-rose-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
+            title={`Разрешите уведомления в настройках сайта (${statusSelfTestStr})`}
+          >
+            🔕 Разрешите уведомления
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleTogglePush(false)}
+            disabled={pushLoading || pushState === 'loading'}
+            className={className || "flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
+            title={isIosNonPwa ? `Добавьте приложение на экран Домой на iPhone (${statusSelfTestStr})` : statusSelfTestStr}
+          >
+            🔔 {pushLoading ? '...' : 'Включить уведомления'}
+          </button>
+        )}
+
         <button
           type="button"
-          onClick={handleTogglePush}
-          disabled={pushLoading}
-          className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-          title={`Нажмите, чтобы отключить push-уведомления (версия ${CLIENT_VERSION})`}
+          onClick={() => setShowTools(!showTools)}
+          className="text-[10px] text-slate-400 hover:text-slate-200 px-1 py-0.5 rounded border border-slate-700/50"
+          title="Сведения о системе и инструменты"
         >
-          🔔 {pushLoading ? '...' : 'Уведомления вкл'}
-          <span className="opacity-40 text-[9px] font-mono font-normal hidden sm:inline ml-0.5">({CLIENT_VERSION})</span>
+          ℹ️
         </button>
-      ) : pushState === 'denied' ? (
-        <button
-          type="button"
-          onClick={() => alert('Уведомления заблокированы браузером. Разрешите их в настройках сайта.')}
-          className={className || "flex items-center gap-1.5 bg-rose-700 hover:bg-rose-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-          title={`Разрешите уведомления в настройках сайта (версия ${CLIENT_VERSION})`}
-        >
-          🔕 Разрешите уведомления
-          <span className="opacity-40 text-[9px] font-mono font-normal hidden sm:inline ml-0.5">({CLIENT_VERSION})</span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={handleTogglePush}
-          disabled={pushLoading || pushState === 'loading'}
-          className={className || "flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-          title={isIosNonPwa ? `Добавьте приложение на экран Домой на iPhone (${CLIENT_VERSION})` : `Версия ${CLIENT_VERSION}`}
-        >
-          🔔 {pushLoading ? '...' : 'Включить уведомления'}
-          <span className="opacity-40 text-[9px] font-mono font-normal hidden sm:inline ml-0.5">({CLIENT_VERSION})</span>
-        </button>
+      </div>
+
+      {showTools && (
+        <div className="bg-slate-900 text-slate-200 border border-slate-700 p-2 rounded-lg text-[10px] space-y-1 z-40 max-w-xs shadow-lg font-mono">
+          <div className="text-[9px] text-slate-400 border-b border-slate-800 pb-1">
+            {statusSelfTestStr}
+          </div>
+          <div className="flex gap-2 pt-1">
+            {pushState === 'enabled' && (
+              <button
+                type="button"
+                onClick={handleReSubscribe}
+                disabled={pushLoading}
+                className="bg-emerald-800 hover:bg-emerald-700 text-white px-2 py-0.5 rounded text-[10px]"
+              >
+                🔄 Перепроверить
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleClearAllCaches}
+              className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-0.5 rounded text-[10px]"
+            >
+              🗑️ Сбросить кэш
+            </button>
+          </div>
+        </div>
       )}
-    </>
+
+      <span className="text-[9px] text-slate-400 font-mono hidden sm:inline opacity-70">
+        {statusSelfTestStr}
+      </span>
+    </div>
   );
 }
