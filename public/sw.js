@@ -19,10 +19,21 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// === MESSAGE: ручное обновление ===
+// === MESSAGE: ручное обновление или сброс кэша ===
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+  } else if (event.data && event.data.type === 'CLEAR_ALL_CACHES') {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(async () => {
+        const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const client of clientList) {
+          if ('navigate' in client) {
+            client.navigate(client.url);
+          }
+        }
+      })
+    );
   }
 });
 
