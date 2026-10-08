@@ -203,7 +203,7 @@ export async function PUT(req) {
       }
     }
   } catch (e) {
-    console.error('Failed updating amo lead on gardener action:', e.message);
+    console.error('[external-amocrm] Failed updating amo lead on gardener action:', e.message);
   }
 
   const responseBody = { order: updated };

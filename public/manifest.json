@@ -1,8 +1,10 @@
 {
+  "id": "/",
   "name": "Анемон Агро — Диспетчерская",
   "short_name": "Анемон Агро",
   "description": "Система управления заказами садовников",
   "start_url": "/login",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#4a5926",
