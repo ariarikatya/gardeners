@@ -16,7 +16,7 @@ export async function GET(req) {
 
     return NextResponse.json({ connected });
   } catch (err) {
-    console.error('Ошибка проверки amo-status:', err);
+    console.error('[external-amocrm] amo-status check failed:', err);
     return NextResponse.json({ connected: false });
   }
 }

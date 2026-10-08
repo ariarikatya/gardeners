@@ -81,7 +81,7 @@ export async function DELETE(req) {
         );
         console.log('✅ [DELETE WEBLEAD] Статус сделки в amoCRM успешно изменен на отказной');
       } catch (err) {
-        console.error('❌ [DELETE WEBLEAD] Ошибка при изменении статуса в amoCRM:', err.message, err.body || err);
+        console.error('❌ [external-amocrm][DELETE WEBLEAD] Ошибка при изменении статуса в amoCRM:', err.message, err.body || err);
       }
     } else {
       console.log('⚠️ [DELETE WEBLEAD] amoDealId не указан, пропускаем обновление в amoCRM');

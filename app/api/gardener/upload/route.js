@@ -89,7 +89,7 @@ export async function POST(req) {
       waitUntil(drainTask);
     } catch (err) {
       // Запасной вариант вне Vercel
-      drainTask.catch(e => console.error('[Yandex.Disk Drain Error]:', e));
+      drainTask.catch(e => console.error('[external-yadisk] drainQueue error:', e));
     }
 
     return NextResponse.json({
