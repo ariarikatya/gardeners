@@ -2,11 +2,23 @@ import { NextResponse } from 'next/server';
 import webpush from 'web-push';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { CLIENT_VERSION } from '@/lib/pwa-env';
 
 export const dynamic = 'force-dynamic';
 
+function classifyEndpoint(endpoint = '') {
+  if (endpoint.includes('apple.com')) return 'apple';
+  if (endpoint.includes('googleapis.com') || endpoint.includes('fcm')) return 'fcm';
+  if (endpoint.includes('mozilla.com')) return 'mozilla';
+  if (endpoint.includes('microsoft.com')) return 'microsoft';
+  return 'other';
+}
+
 export async function GET(req) {
   try {
+    const userAgent = req.headers.get('user-agent') || '';
+    const referer = req.headers.get('referer') || '';
+
     const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
     const privateKey = process.env.VAPID_PRIVATE_KEY;
     const subject = process.env.VAPID_SUBJECT || 'mailto:admin@example.com';
@@ -51,12 +63,15 @@ export async function GET(req) {
       const u = sub.userId ? userMap.get(sub.userId) : null;
       return {
         id: sub.id,
+        provider: classifyEndpoint(sub.endpoint),
         endpointPrefix: sub.endpoint ? sub.endpoint.slice(0, 60) : '',
         userId: sub.userId,
         user: u ? `${u.phone} (${u.role})` : sub.userId ? `ID: ${sub.userId} (не найден)` : 'НЕ ПРИВЯЗАНА',
         createdAt: sub.createdAt,
       };
     });
+
+    const mySubs = me ? formattedSubs.filter((s) => s.userId === me.id) : [];
 
     let testSendResults = [];
     if (publicKeySet && privateKeySet && allSubs.length > 0) {
@@ -81,6 +96,7 @@ export async function GET(req) {
             const res = await webpush.sendNotification(pushSubscription, payload);
             return {
               endpointPrefix: sub.endpoint.slice(0, 60),
+              provider: classifyEndpoint(sub.endpoint),
               statusCode: res.statusCode,
               success: true,
             };
@@ -91,6 +107,7 @@ export async function GET(req) {
             }
             return {
               endpointPrefix: sub.endpoint.slice(0, 60),
+              provider: classifyEndpoint(sub.endpoint),
               statusCode,
               error: err.message,
               success: false,
@@ -101,9 +118,16 @@ export async function GET(req) {
     }
 
     return NextResponse.json({
+      serverClientVersion: CLIENT_VERSION,
+      requestInfo: {
+        userAgent,
+        referer,
+      },
       publicKeySet,
       privateKeySet,
       me,
+      mySubscriptionsCount: mySubs.length,
+      totalSubscriptionsCount: formattedSubs.length,
       subscriptions: formattedSubs,
       testSend: testSendResults,
     });

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { detectPwaEnv, subscribeToDisplayModeChange, CLIENT_VERSION } from '@/lib/pwa-env';
+import { clientLog } from '@/lib/clientLog';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -22,81 +24,91 @@ export default function PushButton({ className = '' }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const checkIsIosNonPwa = () => {
-      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const isStandalone = Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
-      return isIos && !isStandalone;
-    };
+    const env = detectPwaEnv();
 
-    if (checkIsIosNonPwa()) {
-      setIsIosNonPwa(true);
-      setShowIosPushHint(true);
-    } else {
-      setIsIosNonPwa(false);
-    }
+    const updateEnvStatus = () => {
+      const freshEnv = detectPwaEnv();
+      const nonPwa = freshEnv.isIos && !freshEnv.isStandalone;
+      setIsIosNonPwa(nonPwa);
 
-    const updateIosStatus = () => {
-      if (!checkIsIosNonPwa()) {
-        setIsIosNonPwa(false);
+      if (freshEnv.isStandalone || freshEnv.notificationPermission === 'granted') {
+        setShowIosPushHint(false);
       }
     };
 
-    window.addEventListener('focus', updateIosStatus);
-    document.addEventListener('visibilitychange', updateIosStatus);
+    updateEnvStatus();
+
+    const unsubscribeMq = subscribeToDisplayModeChange(() => {
+      updateEnvStatus();
+    });
+
+    window.addEventListener('focus', updateEnvStatus);
+    document.addEventListener('visibilitychange', updateEnvStatus);
 
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushState('unsupported');
+      clientLog('mount', { state: 'unsupported' });
       return () => {
-        window.removeEventListener('focus', updateIosStatus);
-        document.removeEventListener('visibilitychange', updateIosStatus);
+        unsubscribeMq();
+        window.removeEventListener('focus', updateEnvStatus);
+        document.removeEventListener('visibilitychange', updateEnvStatus);
       };
     }
 
     if (Notification.permission === 'denied') {
       setPushState('denied');
+      clientLog('mount', { state: 'denied' });
     } else {
       navigator.serviceWorker.ready.then(async (reg) => {
         try {
           const sub = await reg.pushManager.getSubscription();
           if (sub) {
             setPushState('enabled');
+            setShowIosPushHint(false);
+            clientLog('mount', { state: 'enabled', endpointPrefix: sub.endpoint.slice(0, 40) });
           } else {
             setPushState('disabled');
+            clientLog('mount', { state: 'disabled' });
           }
         } catch (err) {
           console.error('[PushButton] Error checking push subscription:', err);
           setPushState('disabled');
+          clientLog('mount', { state: 'disabled', checkError: err.message });
         }
-      }).catch(() => {
+      }).catch((swErr) => {
         setPushState('disabled');
+        clientLog('mount', { state: 'disabled', swReadyError: swErr?.message });
       });
     }
 
     return () => {
-      window.removeEventListener('focus', updateIosStatus);
-      document.removeEventListener('visibilitychange', updateIosStatus);
+      unsubscribeMq();
+      window.removeEventListener('focus', updateEnvStatus);
+      document.removeEventListener('visibilitychange', updateEnvStatus);
     };
   }, []);
 
   const handleTogglePush = async () => {
     if (pushLoading) return;
 
-    if (isIosNonPwa) {
-      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const isStandalone = Boolean(window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches);
-      if (isIos && !isStandalone) {
-        setShowIosPushHint(true);
-        alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
-        return;
-      } else {
-        setIsIosNonPwa(false);
-      }
+    const freshEnv = detectPwaEnv();
+    clientLog('toggle_click', { pushState, freshEnv });
+
+    // iOS non-PWA check prior to requesting subscription
+    if (freshEnv.isIos && !freshEnv.isStandalone && Notification.permission !== 'granted') {
+      clientLog('ios_gate_shown', { reason: 'click_recheck_not_standalone' });
+      setShowIosPushHint(true);
+      alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+      return;
+    } else {
+      setIsIosNonPwa(false);
     }
 
     setPushLoading(true);
 
     try {
       if (pushState === 'enabled') {
+        clientLog('unsubscribe_start');
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
@@ -108,8 +120,12 @@ export default function PushButton({ className = '' }) {
           await sub.unsubscribe().catch(() => {});
         }
         setPushState('disabled');
+        clientLog('unsubscribe_success');
       } else {
+        clientLog('permission_requested');
         const permission = await Notification.requestPermission();
+        clientLog('permission_result', { permission });
+
         if (permission === 'denied') {
           setPushState('denied');
           alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
@@ -125,12 +141,24 @@ export default function PushButton({ className = '' }) {
         const vapidRes = await fetch('/api/push/vapid-public-key');
         const vapidData = await vapidRes.json();
         if (!vapidData.key) {
+          clientLog('vapid_missing');
           alert('VAPID публичный ключ не настроен на сервере.');
           setPushLoading(false);
           return;
         }
 
         const reg = await navigator.serviceWorker.ready;
+        clientLog('sw_ready', {
+          scope: reg?.scope,
+          activeScript: reg?.active?.scriptURL,
+          hasController: Boolean(navigator.serviceWorker.controller),
+        });
+
+        if (reg.pushManager.permissionState) {
+          const pmState = await reg.pushManager.permissionState({ userVisibleOnly: true }).catch(() => 'unknown');
+          clientLog('permission_state', { pmState });
+        }
+
         let sub = null;
         try {
           sub = await reg.pushManager.subscribe({
@@ -138,29 +166,46 @@ export default function PushButton({ className = '' }) {
             applicationServerKey: urlBase64ToUint8Array(vapidData.key),
           });
         } catch (subErr) {
-          if (subErr.name === 'NotAllowedError' || /internal service error/i.test(subErr.message)) {
-            alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
-            setShowIosPushHint(true);
+          clientLog('subscribe_error', { name: subErr.name, message: subErr.message, stack: subErr.stack });
+          const recheckEnv = detectPwaEnv();
+
+          if (subErr.name === 'NotAllowedError') {
+            if (recheckEnv.isIos && !recheckEnv.isStandalone && Notification.permission !== 'granted') {
+              clientLog('ios_gate_shown', { reason: 'subscribe_error_not_allowed_non_pwa' });
+              setShowIosPushHint(true);
+              alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+            } else {
+              clientLog('subscribe_error_not_allowed_standalone');
+              alert('iOS отклонила подписку на push-уведомления. Пожалуйста, проверьте в Настройки iPhone -> Уведомления -> Anemon Agro, что уведомления разрешены, и попробуйте ещё раз.');
+            }
+          } else if (subErr.name === 'AbortError' || subErr.name === 'NotSupportedError' || subErr.name === 'InvalidStateError') {
+            alert(`Не удалось оформить подписку (${subErr.name}: ${subErr.message || 'Ошибка браузера'}). Перезапустите приложение и попробуйте снова.`);
           } else {
-            alert('Ошибка при подписке: ' + subErr.message);
+            alert(`Ошибка при настройке уведомлений: ${subErr.message || subErr.name || 'Ошибка push-сервиса'}. Подождите пару секунд и повторите попытку.`);
           }
+
           setPushLoading(false);
           return;
         }
 
+        clientLog('subscribe_success', { endpointPrefix: sub.endpoint.slice(0, 40) });
+
         const subRes = await fetch('/api/push/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ subscription: sub.toJSON() }),
+          body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
         });
 
         const subData = await subRes.json().catch(() => ({}));
 
         if (!subRes.ok || subData.ok === false) {
+          clientLog('server_subscribe_fail', { status: subRes.status, subData });
           alert('Ошибка при сохранении подписки на сервере: ' + (subData.error || 'Неизвестная ошибка'));
           setPushLoading(false);
           return;
         }
+
+        clientLog('server_subscribe_ok', { subData });
 
         setPushState('enabled');
         setShowIosPushHint(false);
@@ -179,6 +224,7 @@ export default function PushButton({ className = '' }) {
         }
       }
     } catch (err) {
+      clientLog('toggle_push_uncaught_error', { message: err.message, stack: err.stack });
       console.error('[PushButton] Failed to toggle push notifications:', err);
       alert('Ошибка при настройке уведомлений: ' + err.message);
     } finally {
@@ -211,18 +257,20 @@ export default function PushButton({ className = '' }) {
           onClick={handleTogglePush}
           disabled={pushLoading}
           className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-          title="Нажмите, чтобы отключить push-уведомления"
+          title={`Нажмите, чтобы отключить push-уведомления (версия ${CLIENT_VERSION})`}
         >
           🔔 {pushLoading ? '...' : 'Уведомления вкл'}
+          <span className="opacity-40 text-[9px] font-mono font-normal hidden sm:inline ml-0.5">({CLIENT_VERSION})</span>
         </button>
       ) : pushState === 'denied' ? (
         <button
           type="button"
           onClick={() => alert('Уведомления заблокированы браузером. Разрешите их в настройках сайта.')}
           className={className || "flex items-center gap-1.5 bg-rose-700 hover:bg-rose-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-          title="Разрешите уведомления в настройках сайта"
+          title={`Разрешите уведомления в настройках сайта (версия ${CLIENT_VERSION})`}
         >
           🔕 Разрешите уведомления
+          <span className="opacity-40 text-[9px] font-mono font-normal hidden sm:inline ml-0.5">({CLIENT_VERSION})</span>
         </button>
       ) : (
         <button
@@ -230,9 +278,10 @@ export default function PushButton({ className = '' }) {
           onClick={handleTogglePush}
           disabled={pushLoading || pushState === 'loading'}
           className={className || "flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-          title={isIosNonPwa ? 'Добавьте приложение на экран Домой на iPhone' : undefined}
+          title={isIosNonPwa ? `Добавьте приложение на экран Домой на iPhone (${CLIENT_VERSION})` : `Версия ${CLIENT_VERSION}`}
         >
           🔔 {pushLoading ? '...' : 'Включить уведомления'}
+          <span className="opacity-40 text-[9px] font-mono font-normal hidden sm:inline ml-0.5">({CLIENT_VERSION})</span>
         </button>
       )}
     </>

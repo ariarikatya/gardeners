@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v7';
+const CACHE_NAME = 'anemon-agro-v8';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 // === INSTALL: сразу берём контроль ===
@@ -35,7 +35,6 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
 
   // === НАВИГАЦИЯ (HTML страницы): ТОЛЬКО сеть, без fallback на старый HTML ===
-  // Это главное исправление: больше не будет белого экрана от устаревших страниц
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -60,7 +59,6 @@ self.addEventListener('fetch', (event) => {
           }
           const cachedLogin = await caches.match('/login');
           if (cachedLogin) return cachedLogin;
-          // Иначе — стандартная ошибка сети браузера (НЕ старый мусорный HTML)
           return new Response('Оффлайн. Проверьте подключение к интернету.', {
             status: 503,
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -105,7 +103,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// === PUSH: без изменений ===
+// === PUSH: получение и клик по уведомлениям ===
 self.addEventListener('push', (event) => {
   let data = {};
   if (event.data) {
