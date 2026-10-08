@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261008-07fdaf7';
+const CACHE_NAME = 'anemon-agro-v7';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 // === INSTALL: сразу берём контроль ===
@@ -19,21 +19,10 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// === MESSAGE: ручное обновление или сброс кэша ===
+// === MESSAGE: ручное обновление ===
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
-  } else if (event.data && event.data.type === 'CLEAR_ALL_CACHES') {
-    event.waitUntil(
-      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(async () => {
-        const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-        for (const client of clientList) {
-          if ('navigate' in client) {
-            client.navigate(client.url);
-          }
-        }
-      })
-    );
   }
 });
 
@@ -46,6 +35,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
 
   // === НАВИГАЦИЯ (HTML страницы): ТОЛЬКО сеть, без fallback на старый HTML ===
+  // Это главное исправление: больше не будет белого экрана от устаревших страниц
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -70,6 +60,7 @@ self.addEventListener('fetch', (event) => {
           }
           const cachedLogin = await caches.match('/login');
           if (cachedLogin) return cachedLogin;
+          // Иначе — стандартная ошибка сети браузера (НЕ старый мусорный HTML)
           return new Response('Оффлайн. Проверьте подключение к интернету.', {
             status: 503,
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -114,7 +105,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// === PUSH: получение и клик по уведомлениям ===
+// === PUSH: без изменений ===
 self.addEventListener('push', (event) => {
   let data = {};
   if (event.data) {

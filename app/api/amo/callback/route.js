@@ -28,7 +28,7 @@ export async function GET(req) {
     if (dbSecret && dbSecret.value) clientSecret = dbSecret.value;
     else clientSecret = process.env.AMO_CLIENT_SECRET;
 
-    const redirectUri = 'https://gardeners-agro.netlify.app/api/amo/callback';
+    const redirectUri = 'https://anemonagro.ru/api/amo/callback';
 
     const tokenPayload = {
       client_id: clientId,

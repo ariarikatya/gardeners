@@ -12,7 +12,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-const ADMIN_PANEL_URL = 'https://gardeners-agro.netlify.app/admin';
+const ADMIN_PANEL_URL = 'https://anemonagro.ru/admin';
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: CORS_HEADERS });
@@ -204,7 +204,7 @@ export async function POST(req) {
               client_secret: clientSecret,
               grant_type: 'refresh_token',
               refresh_token: refreshToken,
-              redirect_uri: 'https://gardeners-agro.netlify.app/api/amo/callback'
+              redirect_uri: 'https://anemonagro.ru/api/amo/callback'
             })
           });
 

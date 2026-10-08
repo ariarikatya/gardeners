@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
 export default function AmoConnectPage() {
-  const [siteOrigin, setSiteOrigin] = useState('https://gardeners-agro.netlify.app');
+  const [siteOrigin, setSiteOrigin] = useState('https://anemonagro.ru');
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -24,8 +24,8 @@ export default function AmoConnectPage() {
 
       window.addEventListener('message', handleMessage);
 
-      const redirectUri = "https://gardeners-agro.netlify.app/api/amo/callback";
-      const secretsUri = "https://gardeners-agro.netlify.app/api/amo/secrets";
+      const redirectUri = "https://anemonagro.ru/api/amo/callback";
+      const secretsUri = "https://anemonagro.ru/api/amo/secrets";
 
       const scriptId = 'amocrm_oauth_script';
       if (!document.getElementById(scriptId)) {
@@ -127,8 +127,8 @@ export default function AmoConnectPage() {
                 charset="utf-8"
                 data-name="Садовники"
                 data-description="Интеграция для сайта о заказах садовников"
-                data-redirect_uri="https://gardeners-agro.netlify.app/api/amo/callback"
-                data-secrets_uri="https://gardeners-agro.netlify.app/api/amo/secrets"
+                data-redirect_uri="https://anemonagro.ru/api/amo/callback"
+                data-secrets_uri="https://anemonagro.ru/api/amo/secrets"
                 data-logo={`${siteOrigin}/logo.png`}
                 data-scopes="crm,notifications"
                 data-title="Подключить amoCRM"
