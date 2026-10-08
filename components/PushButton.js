@@ -15,6 +15,14 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+const IOS_NON_PWA_ALERT_MSG =
+  'На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n' +
+  '1) Откройте меню Поделиться (квадрат со стрелкой)\n' +
+  '2) Выберите «На экран „Домой“»\n' +
+  '3) Откройте Anemon Agro с иконки Домашнего экрана\n' +
+  '4) Нажмите «Включить уведомления» здесь ещё раз\n\n' +
+  '💡 Важно: если на Домашнем экране несколько иконок Анемон Агро — удалите все старые и откройте приложение по последней иконке; настройки уведомлений iOS хранятся отдельно для каждой иконки.';
+
 export default function PushButton({ className = '' }) {
   const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'unsupported'
   const [pushLoading, setPushLoading] = useState(false);
@@ -94,11 +102,15 @@ export default function PushButton({ className = '' }) {
     const freshEnv = detectPwaEnv();
     clientLog('toggle_click', { pushState, freshEnv });
 
+    // Mark push flow as active so ServiceWorkerRegister defers reloading page during setup
+    sessionStorage.setItem('push_flow_active', '1');
+
     // iOS non-PWA check prior to requesting subscription
     if (freshEnv.isIos && !freshEnv.isStandalone && Notification.permission !== 'granted') {
       clientLog('ios_gate_shown', { reason: 'click_recheck_not_standalone' });
       setShowIosPushHint(true);
-      alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+      alert(IOS_NON_PWA_ALERT_MSG);
+      sessionStorage.removeItem('push_flow_active');
       return;
     } else {
       setIsIosNonPwa(false);
@@ -173,10 +185,10 @@ export default function PushButton({ className = '' }) {
             if (recheckEnv.isIos && !recheckEnv.isStandalone && Notification.permission !== 'granted') {
               clientLog('ios_gate_shown', { reason: 'subscribe_error_not_allowed_non_pwa' });
               setShowIosPushHint(true);
-              alert('На iPhone уведомления доступны только для приложения, добавленного на домашний экран:\n\n1) Откройте меню Поделиться (квадрат со стрелкой)\n2) Выберите «На экран „Домой“»\n3) Откройте Anemon Agro с иконки Домашнего экрана\n4) Нажмите «Включить уведомления» здесь ещё раз');
+              alert(IOS_NON_PWA_ALERT_MSG);
             } else {
               clientLog('subscribe_error_not_allowed_standalone');
-              alert('iOS отклонила подписку на push-уведомления. Пожалуйста, проверьте в Настройки iPhone -> Уведомления -> Anemon Agro, что уведомления разрешены, и попробуйте ещё раз.');
+              alert('iOS отклонила подписку на push-уведомления. Пожалуйста, проверьте в Настройки iPhone -> Уведомления -> Anemon Agro, что уведомления разрешены, и попробуйте ещё раз.\n\n💡 Если на экране несколько иконок приложения — удалите дубликаты.');
             }
           } else if (subErr.name === 'AbortError' || subErr.name === 'NotSupportedError' || subErr.name === 'InvalidStateError') {
             alert(`Не удалось оформить подписку (${subErr.name}: ${subErr.message || 'Ошибка браузера'}). Перезапустите приложение и попробуйте снова.`);
@@ -228,6 +240,7 @@ export default function PushButton({ className = '' }) {
       console.error('[PushButton] Failed to toggle push notifications:', err);
       alert('Ошибка при настройке уведомлений: ' + err.message);
     } finally {
+      sessionStorage.removeItem('push_flow_active');
       setPushLoading(false);
     }
   };
@@ -246,6 +259,9 @@ export default function PushButton({ className = '' }) {
               <li>Откройте Anemon Agro с иконки Домашнего экрана</li>
               <li>Нажмите «Включить уведомления» здесь ещё раз</li>
             </ol>
+            <div className="mt-1.5 text-[10px] text-emerald-800 font-medium">
+              💡 Если на Домашнем экране несколько иконок — удалите все старые и откройте с последней.
+            </div>
           </div>
           <button onClick={() => setShowIosPushHint(false)} className="text-slate-900 font-bold ml-2 text-sm p-1">✕</button>
         </div>

@@ -119,6 +119,7 @@ export async function GET(req) {
 
     return NextResponse.json({
       serverClientVersion: CLIENT_VERSION,
+      swCacheName: 'anemon-agro-v8',
       requestInfo: {
         userAgent,
         referer,
