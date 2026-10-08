@@ -60,7 +60,7 @@ export default function AmoConnectPage() {
         setConnected(false);
       }
     } catch (e) {
-      console.error(e);
+      console.error('[external-amocrm][amo-connect]', e);
       setConnected(false);
     } finally {
       setLoading(false);
