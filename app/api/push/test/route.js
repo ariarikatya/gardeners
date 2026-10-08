@@ -12,7 +12,7 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, error: 'Нет cookie авторизации' }, { status: 401 });
     }
 
-    const payload = await verifyToken(token);
+    const payload = await verifyToken(token).catch(() => null);
     const userId = payload?.userId || payload?.id;
 
     if (!userId) {
@@ -24,25 +24,40 @@ export async function POST(req) {
     });
 
     if (count === 0) {
-      return NextResponse.json({ ok: false, error: 'У вашего аккаунта нет сохранённых подписок (userId не привязан)' }, { status: 404 });
+      return NextResponse.json({
+        ok: false,
+        statusCode: 404,
+        expired: true,
+        error: 'У вашего аккаунта нет сохранённых подписок (userId не привязан)',
+        subscriptions: 0,
+      }, { status: 404 });
     }
 
-    (async () => {
-      try {
-        await sendToUser(userId, {
-          title: '🔔 Проверка уведомлений',
-          body: `Канал работает! Подписок у аккаунта: ${count}`,
-          tag: 'push-test',
-          url: payload.role === 'GARDENER' ? '/gardener' : '/admin',
-        });
-      } catch (err) {
-        console.error('Error in sendToUser test push:', err);
-      }
-    })();
+    const result = await sendToUser(userId, {
+      title: '🔔 Проверка уведомлений',
+      body: `Канал работает! Подписок у аккаунта: ${count}`,
+      tag: 'push-test',
+      url: payload.role === 'GARDENER' ? '/gardener' : '/admin',
+    });
 
-    return NextResponse.json({ ok: true, subscriptions: count });
+    const isSuccess = Boolean(result && result.deliveredCount > 0);
+    const statusCode = result?.statusCode || (isSuccess ? 201 : 500);
+
+    return NextResponse.json({
+      ok: isSuccess,
+      statusCode,
+      expired: Boolean(result?.expired),
+      subscriptions: count,
+      deliveredCount: result?.deliveredCount || 0,
+      failedCount: result?.failedCount || 0,
+    });
   } catch (err) {
     console.error('Error in /api/push/test:', err);
-    return NextResponse.json({ ok: false, error: err.message || 'Failed to send test push' }, { status: 500 });
+    return NextResponse.json({
+      ok: false,
+      statusCode: 500,
+      expired: false,
+      error: err.message || 'Failed to send test push',
+    }, { status: 500 });
   }
 }

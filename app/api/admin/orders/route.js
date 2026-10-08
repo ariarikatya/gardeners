@@ -303,7 +303,7 @@ export async function POST(req) {
               }
             }
           } catch (err) {
-            console.error('Background amoDealId search for order error:', err.message);
+            console.error('[external-amocrm] Background amoDealId search error:', err.message);
           }
         })();
       }
@@ -489,7 +489,7 @@ export async function PUT(req) {
       await amoApi.addNoteToLead(existing.amoDealId, `Заказ перенесён диспетчером на ${toDateKey(updateData.date)}`);
       await amoApi.updateLeadStage(existing.amoDealId, serviceName, 'refusal');
     } catch (e) {
-      console.error('Failed to handle amo transfer for date change:', e.message);
+      console.error('[external-amocrm] Failed to handle amo transfer for date change:', e.message);
     }
   }
 
@@ -572,7 +572,7 @@ export async function PUT(req) {
         try {
           await amoApi.addNoteToLead(amoLeadId, `Статус заказа в CRM изменен: "${existing.status}" ➔ "${updateData.status}"`);
         } catch (e) {
-          console.error('Failed adding status note to amo:', e.message);
+          console.error('[external-amocrm] Failed adding status note to amo:', e.message);
         }
 
         if (action) {
@@ -604,7 +604,7 @@ export async function PUT(req) {
         }
       }
     } catch (e) {
-      console.error('Failed updating amo lead stage on admin PUT:', e.message);
+      console.error('[external-amocrm] Failed updating amo lead stage on admin PUT:', e.message);
     }
 
     // Синхронизация связанного заказа-дубля напарника
@@ -848,7 +848,7 @@ export async function DELETE(req) {
         });
         console.log('✅ [DELETE] Успешно удалено из amoCRM');
       } catch (err) {
-        console.error('❌ [DELETE] Ошибка при удалении из amoCRM:', err.message, err.body || err);
+        console.error('❌ [external-amocrm][DELETE] Ошибка при удалении из amoCRM:', err.message, err.body || err);
       }
     } else {
       console.log('⚠️ [DELETE] amoDealId не указан, пропускаем удаление из amoCRM');

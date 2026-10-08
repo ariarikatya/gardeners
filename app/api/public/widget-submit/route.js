@@ -172,10 +172,10 @@ export async function POST(req) {
           where: { id: lead.id },
           data: { amoDealId: String(apiRes.leadId) },
         });
-        console.log('✅ [widget-submit] amoDealId успешно сохранен в WebLead через API v4:', apiRes.leadId);
+        console.log('✅ [external-amocrm][widget-submit] amoDealId успешно сохранен в WebLead через API v4:', apiRes.leadId);
       }
     } catch (apiErr) {
-      console.warn('⚠️ [widget-submit] Ошибка API v4, применяю fallback через веб-форму:', apiErr.message);
+      console.warn('⚠️ [external-amocrm][widget-submit] Ошибка API v4, применяю fallback через веб-форму:', apiErr.message);
       const result = await forwardToAmoUnsorted(amoParams);
       console.log('4. forwardToAmoUnsorted результат:', JSON.stringify(result));
 
@@ -252,7 +252,7 @@ export async function POST(req) {
           }
         }
       } catch (amoSearchErr) {
-        console.error('⚠️ Ошибка поиска/сохранения amoDealId в widget-submit:', amoSearchErr.message);
+        console.error('⚠️ [external-amocrm][widget-submit] Ошибка поиска/сохранения amoDealId в widget-submit:', amoSearchErr.message);
       }
     }
 
@@ -271,7 +271,7 @@ export async function POST(req) {
 
     return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
   } catch (e) {
-    console.error('widget-submit error:', e);
+    console.error('[external-amocrm][widget-submit] widget-submit error:', e);
     console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ (ОШИБКА) ==========');
     return NextResponse.json({ error: 'Не удалось отправить заявку' }, { status: 500, headers: CORS_HEADERS });
   }
