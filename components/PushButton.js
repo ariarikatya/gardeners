@@ -133,16 +133,33 @@ export default function PushButton({ className = '' }) {
     if (testingPush) return;
     setTestingPush(true);
     clientLog('send_test_push_click');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     try {
-      const res = await fetch('/api/push/test', { method: 'POST' });
+      const res = await fetch('/api/push/test', {
+        method: 'POST',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       const data = await res.json().catch(() => ({}));
+
       if (res.ok && data.ok) {
-        alert(`✅ Тестовое push-уведомление отправлено! (${data.subscriptions || 1} подписка(и))`);
+        alert(`✅ доставлено (${data.statusCode || 201})`);
+      } else if (data.expired || data.statusCode === 404 || data.statusCode === 410) {
+        setPushState('orphan');
+        alert('⚠️ подписка протухла — разрешите уведомления заново');
       } else {
-        alert(`⚠️ Ошибка отправки тестового push: ${data.error || 'Подписка не найдена или протухла'}`);
+        alert(`❌ ошибка ${data.statusCode || res.status || data.error || 'неизвестно'}`);
       }
     } catch (e) {
-      alert(`Ошибка при отправке теста: ${e.message}`);
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        alert('❌ Ошибка: таймаут ожидания ответа (15с)');
+      } else {
+        alert(`❌ Ошибка отправки теста: ${e.message}`);
+      }
     } finally {
       setTestingPush(false);
     }
