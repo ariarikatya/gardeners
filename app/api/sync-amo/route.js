@@ -43,7 +43,7 @@ export async function GET() {
           console.log(`🗑️ Удалено из БД (удалено в amoCRM): ${order.amoDealId}`);
           updates.push({ orderId: order.id, oldStatus: order.status, newStatus: 'Удалён из БД' });
         } else {
-          console.error(`Error syncing lead ${order.amoDealId}:`, err.message);
+          console.error(`[external-amocrm][sync-amo] Error syncing lead ${order.amoDealId}:`, err.message);
         }
       }
     }

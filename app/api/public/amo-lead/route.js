@@ -50,7 +50,7 @@ export async function POST(req) {
 
     return NextResponse.json({ success: true });
   } catch (e) {
-    console.error('amo-lead error:', e);
+    console.error('[external-amocrm][amo-lead] amo-lead error:', e);
     return NextResponse.json({ error: 'Не удалось отправить заявку' }, { status: 500 });
   }
 }
