@@ -44,7 +44,7 @@ export async function GET() {
       { headers: CORS_HEADERS }
     );
   } catch (error) {
-    console.error('Error in debug/amo-tokens:', error);
+    console.error('[external-amocrm][debug-amo-tokens] Error in debug/amo-tokens:', error);
     return NextResponse.json(
       { error: 'Failed to fetch amo tokens debug info' },
       { status: 500, headers: CORS_HEADERS }

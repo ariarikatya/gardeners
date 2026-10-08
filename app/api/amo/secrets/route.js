@@ -47,7 +47,7 @@ export async function POST(req) {
 
     return NextResponse.json({ success: true }, { status: 200, headers: CORS_HEADERS });
   } catch (error) {
-    console.error('❌ Ошибка в /api/amo/secrets:', error);
+    console.error('[external-amocrm][amo-secrets] Ошибка в /api/amo/secrets:', error);
     return NextResponse.json({ error: error.message }, { status: 500, headers: CORS_HEADERS });
   }
 }
