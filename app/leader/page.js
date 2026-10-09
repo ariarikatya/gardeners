@@ -323,16 +323,16 @@ export default function LeaderDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
-      <header className="bg-emerald-900 text-white px-4 py-4 flex items-center justify-between shadow">
+      <header className="bg-emerald-900 text-white px-3 py-3 sm:px-4 sm:py-4 flex flex-wrap items-center justify-between gap-2 shadow">
         <div>
-          <h1 className="text-lg font-bold">🌿 Руководитель</h1>
-          <p className="text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
+          <h1 className="text-base sm:text-lg font-bold">🌿 Руководитель</h1>
+          <p className="text-[11px] sm:text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href="/admin/users" className="bg-amber-600 hover:bg-amber-500 text-white font-medium px-3 py-2 rounded-lg text-sm transition-all">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <Link href="/admin/users" className="bg-amber-600 hover:bg-amber-500 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap">
             👥 Пользователи
           </Link>
-          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-3 py-2 rounded-lg text-sm">Выйти</button>
+          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm whitespace-nowrap">Выйти</button>
         </div>
       </header>
 

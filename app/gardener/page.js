@@ -1309,29 +1309,29 @@ export default function GardenerDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="bg-emerald-800 text-white py-4 px-4 flex justify-between items-center shadow">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-bold flex items-center gap-1">🌿 Мой Кабинет</h1>
+      <header className="bg-emerald-800 text-white py-3 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-x-2 gap-y-2 shadow">
+        <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
+          <h1 className="text-base sm:text-lg font-bold flex items-center gap-1 whitespace-nowrap">🌿 Мой Кабинет</h1>
           {isSyncingQueue ? (
-            <span className="text-xs bg-amber-600/90 border border-amber-400 text-white px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-pulse">
+            <span className="text-[11px] sm:text-xs bg-amber-600/90 border border-amber-400 text-white px-2 py-1 sm:px-2.5 rounded-lg flex items-center gap-1.5 animate-pulse min-w-0 max-w-full truncate">
               ⚡ Отправка очереди ({queueCount})…
             </span>
           ) : isOffline || (typeof window !== 'undefined' && !navigator.onLine) ? (
-            <span className="text-xs bg-amber-600/90 border border-amber-400 text-white px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+            <span className="text-[11px] sm:text-xs bg-amber-600/90 border border-amber-400 text-white px-2 py-1 sm:px-2.5 rounded-lg flex items-center gap-1.5 min-w-0 max-w-full truncate">
               📡 Оффлайн {lastCacheTime ? `— данные от ${lastCacheTime}` : ''}
             </span>
           ) : (
-            <span className="text-xs bg-emerald-700/80 border border-emerald-500 text-emerald-100 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+            <span className="text-[11px] sm:text-xs bg-emerald-700/80 border border-emerald-500 text-emerald-100 px-2 py-1 sm:px-2.5 rounded-lg flex items-center gap-1.5 min-w-0 max-w-full truncate">
               🟢 В сети
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <PushButton className="text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
-          <a href="tel:88452650206" className="text-xs bg-emerald-700 hover:bg-emerald-600 px-3 py-1.5 rounded-lg flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <PushButton className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
+          <a href="tel:88452650206" className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap">
             📞 Диспетчер
           </a>
-          <button type="button" onClick={handleLogout} className="text-xs bg-emerald-700 px-3 py-1.5 rounded-lg">Выйти</button>
+          <button type="button" onClick={handleLogout} className="text-[11px] sm:text-xs bg-emerald-700 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg whitespace-nowrap">Выйти</button>
         </div>
       </header>
 
