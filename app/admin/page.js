@@ -1171,11 +1171,11 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Шапка */}
       <header className="bg-emerald-900 text-white py-3 px-3 sm:px-6 shadow-md">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-base sm:text-xl font-bold flex items-center gap-2">
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <button onClick={handleLogout} className="bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap">
+        <button onClick={handleLogout} className="bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap text-xs sm:text-sm">
           Выйти
         </button>
         </div>
