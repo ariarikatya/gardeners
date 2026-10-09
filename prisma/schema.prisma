@@ -227,3 +227,14 @@ model ClientPushLog {
   @@index([userId])
   @@index([createdAt])
 }
+model PushClientLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  event     String
+  message   String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
