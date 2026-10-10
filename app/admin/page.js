@@ -1335,7 +1335,7 @@ export default function AdminDashboard() {
             <>
               {/* Блок навигации по месяцам */}
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2 sm:p-2.5 mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
                     onClick={handlePrevYear}
@@ -1633,7 +1633,7 @@ export default function AdminDashboard() {
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-50 border border-dashed border-emerald-300 inline-block"></span>Свободно</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-500 inline-block"></span>Можно вклинить</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block"></span>Занят</span>
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-700 inline-block"></span>Выполнен</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span>Выполнен</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500 inline-block"></span>Перенос</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-rose-500 inline-block"></span>Отказ</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-300 inline-block"></span>Отменён</span>
@@ -1653,23 +1653,43 @@ export default function AdminDashboard() {
                     <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
                       <tr className="bg-slate-100 border-b border-slate-200">
                         <th className="px-1.5 py-1 text-left text-[12px] font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
-                        {displayGardeners.map(g => (
-                          <th
-                            key={g.id}
-                            onDoubleClick={() => toggleHideGardener(g.id)}
-                            title="Двойной клик — скрыть столбец"
-                            className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm align-top cursor-pointer hover:bg-slate-200/60 transition-colors select-none"
-                          >
-                            <div className="flex flex-col items-center gap-0.5">
-                              <span>{g.name}</span>
-                              {g.jobTitle && <span className="text-[10px] text-slate-500 font-normal bg-slate-200/60 px-1.5 py-0.2 rounded">{g.jobTitle}</span>}
-                              <div className="flex flex-wrap items-center justify-center gap-1 mt-0.5">
-                                {g.isRegular && <span className="text-[9px] bg-indigo-100 text-indigo-800 px-1 py-0.2 rounded font-semibold" title="Постоянник">★ постоянник</span>}
-                                {g.annualContract && <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-semibold" title="Годовой контракт">📜 годовой</span>}
-                              </div>
-                            </div>
-                          </th>
-                        ))}
+                        {(() => {
+                          const visibleDateKeys = new Set(visibleDates.map(d => d.toISOString().split('T')[0]));
+                          return displayGardeners.map(g => {
+                            const gardenerTotalFact = orders.reduce((sum, o) => {
+                              if (o.gardenerId === g.id && o.status === 'Выполнен' && o.priceFact > 0 && o.date) {
+                                const oDateKey = o.date.split('T')[0];
+                                if (visibleDateKeys.has(oDateKey)) {
+                                  return sum + Number(o.priceFact);
+                                }
+                              }
+                              return sum;
+                            }, 0);
+
+                            return (
+                              <th
+                                key={g.id}
+                                onDoubleClick={() => toggleHideGardener(g.id)}
+                                title="Двойной клик — скрыть столбец"
+                                className="px-1.5 py-1 text-[12px] font-semibold text-slate-600 border-r border-slate-200 min-w-[140px] sticky top-0 z-20 bg-slate-100 shadow-sm align-top cursor-pointer hover:bg-slate-200/60 transition-colors select-none"
+                              >
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span>{g.name}</span>
+                                  {gardenerTotalFact > 0 && (
+                                    <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-1.5 py-0.5 rounded shadow-xs" title={`Выполнено за период: ${gardenerTotalFact} ₽`}>
+                                      Σ {gardenerTotalFact}
+                                    </span>
+                                  )}
+                                  {g.jobTitle && <span className="text-[10px] text-slate-500 font-normal bg-slate-200/60 px-1.5 py-0.5 rounded">{g.jobTitle}</span>}
+                                  <div className="flex flex-wrap items-center justify-center gap-1 mt-0.5">
+                                    {g.isRegular && <span className="text-[9px] bg-indigo-100 text-indigo-800 px-1 py-0.5 rounded font-semibold" title="Постоянник">★ постоянник</span>}
+                                    {g.annualContract && <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.5 rounded font-semibold" title="Годовой контракт">📜 годовой</span>}
+                                  </div>
+                                </div>
+                              </th>
+                            );
+                          });
+                        })()}
                       </tr>
                     </thead>
                     <tbody>
@@ -1724,40 +1744,33 @@ export default function AdminDashboard() {
                                       )}
                                       {dayOrders.map(order => {
                                         const isDone = order.status === 'Выполнен';
-                                        const priceVal = isDone
-                                          ? (order.priceFact > 0 ? order.priceFact : order.priceContract)
-                                          : (order.priceContract > 0 ? order.priceContract : order.priceFact);
-                                        const priceTitle = isDone
-                                          ? `Факт: ${priceVal || 0} ₽`
-                                          : `Сумма по договору: ${priceVal || 0} ₽`;
+                                        const showFactPrice = isDone && order.priceFact > 0;
 
                                         return (
                                           <div
                                             key={order.id}
                                             onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
                                             className={`p-1.5 rounded text-white font-medium cursor-pointer transition-all text-left text-[11px] ${
-                                              order.status === 'Выполнен' ? 'bg-green-700 hover:bg-green-800' :
+                                              order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
                                               order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
                                               order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
                                               order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
                                               activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
                                             }`}
                                           >
+                                            {showFactPrice && (
+                                              <div
+                                                title={`Факт: ${order.priceFact} ₽`}
+                                                className="bg-green-700/60 rounded px-1 py-0.5 mb-1 text-center font-bold text-xs sm:text-sm text-white tracking-wide border border-green-500/30"
+                                              >
+                                                {order.priceFact}
+                                              </div>
+                                            )}
                                             <div className="flex items-center justify-between gap-1 mb-0.5">
                                               <span className="truncate">{order.clientName}</span>
-                                              <div className="flex items-center gap-1 shrink-0">
-                                                {!order.amoDealId && (
-                                                  <span className="text-[10px]" title="Нет ID amoCRM">❌</span>
-                                                )}
-                                                {priceVal > 0 && (
-                                                  <span
-                                                    title={priceTitle}
-                                                    className="font-bold text-[10px] bg-black/20 px-1 py-0.5 rounded text-white whitespace-nowrap"
-                                                  >
-                                                    {priceVal >= 10000 ? Math.round(priceVal / 1000) + 'к' : `${priceVal} ₽`}
-                                                  </span>
-                                                )}
-                                              </div>
+                                              {!order.amoDealId && (
+                                                <span className="text-[10px] shrink-0" title="Нет ID amoCRM">❌</span>
+                                              )}
                                             </div>
                                             <div className="text-[10px] opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
                                             <div className="text-[10px] opacity-90">{order.description}</div>
