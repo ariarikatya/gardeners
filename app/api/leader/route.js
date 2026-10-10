@@ -11,16 +11,20 @@ async function checkLeader(req) {
   return payload && payload.role === 'LEADER';
 }
 
-function formatDateInput(date) {
+function formatDateInput(date, isEnd = false) {
   const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
+  if (isEnd) {
+    d.setHours(23, 59, 59, 999);
+  } else {
+    d.setHours(0, 0, 0, 0);
+  }
   return d;
 }
 
 function getDateRange(rawStart, rawEnd) {
   const now = new Date();
-  const start = rawStart ? formatDateInput(rawStart) : new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = rawEnd ? formatDateInput(rawEnd) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const start = rawStart ? formatDateInput(rawStart, false) : new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const end = rawEnd ? formatDateInput(rawEnd, true) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   return { start, end };
 }
 
@@ -170,8 +174,17 @@ export async function GET(req) {
     return split.companyShare;
   };
 
-  const pendingOrdersAll = orders.filter(o => !['Выполнен', 'Отменен', 'Отказ'].includes(o.status));
-  const forecastRevenue = round2(pendingOrdersAll.reduce((sum, o) => sum + calcExpectedCompanyRevenue(o), 0));
+  const tomorrow = new Date();
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const futurePendingOrders = orders.filter(o => {
+    if (['Выполнен', 'Отменен', 'Отказ'].includes(o.status)) return false;
+    const orderDate = formatDateInput(o.date);
+    return orderDate.getTime() >= tomorrow.getTime();
+  });
+
+  const forecastRevenue = round2(futurePendingOrders.reduce((sum, o) => sum + calcExpectedCompanyRevenue(o), 0)) || 0;
 
   const daysInPeriod = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
   const avgDailyRevenue = daysInPeriod > 0 ? (totalRevenue - approvedExpenses) / daysInPeriod : 0;

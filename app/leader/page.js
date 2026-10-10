@@ -18,6 +18,15 @@ function formatMoney(value) {
   return currency.format(Number(value || 0));
 }
 
+function formatHumanRange(startStr, endStr) {
+  if (!startStr || !endStr) return '';
+  const d1 = new Date(startStr);
+  const d2 = new Date(endStr);
+  if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return '';
+  const f = (d) => d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return `${f(d1)} – ${f(d2)}`;
+}
+
 const OPERATION_TYPE_LABELS = {
   bonus: 'Премия',
   fine: 'Штраф',
@@ -117,39 +126,25 @@ export default function LeaderDashboard() {
   };
 
   useEffect(() => {
-    if (range === 'month') {
-      const current = getDefaultRange();
-      setStartDate(current.start);
-      setEndDate(current.end);
-      fetchData(current.start, current.end);
+    if (startDate && endDate && startDate > endDate) {
       return;
     }
-    if (range === 'quarter') {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      setStartDate(start.toISOString().slice(0, 10));
-      setEndDate(end.toISOString().slice(0, 10));
-      fetchData(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
-      return;
-    }
-    if (range === 'year') {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), 0, 1);
-      const end = new Date(now.getFullYear(), 11, 31);
-      setStartDate(start.toISOString().slice(0, 10));
-      setEndDate(end.toISOString().slice(0, 10));
-      fetchData(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
-      return;
-    }
-    fetchData(startDate, endDate);
-  }, [range]);
-
-  useEffect(() => {
     fetchData(startDate, endDate);
   }, [startDate, endDate]);
 
   const handleLogout = async () => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
+        if (sub) {
+          fetch('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+            credentials: 'include'
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
   };
@@ -357,33 +352,78 @@ export default function LeaderDashboard() {
         ) : (
         <>
         <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Период</label>
-            <div className="flex gap-2">
+          <div className="flex-1 min-w-[280px]">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+              <label className="text-xs font-semibold text-slate-500">Период</label>
+              {startDate && endDate && startDate <= endDate && (
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  📅 {formatHumanRange(startDate, endDate)}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 items-center">
               {['month', 'quarter', 'year', 'custom'].map((type) => (
                 <button
                   key={type}
-                  onClick={() => setRange(type)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium ${range === type ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                  type="button"
+                  onClick={() => {
+                    setRange(type);
+                    if (type === 'month') {
+                      const current = getDefaultRange();
+                      setStartDate(current.start);
+                      setEndDate(current.end);
+                    } else if (type === 'quarter') {
+                      const now = new Date();
+                      const start = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+                      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                      setStartDate(start.toISOString().slice(0, 10));
+                      setEndDate(end.toISOString().slice(0, 10));
+                    } else if (type === 'year') {
+                      const now = new Date();
+                      const start = new Date(now.getFullYear(), 0, 1);
+                      const end = new Date(now.getFullYear(), 11, 31);
+                      setStartDate(start.toISOString().slice(0, 10));
+                      setEndDate(end.toISOString().slice(0, 10));
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${range === type ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
                 >
                   {type === 'month' ? 'Месяц' : type === 'quarter' ? 'Квартал' : type === 'year' ? 'Год' : 'Свой'}
                 </button>
               ))}
             </div>
+
+            {range === 'custom' && (
+              <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs font-semibold text-slate-600">От:</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    placeholder="dd.mm.yyyy"
+                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs font-semibold text-slate-600">До:</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    placeholder="dd.mm.yyyy"
+                    className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                {startDate && endDate && startDate > endDate && (
+                  <div className="w-full text-xs font-semibold text-rose-600 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                    ⚠️ Дата «От» ({startDate}) не может быть позже даты «До» ({endDate})
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {range === 'custom' && (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">От</label>
-                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">До</label>
-                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-2 text-sm" />
-              </div>
-            </>
-          )}
           <div className="ml-auto flex items-center gap-2 text-xs text-slate-700">
             <span>Масштаб {Math.round(leaderScale * 100)}%</span>
             <button onClick={() => setLeaderScale(s => Math.max(0.7, +(s - 0.1).toFixed(1)))} className="bg-white border rounded px-2 py-1">−</button>
@@ -418,7 +458,7 @@ export default function LeaderDashboard() {
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Прогноз продаж</div>
                 <div className="text-2xl font-bold text-blue-700 mt-2">{formatMoney(summary.forecast)}</div>
-                <div className="text-[11px] text-slate-500 mt-1">Считается по планируемым заказам за вычетом процента садовника.</div>
+                <div className="text-[11px] text-slate-500 mt-1">Ожидаемая выручка компании по запланированным заказам с завтрашнего дня (за вычетом доли садовника)</div>
               </div>
             </div>
  
