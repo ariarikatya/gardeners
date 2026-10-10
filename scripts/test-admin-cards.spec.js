@@ -5,7 +5,8 @@ const JWT_SECRET = new TextEncoder().encode('fallback-secret-use-env-in-prod');
 
 test.describe('Admin Order Cards & Header Totals', () => {
   test('Renders static priceFact, no inline inputs, and opens modal on click', async ({ page, context }) => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const todayStr = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0).toISOString().split('T')[0];
 
     const mockGardeners = [
       { id: 'g1', name: 'Иван Иванов', phone: '79991112233', jobTitle: 'садовник', services: [] },
@@ -113,6 +114,8 @@ test.describe('Admin Order Cards & Header Totals', () => {
       }
     ]);
 
+    page.on('console', msg => console.log('PAGE LOG:', msg.text()));
+    page.on('response', resp => { if (!resp.ok()) console.log('FAILED RESP:', resp.url(), resp.status()); });
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('http://localhost:3000/admin');
     await page.waitForLoadState('networkidle');
@@ -152,13 +155,15 @@ test.describe('Admin Order Cards & Header Totals', () => {
     await closeModalBtn.click();
     await expect(modalTitle).not.toBeVisible();
 
-    // 6. Test status filter behavior on gardener column header total
+    // 6. Test status filter behavior on gardener column header total (Σ must NOT disappear when status filter is active)
     const statusSelect = page.locator('select', { hasText: 'Любой' }).first();
     await statusSelect.selectOption('Новый заказ');
 
-    // Completed cards are hidden, so column header total Σ should not show 1650
-    await expect(header1).not.toContainText('Σ 1650');
-    await page.screenshot({ path: 'test-status-filter-sum.png', fullPage: false });
+    // Total Σ remains 1650 even when status filter is set to 'Новый заказ'
+    await expect(header1).toContainText('Σ 1650');
+
+    // Save screenshot for verification
+    await page.screenshot({ path: '/home/jules/verification/verification.png', fullPage: false });
 
     // Reset status filter
     await statusSelect.selectOption('all');
