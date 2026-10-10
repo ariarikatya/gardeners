@@ -1656,7 +1656,7 @@ export default function AdminDashboard() {
                         {(() => {
                           const visibleDateKeys = new Set(visibleDates.map(d => d.toISOString().split('T')[0]));
                           return displayGardeners.map(g => {
-                            const gardenerTotalFact = orders.reduce((sum, o) => {
+                            const gardenerTotalFact = filteredOrders.reduce((sum, o) => {
                               if (o.gardenerId === g.id && o.status === 'Выполнен' && o.priceFact > 0 && o.date) {
                                 const oDateKey = o.date.split('T')[0];
                                 if (visibleDateKeys.has(oDateKey)) {
@@ -1676,8 +1676,8 @@ export default function AdminDashboard() {
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span>{g.name}</span>
                                   {gardenerTotalFact > 0 && (
-                                    <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-1.5 py-0.5 rounded shadow-xs" title={`Выполнено за период: ${gardenerTotalFact} ₽`}>
-                                      Σ {gardenerTotalFact}
+                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded" title={`Выполнено за период: ${gardenerTotalFact} ₽`}>
+                                      Σ {gardenerTotalFact} (месяц)
                                     </span>
                                   )}
                                   {g.jobTitle && <span className="text-[10px] text-slate-500 font-normal bg-slate-200/60 px-1.5 py-0.5 rounded">{g.jobTitle}</span>}
@@ -1761,7 +1761,7 @@ export default function AdminDashboard() {
                                             {showFactPrice && (
                                               <div
                                                 title={`Факт: ${order.priceFact} ₽`}
-                                                className="bg-green-700/60 rounded px-1 py-0.5 mb-1 text-center font-bold text-xs sm:text-sm text-white tracking-wide border border-green-500/30"
+                                                className="bg-green-700/60 rounded px-1.5 py-0.5 mb-1 text-center font-bold text-sm tracking-tight text-white border border-green-500/30"
                                               >
                                                 {order.priceFact}
                                               </div>
