@@ -511,6 +511,18 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
+        if (sub) {
+          fetch('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+            credentials: 'include'
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');
   };
@@ -1710,30 +1722,50 @@ export default function AdminDashboard() {
                                           <button onClick={() => handleToggleBlockDay(dateStr, g.id)} className="text-[9px] underline font-semibold text-emerald-800">Открыть</button>
                                         </div>
                                       )}
-                                      {dayOrders.map(order => (
-                                        <div
-                                          key={order.id}
-                                          onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
-                                          className={`p-1.5 rounded text-white font-medium cursor-pointer transition-all text-left text-[11px] ${
-                                            order.status === 'Выполнен' ? 'bg-green-600 hover:bg-green-700' :
-                                            order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
-                                            order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
-                                            order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
-                                            activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
-                                          }`}
-                                        >
-                                          <div className="flex items-center justify-between gap-1 mb-0.5">
-                                            <span>{order.clientName}</span>
-                                            {!order.amoDealId && (
-                                              <span className="text-[10px]" title="Нет ID amoCRM">❌</span>
-                                            )}
+                                      {dayOrders.map(order => {
+                                        const isDone = order.status === 'Выполнен';
+                                        const priceVal = isDone
+                                          ? (order.priceFact > 0 ? order.priceFact : order.priceContract)
+                                          : (order.priceContract > 0 ? order.priceContract : order.priceFact);
+                                        const priceTitle = isDone
+                                          ? `Факт: ${priceVal || 0} ₽`
+                                          : `Сумма по договору: ${priceVal || 0} ₽`;
+
+                                        return (
+                                          <div
+                                            key={order.id}
+                                            onClick={() => { setConvertingLeadId(null); openEditOrderModal(order); }}
+                                            className={`p-1.5 rounded text-white font-medium cursor-pointer transition-all text-left text-[11px] ${
+                                              order.status === 'Выполнен' ? 'bg-green-700 hover:bg-green-800' :
+                                              order.status === 'Отменен' ? 'bg-slate-300 hover:bg-slate-400 line-through' :
+                                              order.status === 'Перенос' ? 'bg-blue-500 hover:bg-blue-600' :
+                                              order.status === 'Отказ' ? 'bg-rose-500 hover:bg-rose-600' :
+                                              activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
+                                            }`}
+                                          >
+                                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                                              <span className="truncate">{order.clientName}</span>
+                                              <div className="flex items-center gap-1 shrink-0">
+                                                {!order.amoDealId && (
+                                                  <span className="text-[10px]" title="Нет ID amoCRM">❌</span>
+                                                )}
+                                                {priceVal > 0 && (
+                                                  <span
+                                                    title={priceTitle}
+                                                    className="font-bold text-[10px] bg-black/20 px-1 py-0.2 rounded text-white whitespace-nowrap"
+                                                  >
+                                                    {priceVal} ₽
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                            <div className="text-[10px] opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
+                                            <div className="text-[10px] opacity-90">{order.description}</div>
+                                            {order.status === 'Перенос' && <div className="text-[9px] opacity-90">⤴ запрошен перенос</div>}
+                                            {order.status === 'Отказ' && <div className="text-[9px] opacity-90">✕ отказ мастера</div>}
                                           </div>
-                                          <div className="text-[10px] opacity-90">{order.district ? `${order.district} • ` : ''}<a href={`https://yandex.ru/maps/?text=${encodeURIComponent(order.district ? `${order.district}, ${order.address}` : order.address)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="underline">{order.address}</a></div>
-                                          <div className="text-[10px] opacity-90">{order.description}</div>
-                                          {order.status === 'Перенос' && <div className="text-[9px] opacity-90">⤴ запрошен перенос</div>}
-                                          {order.status === 'Отказ' && <div className="text-[9px] opacity-90">✕ отказ мастера</div>}
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                       {!isBlockedDay && (
                                         <div className="flex gap-1">
                                           <button

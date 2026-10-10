@@ -23,6 +23,47 @@ const IOS_NON_PWA_ALERT_MSG =
   '4) Нажмите «Включить уведомления» здесь ещё раз\n\n' +
   '💡 Важно: если на Домашнем экране несколько иконок Анемон Агро — удалите все старые и откройте приложение по последней иконке; настройки уведомлений iOS хранятся отдельно для каждой иконки.';
 
+async function performSilentReSubscribe(reg, oldEndpoint) {
+  try {
+    if (oldEndpoint) {
+      await fetch('/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: oldEndpoint }),
+      }).catch(() => {});
+    }
+
+    const currentSub = await reg.pushManager.getSubscription().catch(() => null);
+    if (currentSub) {
+      await currentSub.unsubscribe().catch(() => {});
+    }
+
+    const vapidRes = await fetch('/api/push/vapid-public-key');
+    const vapidData = await vapidRes.json().catch(() => ({}));
+    if (!vapidData.key) return null;
+
+    const newSub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidData.key),
+    });
+
+    const subRes = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: newSub.toJSON(), clientVersion: CLIENT_VERSION }),
+    });
+
+    const subData = await subRes.json().catch(() => ({}));
+    if (subRes.ok && subData.ok && subData.hasUserId !== false) {
+      clientLog('silent_resubscribe_success', { endpointPrefix: newSub.endpoint.slice(0, 40) });
+      return newSub;
+    }
+  } catch (err) {
+    clientLog('silent_resubscribe_failed', { error: err.message });
+  }
+  return null;
+}
+
 export default function PushButton({ className = '' }) {
   const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'orphan' | 'unsupported'
   const [pushLoading, setPushLoading] = useState(false);
@@ -73,16 +114,48 @@ export default function PushButton({ className = '' }) {
         try {
           const sub = await reg.pushManager.getSubscription();
           if (sub) {
-            setPushState('enabled');
-            setShowIosPushHint(false);
-            clientLog('mount', { state: 'enabled', endpointPrefix: sub.endpoint.slice(0, 40) });
+            const subRes = await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
+            }).catch(() => null);
+
+            if (subRes && subRes.ok) {
+              const subData = await subRes.json().catch(() => ({}));
+              if (subData.ok && subData.hasUserId !== false) {
+                setPushState('enabled');
+                setShowIosPushHint(false);
+                clientLog('mount', { state: 'enabled', synced: true, endpointPrefix: sub.endpoint.slice(0, 40) });
+              } else if (Notification.permission === 'granted') {
+                clientLog('mount_rebind_start');
+                const reboundSub = await performSilentReSubscribe(reg, sub.endpoint);
+                if (reboundSub) {
+                  setPushState('enabled');
+                  setShowIosPushHint(false);
+                } else {
+                  setPushState('orphan');
+                }
+              } else {
+                setPushState('disabled');
+              }
+            } else {
+              setPushState('enabled');
+              setShowIosPushHint(false);
+              clientLog('mount', { state: 'enabled', offline: true, endpointPrefix: sub.endpoint.slice(0, 40) });
+            }
           } else {
             if (Notification.permission === 'granted') {
-              setPushState('orphan');
-              clientLog('orphan_subscription_detected', {
-                notifPerm: Notification.permission,
-                displayMode: envInfo.displayMode,
-              });
+              const reboundSub = await performSilentReSubscribe(reg, null);
+              if (reboundSub) {
+                setPushState('enabled');
+                setShowIosPushHint(false);
+              } else {
+                setPushState('orphan');
+                clientLog('orphan_subscription_detected', {
+                  notifPerm: Notification.permission,
+                  displayMode: envInfo.displayMode,
+                });
+              }
             } else {
               setPushState('disabled');
               clientLog('mount', { state: 'disabled' });
@@ -138,18 +211,38 @@ export default function PushButton({ className = '' }) {
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-      const res = await fetch('/api/push/test', {
+      let res = await fetch('/api/push/test', {
         method: 'POST',
         signal: controller.signal,
       });
+      let data = await res.json().catch(() => ({}));
+
+      if ((!res.ok || !data.ok) && (data.expired || data.statusCode === 404 || data.statusCode === 410)) {
+        if (Notification.permission === 'granted') {
+          const reg = await navigator.serviceWorker.ready.catch(() => null);
+          if (reg) {
+            const currentSub = await reg.pushManager.getSubscription().catch(() => null);
+            const newSub = await performSilentReSubscribe(reg, currentSub?.endpoint);
+            if (newSub) {
+              setPushState('enabled');
+              res = await fetch('/api/push/test', { method: 'POST', signal: controller.signal });
+              data = await res.json().catch(() => ({}));
+            }
+          }
+        }
+      }
+
       clearTimeout(timeoutId);
-      const data = await res.json().catch(() => ({}));
 
       if (res.ok && data.ok) {
         alert(`✅ доставлено (${data.statusCode || 201})`);
       } else if (data.expired || data.statusCode === 404 || data.statusCode === 410) {
-        setPushState('orphan');
-        alert('⚠️ подписка протухла — разрешите уведомления заново');
+        setPushState(Notification.permission === 'denied' ? 'denied' : 'orphan');
+        if (Notification.permission === 'denied') {
+          alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
+        } else {
+          alert('⚠️ подписка протухла — разрешите уведомления заново');
+        }
       } else {
         alert(`❌ ошибка ${data.statusCode || res.status || data.error || 'неизвестно'}`);
       }
@@ -366,7 +459,7 @@ export default function PushButton({ className = '' }) {
               className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
               title={`Нажмите, чтобы отключить push-уведомления (${statusSelfTestStr})`}
             >
-              🔔 {pushLoading ? '...' : 'Уведомления вкл'}
+              🔔 {pushLoading ? '...' : 'Отключить уведомления'}
             </button>
             <button
               type="button"
