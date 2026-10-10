@@ -45,8 +45,12 @@ htmlcov/
 # Temp files
 *.tmp
 *.temp
+# Google service account key (private)
 google-key.json
 
 # Test outputs & screenshots
 test-*.png
 test-results/
+
+# Auto-generated service worker version
+lib/swVersion.generated.js
