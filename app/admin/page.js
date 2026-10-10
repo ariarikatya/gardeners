@@ -276,6 +276,9 @@ export default function AdminDashboard() {
   const [longPressInfo, setLongPressInfo] = useState(null);
   const [longPressTimer, setLongPressTimer] = useState(null);
 
+  // Режим подсчёта итогов по садовнику (Период / Неделя / День)
+  const [sumMode, setSumMode] = useState('period');
+
   // Скрытые столбцы с сохранением в localStorage
   const [hiddenGardenerIds, setHiddenGardenerIds] = useState([]);
 
@@ -1652,19 +1655,66 @@ export default function AdminDashboard() {
                   <table style={{ zoom: tableScale }} className="w-full border-collapse text-[12px] relative">
                     <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm">
                       <tr className="bg-slate-100 border-b border-slate-200">
-                        <th className="px-1.5 py-1 text-left text-[12px] font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm">Дата</th>
+                        <th className="px-1.5 py-1 text-left text-[12px] font-semibold text-slate-600 border-r border-slate-200 sticky top-0 left-0 z-30 bg-slate-100 shadow-sm align-top">
+                          <div className="flex flex-col gap-1">
+                            <span>Дата</span>
+                            <div className="flex items-center gap-0.5 text-[9px] font-normal" title="Переключатель периода для итогов Σ по садовникам">
+                              <button
+                                type="button"
+                                onClick={() => setSumMode('day')}
+                                className={`px-1 py-0.5 rounded ${sumMode === 'day' ? 'bg-slate-700 text-white font-bold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                              >
+                                День
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSumMode('week')}
+                                className={`px-1 py-0.5 rounded ${sumMode === 'week' ? 'bg-slate-700 text-white font-bold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                              >
+                                Нед
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSumMode('period')}
+                                className={`px-1 py-0.5 rounded ${sumMode === 'period' ? 'bg-slate-700 text-white font-bold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}
+                              >
+                                Пер
+                              </button>
+                            </div>
+                          </div>
+                        </th>
                         {(() => {
-                          const visibleDateKeys = new Set(visibleDates.map(d => d.toISOString().split('T')[0]));
+                          const todayKey = toDateKey(new Date());
+
+                          // Вычисляем диапазон текущей недели (пн-вс)
+                          const nowObj = new Date();
+                          const dayOfWeek = nowObj.getDay();
+                          const diffToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+                          const monday = new Date(nowObj);
+                          monday.setDate(nowObj.getDate() + diffToMon);
+                          const sunday = new Date(monday);
+                          sunday.setDate(monday.getDate() + 6);
+                          const monKey = toDateKey(monday);
+                          const sunKey = toDateKey(sunday);
+
+                          const visibleDateKeys = new Set(visibleDates.map(d => toDateKey(d)));
+
                           return displayGardeners.map(g => {
                             const gardenerTotalFact = filteredOrders.reduce((sum, o) => {
-                              if (o.gardenerId === g.id && o.status === 'Выполнен' && o.priceFact > 0 && o.date) {
-                                const oDateKey = o.date.split('T')[0];
-                                if (visibleDateKeys.has(oDateKey)) {
-                                  return sum + Number(o.priceFact);
+                              if (o.gardenerId === g.id && o.status === 'Выполнен' && Number(o.priceFact) > 0 && o.date) {
+                                const oDateKey = toDateKey(o.date);
+                                if (sumMode === 'day') {
+                                  if (oDateKey === todayKey) return sum + Number(o.priceFact);
+                                } else if (sumMode === 'week') {
+                                  if (oDateKey >= monKey && oDateKey <= sunKey && visibleDateKeys.has(oDateKey)) return sum + Number(o.priceFact);
+                                } else {
+                                  if (visibleDateKeys.has(oDateKey)) return sum + Number(o.priceFact);
                                 }
                               }
                               return sum;
                             }, 0);
+
+                            const modeLabel = sumMode === 'day' ? 'день' : sumMode === 'week' ? 'неделю' : 'отображаемый период';
 
                             return (
                               <th
@@ -1676,7 +1726,7 @@ export default function AdminDashboard() {
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span>{g.name}</span>
                                   {gardenerTotalFact > 0 && (
-                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded" title={`Итог за период: ${gardenerTotalFact} ₽`}>
+                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded" title={`Итог по выполненным за ${modeLabel}: ${gardenerTotalFact}`}>
                                       Σ {gardenerTotalFact}
                                     </span>
                                   )}
@@ -1761,7 +1811,7 @@ export default function AdminDashboard() {
                                             {showFactPrice && (
                                               <div
                                                 title={`Факт: ${order.priceFact} ₽`}
-                                                className="bg-green-700/60 rounded px-1.5 py-0.5 mb-1 text-center font-bold text-sm tracking-tight text-white border border-green-500/30"
+                                                className="bg-green-700/60 rounded px-1.5 py-0.5 mb-1 text-left font-bold text-base leading-tight tracking-tight text-white border border-green-500/30"
                                               >
                                                 {order.priceFact}
                                               </div>
