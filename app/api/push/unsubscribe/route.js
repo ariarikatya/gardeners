@@ -1,13 +1,27 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { verifyToken } from '@/lib/jwt';
 
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
     const endpoint = body.endpoint || body.subscription?.endpoint;
 
+    let userId = body.userId || null;
+    const token = req.cookies.get('token')?.value;
+    if (token) {
+      const payload = await verifyToken(token);
+      if (payload?.userId || payload?.id) {
+        userId = payload.userId || payload.id;
+      }
+    }
+
     if (endpoint) {
-      await prisma.pushSubscription.delete({ where: { endpoint } }).catch(() => {});
+      if (userId) {
+        await prisma.pushSubscription.deleteMany({ where: { endpoint, userId } }).catch(() => {});
+      } else {
+        await prisma.pushSubscription.deleteMany({ where: { endpoint } }).catch(() => {});
+      }
     }
 
     return NextResponse.json({ ok: true });

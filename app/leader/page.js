@@ -455,7 +455,7 @@ export default function LeaderDashboard() {
                 <div className="text-2xl font-bold text-violet-700 mt-2">{formatMoney(summary.payout)}</div>
                 <div className="text-[11px] text-slate-500 mt-1">Заработано + премии − штрафы − списания − долг садовника фирме.</div>
               </div>
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm" title="Ожидаемая выручка компании по запланированным заказам с завтрашнего дня (за вычетом доли садовника)">
                 <div className="text-xs uppercase tracking-wide text-slate-500">Прогноз продаж</div>
                 <div className="text-2xl font-bold text-blue-700 mt-2">{formatMoney(summary.forecast)}</div>
                 <div className="text-[11px] text-slate-500 mt-1">Ожидаемая выручка компании по запланированным заказам с завтрашнего дня (за вычетом доли садовника)</div>

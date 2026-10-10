@@ -209,11 +209,13 @@ model WebLead {
 
 model PushSubscription {
   id        String   @id @default(cuid())
-  endpoint  String   @unique
+  endpoint  String
   p256dh    String
   auth      String
   userId    String?
   createdAt DateTime @default(now())
+
+  @@unique([userId, endpoint])
 }
 
 model ClientPushLog {

@@ -25,20 +25,39 @@ export async function POST(req) {
       }
     }
 
-    const savedSub = await prisma.pushSubscription.upsert({
-      where: { endpoint },
-      update: {
-        p256dh,
-        auth,
-        userId: userId || undefined,
-      },
-      create: {
-        endpoint,
-        p256dh,
-        auth,
-        userId,
-      },
-    });
+    let savedSub;
+    if (userId) {
+      savedSub = await prisma.pushSubscription.upsert({
+        where: {
+          userId_endpoint: {
+            userId,
+            endpoint,
+          },
+        },
+        update: {
+          p256dh,
+          auth,
+        },
+        create: {
+          endpoint,
+          p256dh,
+          auth,
+          userId,
+        },
+      });
+    } else {
+      const existing = await prisma.pushSubscription.findFirst({ where: { endpoint, userId: null } });
+      if (existing) {
+        savedSub = await prisma.pushSubscription.update({
+          where: { id: existing.id },
+          data: { p256dh, auth },
+        });
+      } else {
+        savedSub = await prisma.pushSubscription.create({
+          data: { endpoint, p256dh, auth, userId: null },
+        });
+      }
+    }
 
     console.log(`[WebPush] subscribe saved: id=${savedSub.id} userId=${userId} clientVersion=${clientVersion} endpoint=${endpoint.slice(0, 60)}...`);
     if (!userId) {

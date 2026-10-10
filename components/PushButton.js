@@ -28,17 +28,13 @@ async function performSilentReSubscribe(reg, oldEndpoint) {
     if (oldEndpoint) {
       await fetch('/api/push/unsubscribe', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint: oldEndpoint }),
       }).catch(() => {});
     }
 
-    const currentSub = await reg.pushManager.getSubscription().catch(() => null);
-    if (currentSub) {
-      await currentSub.unsubscribe().catch(() => {});
-    }
-
-    const vapidRes = await fetch('/api/push/vapid-public-key');
+    const vapidRes = await fetch('/api/push/vapid-public-key', { credentials: 'include' });
     const vapidData = await vapidRes.json().catch(() => ({}));
     if (!vapidData.key) return null;
 
@@ -49,6 +45,7 @@ async function performSilentReSubscribe(reg, oldEndpoint) {
 
     const subRes = await fetch('/api/push/subscribe', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription: newSub.toJSON(), clientVersion: CLIENT_VERSION }),
     });
@@ -116,6 +113,7 @@ export default function PushButton({ className = '' }) {
           if (sub) {
             const subRes = await fetch('/api/push/subscribe', {
               method: 'POST',
+              credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
             }).catch(() => null);
@@ -211,48 +209,64 @@ export default function PushButton({ className = '' }) {
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-      let res = await fetch('/api/push/test', {
-        method: 'POST',
-        signal: controller.signal,
-      });
-      let data = await res.json().catch(() => ({}));
+      let res = null;
+      let data = {};
+      try {
+        res = await fetch('/api/push/test', {
+          method: 'POST',
+          credentials: 'include',
+          signal: controller.signal,
+        });
+        data = await res.json().catch(() => ({}));
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        clientLog('push_test_network_error', { name: fetchErr.name, message: fetchErr.message });
+        if (fetchErr.name === 'AbortError') {
+          alert('❌ Ошибка: таймаут ожидания ответа (15с)');
+        } else {
+          alert(`❌ Сетевая ошибка при отправке теста: ${fetchErr.message || 'нет подключения'}`);
+        }
+        return;
+      }
+
+      clearTimeout(timeoutId);
 
       if ((!res.ok || !data.ok) && (data.expired || data.statusCode === 404 || data.statusCode === 410)) {
         if (Notification.permission === 'granted') {
           const reg = await navigator.serviceWorker.ready.catch(() => null);
           if (reg) {
             const currentSub = await reg.pushManager.getSubscription().catch(() => null);
+            clientLog('test_push_rebind_attempt');
             const newSub = await performSilentReSubscribe(reg, currentSub?.endpoint);
             if (newSub) {
               setPushState('enabled');
-              res = await fetch('/api/push/test', { method: 'POST', signal: controller.signal });
-              data = await res.json().catch(() => ({}));
+              clientLog('test_push_rebind_success_retrying');
+              const retryRes = await fetch('/api/push/test', { method: 'POST', credentials: 'include' }).catch(() => null);
+              if (retryRes) {
+                res = retryRes;
+                data = await retryRes.json().catch(() => ({}));
+              }
             }
           }
         }
       }
 
-      clearTimeout(timeoutId);
-
       if (res.ok && data.ok) {
         alert(`✅ доставлено (${data.statusCode || 201})`);
       } else if (data.expired || data.statusCode === 404 || data.statusCode === 410) {
-        setPushState(Notification.permission === 'denied' ? 'denied' : 'orphan');
         if (Notification.permission === 'denied') {
+          setPushState('denied');
           alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
         } else {
+          setPushState('orphan');
           alert('⚠️ подписка протухла — разрешите уведомления заново');
         }
       } else {
         alert(`❌ ошибка ${data.statusCode || res.status || data.error || 'неизвестно'}`);
       }
     } catch (e) {
-      clearTimeout(timeoutId);
-      if (e.name === 'AbortError') {
-        alert('❌ Ошибка: таймаут ожидания ответа (15с)');
-      } else {
-        alert(`❌ Ошибка отправки теста: ${e.message}`);
-      }
+      clientLog('push_test_uncaught_error', { message: e.message });
+      alert(`❌ Ошибка отправки теста: ${e.message}`);
     } finally {
       setTestingPush(false);
     }
@@ -266,6 +280,7 @@ export default function PushButton({ className = '' }) {
       if (oldSub) {
         await fetch('/api/push/unsubscribe', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ endpoint: oldSub.endpoint }),
         }).catch(() => {});
@@ -317,6 +332,7 @@ export default function PushButton({ className = '' }) {
         if (sub) {
           await fetch('/api/push/unsubscribe', {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ endpoint: sub.endpoint }),
           }).catch(() => {});
@@ -343,7 +359,7 @@ export default function PushButton({ className = '' }) {
           return;
         }
 
-        const vapidRes = await fetch('/api/push/vapid-public-key');
+        const vapidRes = await fetch('/api/push/vapid-public-key', { credentials: 'include' });
         const vapidData = await vapidRes.json();
         if (!vapidData.key) {
           clientLog('vapid_missing');
@@ -386,6 +402,7 @@ export default function PushButton({ className = '' }) {
 
         const subRes = await fetch('/api/push/subscribe', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
         });
@@ -405,7 +422,7 @@ export default function PushButton({ className = '' }) {
         if (subData.hasUserId === false) {
           alert('⚠️ Подписка сохранена, но не привязана к аккаунту (userId отсутствует). Перезайдите в аккаунт.');
         } else {
-          const testRes = await fetch('/api/push/test', { method: 'POST' });
+          const testRes = await fetch('/api/push/test', { method: 'POST', credentials: 'include' });
           const testData = await testRes.json().catch(() => ({}));
 
           if (testRes.ok && testData.ok) {
