@@ -1,5 +1,49 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-23bd1b6';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-fbbe269';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+
+const OFFLINE_HTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Нет подключения к сети — Анемон Агро</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 20px; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 8px 0; }
+    p { font-size: 14px; color: #64748b; margin: 0 0 20px 0; line-height: 1.5; }
+    button { background: #059669; color: #ffffff; border: none; padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }
+    button:hover { background: #047857; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📡</div>
+    <h1>Нет подключения к сети</h1>
+    <p>Запрошенная страница недоступна в оффлайн-режиме. Проверьте интернет-соединение и повторите попытку.</p>
+    <button onclick="window.location.reload()">Повторить попытку</button>
+  </div>
+</body>
+</html>`;
+
+async function fetchWithTimeoutAndRetry(request, timeoutMs = 5000, maxRetries = 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(request, { signal: controller.signal });
+      clearTimeout(timer);
+      if (res && (res.status === 200 || res.status === 304 || (res.status >= 400 && res.status < 500))) {
+        return res;
+      }
+    } catch (e) {
+      if (attempt === maxRetries) throw e;
+    }
+  }
+  throw new Error('Network request failed after retries');
+}
 
 // === INSTALL: сразу берём контроль ===
 self.addEventListener('install', (event) => {
@@ -34,13 +78,11 @@ self.addEventListener('fetch', (event) => {
   // API — только сеть, никогда не кэшируем
   if (url.pathname.startsWith('/api/')) return;
 
-  // === НАВИГАЦИЯ (HTML страницы): ТОЛЬКО сеть, без fallback на старый HTML ===
-  // Это главное исправление: больше не будет белого экрана от устаревших страниц
+  // === НАВИГАЦИЯ (HTML страницы) ===
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetchWithTimeoutAndRetry(request, 5000, 1)
         .then((res) => {
-          // Обновляем кэш свежей копией для офлайн-доступа садовников
           if (res && res.status === 200) {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
@@ -53,17 +95,19 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(async () => {
-          // Оффлайн: показываем только если это /gardener или /login
+          // Оффлайн: показываем только точечный совпавший кэш
           if (url.pathname.startsWith('/gardener')) {
-            const cached = await caches.match('/gardener');
-            if (cached) return cached;
+            const cachedGardener = await caches.match('/gardener');
+            if (cachedGardener) return cachedGardener;
           }
-          const cachedLogin = await caches.match('/login');
-          if (cachedLogin) return cachedLogin;
-          // Иначе — стандартная ошибка сети браузера (НЕ старый мусорный HTML)
-          return new Response('Оффлайн. Проверьте подключение к интернету.', {
+          if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+            const cachedLogin = await caches.match('/login');
+            if (cachedLogin) return cachedLogin;
+          }
+          // Для всех остальных маршрутов или при отсутствии кэша — чистая заглушка OFFLINE_HTML
+          return new Response(OFFLINE_HTML, {
             status: 503,
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
           });
         })
     );

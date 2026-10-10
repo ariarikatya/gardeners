@@ -232,10 +232,11 @@ export default function GardenerDashboard() {
 
   const loadFromCache = async () => {
     try {
-      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, pendingQueue] = await Promise.all([
+      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
         getCache('orders'),
         getCache('profile'),
         getCache('operations'),
+        getCache('auction'),
         getQueue(),
       ]);
 
@@ -258,6 +259,10 @@ export default function GardenerDashboard() {
 
       if (cachedOpsObj && cachedOpsObj.data) {
         setOperations(cachedOpsObj.data || []);
+      }
+
+      if (cachedAuctionObj && cachedAuctionObj.data) {
+        setAuctionOrders(cachedAuctionObj.data || []);
       }
 
       const activeQueueCount = (pendingQueue || []).filter(i => i.status !== 'conflict').length;
@@ -349,7 +354,9 @@ export default function GardenerDashboard() {
     try {
       const res = await fetch('/api/gardener/auction');
       const data = await res.json();
-      setAuctionOrders(data.orders || []);
+      const auctions = data.orders || [];
+      setAuctionOrders(auctions);
+      saveCache('auction', auctions);
     } catch (e) {
       console.error(e);
     } finally {
