@@ -1633,7 +1633,7 @@ export default function AdminDashboard() {
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-50 border border-dashed border-emerald-300 inline-block"></span>Свободно</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-500 inline-block"></span>Можно вклинить</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block"></span>Занят</span>
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-600 inline-block"></span>Выполнен</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-700 inline-block"></span>Выполнен</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-500 inline-block"></span>Перенос</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-rose-500 inline-block"></span>Отказ</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-300 inline-block"></span>Отменён</span>
@@ -1752,9 +1752,9 @@ export default function AdminDashboard() {
                                                 {priceVal > 0 && (
                                                   <span
                                                     title={priceTitle}
-                                                    className="font-bold text-[10px] bg-black/20 px-1 py-0.2 rounded text-white whitespace-nowrap"
+                                                    className="font-bold text-[10px] bg-black/20 px-1 py-0.5 rounded text-white whitespace-nowrap"
                                                   >
-                                                    {priceVal} ₽
+                                                    {priceVal >= 10000 ? Math.round(priceVal / 1000) + 'к' : `${priceVal} ₽`}
                                                   </span>
                                                 )}
                                               </div>

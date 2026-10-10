@@ -18,7 +18,8 @@
     "test:push-sw-version": "node scripts/test-push-sw-version.js",
     "test:push-pwa-env": "node scripts/test-push-pwa-env.js",
     "test:push-logs": "node scripts/test-push-logs.js",
-    "test:push-update-safety": "node scripts/test-push-update-safety.js"
+    "test:push-update-safety": "node scripts/test-push-update-safety.js",
+    "test:push-rebind": "node scripts/test-push-rebind.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
