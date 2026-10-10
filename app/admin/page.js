@@ -1660,7 +1660,7 @@ export default function AdminDashboard() {
                           const visibleDateKeys = new Set(visibleDates.map(d => toDateKey(d)));
 
                           return displayGardeners.map(g => {
-                            const gardenerTotalFact = filteredOrders.reduce((sum, o) => {
+                            const gardenerTotalFact = orders.reduce((sum, o) => {
                               if (
                                 o.gardenerId === g.id &&
                                 o.status === 'Выполнен' &&
