@@ -1676,8 +1676,8 @@ export default function AdminDashboard() {
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span>{g.name}</span>
                                   {gardenerTotalFact > 0 && (
-                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded" title={`Выполнено за период: ${gardenerTotalFact} ₽`}>
-                                      Σ {gardenerTotalFact} (месяц)
+                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded" title={`Итог за период: ${gardenerTotalFact} ₽`}>
+                                      Σ {gardenerTotalFact}
                                     </span>
                                   )}
                                   {g.jobTitle && <span className="text-[10px] text-slate-500 font-normal bg-slate-200/60 px-1.5 py-0.5 rounded">{g.jobTitle}</span>}
