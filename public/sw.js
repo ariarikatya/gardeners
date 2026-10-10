@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-7112f40';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-23bd1b6';
 const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 // === INSTALL: сразу берём контроль ===
