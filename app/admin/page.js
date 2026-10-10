@@ -279,6 +279,52 @@ export default function AdminDashboard() {
   // Скрытые столбцы с сохранением в localStorage
   const [hiddenGardenerIds, setHiddenGardenerIds] = useState([]);
 
+  // Inline редактирование суммы по факту
+  const [editingFactId, setEditingFactId] = useState(null);
+  const [editingFactVal, setEditingFactVal] = useState('');
+  const [savingFactId, setSavingFactId] = useState(null);
+
+  const handleSavePriceFactInline = async (orderId, val) => {
+    if (savingFactId === orderId) return;
+    const numVal = Math.round(Number(val));
+    const newPriceFact = Number.isFinite(numVal) && numVal >= 0 ? numVal : 0;
+
+    const targetOrder = orders.find(o => o.id === orderId);
+    if (!targetOrder) {
+      setEditingFactId(null);
+      return;
+    }
+
+    const oldPriceFact = targetOrder.priceFact;
+
+    if (oldPriceFact === newPriceFact) {
+      setEditingFactId(null);
+      return;
+    }
+
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, priceFact: newPriceFact } : o));
+    setEditingFactId(null);
+    setSavingFactId(orderId);
+
+    try {
+      const res = await fetch('/api/admin/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: orderId, priceFact: newPriceFact })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, priceFact: oldPriceFact } : o));
+        alert(errData.error || 'Не удалось сохранить сумму по факту');
+      }
+    } catch (err) {
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, priceFact: oldPriceFact } : o));
+      alert('Ошибка сети при сохранении суммы');
+    } finally {
+      setSavingFactId(null);
+    }
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -1659,11 +1705,17 @@ export default function AdminDashboard() {
                           const visibleDateKeys = new Set(visibleDates.map(d => toDateKey(d)));
 
                           return displayGardeners.map(g => {
-                            const gardenerTotalFact = filteredOrders.reduce((sum, o) => {
-                              if (o.gardenerId === g.id && o.status === 'Выполнен' && Number(o.priceFact) > 0 && o.date) {
-                                if (visibleDateKeys.has(toDateKey(o.date))) {
-                                  return sum + Number(o.priceFact);
-                                }
+                            const gardenerTotalFact = orders.reduce((sum, o) => {
+                              if (
+                                o.gardenerId === g.id &&
+                                o.status === 'Выполнен' &&
+                                Number(o.priceFact) > 0 &&
+                                o.date &&
+                                visibleDateKeys.has(toDateKey(o.date)) &&
+                                matchesSearch(o) &&
+                                (!filterDistrict.trim() || (o.district || '').toLocaleLowerCase('ru').includes(filterDistrict.trim().toLocaleLowerCase('ru')))
+                              ) {
+                                return sum + Math.round(Number(o.priceFact));
                               }
                               return sum;
                             }, 0);
@@ -1678,7 +1730,7 @@ export default function AdminDashboard() {
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span>{g.name}</span>
                                   {gardenerTotalFact > 0 && (
-                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded" title={`Итог по выполненным за отображаемую неделю: ${gardenerTotalFact}`}>
+                                    <span className="text-[10px] text-slate-500 font-semibold bg-slate-200/70 px-1.5 py-0.5 rounded whitespace-nowrap" title={`Итог по выполненным за отображаемый период: ${gardenerTotalFact}`}>
                                       Σ {gardenerTotalFact}
                                     </span>
                                   )}
@@ -1746,7 +1798,9 @@ export default function AdminDashboard() {
                                       )}
                                       {dayOrders.map(order => {
                                         const isDone = order.status === 'Выполнен';
-                                        const showFactPrice = isDone && order.priceFact > 0;
+                                        const factNumber = Math.round(Number(order.priceFact));
+                                        const hasValidFact = Number.isFinite(factNumber) && factNumber > 0;
+                                        const isEditingThisFact = editingFactId === order.id;
 
                                         return (
                                           <div
@@ -1760,12 +1814,54 @@ export default function AdminDashboard() {
                                               activeCount >= 2 ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600'
                                             }`}
                                           >
-                                            {showFactPrice && (
-                                              <div
-                                                title={`Факт: ${order.priceFact} ₽`}
-                                                className="bg-green-700/60 rounded px-1.5 py-0.5 mb-1 text-left font-bold text-base leading-tight tracking-tight text-white border border-green-500/30"
-                                              >
-                                                {order.priceFact}
+                                            {isDone && (
+                                              <div onClick={e => e.stopPropagation()} className="mb-1">
+                                                {isEditingThisFact ? (
+                                                  <input
+                                                    type="number"
+                                                    autoFocus
+                                                    aria-label="Сумма по факту"
+                                                    value={editingFactVal}
+                                                    onChange={e => setEditingFactVal(e.target.value)}
+                                                    onKeyDown={async e => {
+                                                      if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        await handleSavePriceFactInline(order.id, editingFactVal);
+                                                      } else if (e.key === 'Escape') {
+                                                        e.preventDefault();
+                                                        setEditingFactId(null);
+                                                      }
+                                                    }}
+                                                    onBlur={async () => {
+                                                      await handleSavePriceFactInline(order.id, editingFactVal);
+                                                    }}
+                                                    className="w-full text-xs font-bold bg-white text-slate-900 rounded px-1 py-0.5 outline-none focus:ring-2 focus:ring-emerald-400"
+                                                  />
+                                                ) : hasValidFact ? (
+                                                  <div
+                                                    onClick={() => {
+                                                      setEditingFactId(order.id);
+                                                      setEditingFactVal(String(factNumber));
+                                                    }}
+                                                    title={`Факт: ${factNumber} ₽`}
+                                                    aria-label="Сумма по факту"
+                                                    className="text-sm sm:text-base font-bold leading-none text-white cursor-pointer hover:opacity-80 py-0.5"
+                                                  >
+                                                    {String(factNumber)}
+                                                  </div>
+                                                ) : (
+                                                  <div
+                                                    onClick={() => {
+                                                      setEditingFactId(order.id);
+                                                      setEditingFactVal('');
+                                                    }}
+                                                    title="Указать сумму по факту"
+                                                    aria-label="Сумма по факту"
+                                                    className="text-[10px] font-semibold text-white/80 hover:text-white cursor-pointer hover:underline py-0.5"
+                                                  >
+                                                    + сумма
+                                                  </div>
+                                                )}
                                               </div>
                                             )}
                                             <div className="flex items-center justify-between gap-1 mb-0.5">
