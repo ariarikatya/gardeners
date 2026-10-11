@@ -52,11 +52,8 @@ export default function LoginPage() {
     setLoading(true);
 
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      const storedToken = localStorage.getItem('auth_token');
-      if (storedToken) {
-        handleOfflineLogin();
-        return;
-      }
+      handleOfflineLogin();
+      return;
     }
 
     try {
@@ -79,7 +76,15 @@ export default function LoginPage() {
 
       redirectByRole(data.role);
     } catch (err) {
+      const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
+      const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+
+      if (isNetworkErr && (storedPhone || storedToken || savedPhone)) {
+        handleOfflineLogin();
+        return;
+      }
+
       if (storedToken) {
         setShowOfflineOption(true);
       }
@@ -94,6 +99,17 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    const cleanPhone = phone.replace(/\D/g, '');
+    const isNetworkOffline = typeof window !== 'undefined' && !navigator.onLine;
+
+    if (isNetworkOffline) {
+      const storedPhone = localStorage.getItem('auth_phone');
+      if (storedPhone && cleanPhone && storedPhone === cleanPhone) {
+        handleOfflineLogin();
+        return;
+      }
+    }
+
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -104,12 +120,22 @@ export default function LoginPage() {
 
       if (!res.ok) throw new Error(data.error || 'Ошибка при входе');
 
-      const cleanPhone = phone.replace(/\D/g, '');
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
+      if (data.token) localStorage.setItem('auth_token', data.token);
+      if (data.role) localStorage.setItem('auth_role', data.role);
 
       redirectByRole(data.role);
     } catch (err) {
-      setError(err.message);
+      const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
+      const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
+      const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+
+      if (isNetworkErr && (storedPhone || storedToken) && cleanPhone && storedPhone === cleanPhone) {
+        handleOfflineLogin();
+        return;
+      }
+
+      setError(err.message || 'Ошибка при входе');
     } finally {
       setLoading(false);
     }

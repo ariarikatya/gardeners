@@ -30,14 +30,14 @@ export async function POST(req) {
       gardenerId: user.gardenerId,
     });
 
-    const response = NextResponse.json({ success: true, role: user.role });
+    const response = NextResponse.json({ success: true, role: user.role, token });
     
     // Записываем токен в HttpOnly cookie
     response.cookies.set('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 дней
+      maxAge: 60 * 60 * 24 * 365, // 365 дней
       path: '/',
     });
 

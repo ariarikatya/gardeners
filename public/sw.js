@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261011-cc6d09e';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261011-9aa4ca4';
 const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -68,7 +68,25 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // API — только сеть, никогда не кэшируем
+  // Однократный ретрай для авто-входа при сетевой ошибке / таймауте
+  if (url.pathname === '/api/auth/auto-login' && request.method === 'POST') {
+    event.respondWith(
+      (async () => {
+        try {
+          return await fetch(request.clone());
+        } catch (err1) {
+          try {
+            return await fetch(request.clone());
+          } catch (err2) {
+            throw err2;
+          }
+        }
+      })()
+    );
+    return;
+  }
+
+  // Остальные API — только сеть
   if (url.pathname.startsWith('/api/')) return;
 
   // === НАВИГАЦИЯ (HTML страницы) ===
@@ -81,8 +99,11 @@ self.addEventListener('fetch', (event) => {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
               try {
-                if (url.pathname === '/gardener') cache.put('/gardener', resClone);
-                else if (url.pathname === '/login') cache.put('/login', resClone);
+                if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+                  cache.put('/gardener', resClone);
+                } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                  cache.put('/login', resClone);
+                }
               } catch (e) {}
             }).catch(() => {});
           }
@@ -97,15 +118,17 @@ self.addEventListener('fetch', (event) => {
           try {
             return await tryFetchAndCache();
           } catch (err2) {
-            // 3. Сеть недоступна -> оффлайн фоллбэк
-            if (url.pathname.startsWith('/gardener')) {
-              const cachedGardener = await caches.match('/gardener');
-              if (cachedGardener) return cachedGardener;
-            } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
-              const cachedLogin = await caches.match('/login');
-              if (cachedLogin) return cachedLogin;
-            }
-            // Показываем автономную оффлайн-страницу вместо устаревшего приложения
+            // 3. Сеть недоступна -> проверяем пригодный кэш
+            const exactCached = await caches.match(request);
+            if (exactCached) return exactCached;
+
+            const cachedGardener = await caches.match('/gardener');
+            if (cachedGardener) return cachedGardener;
+
+            const cachedLogin = await caches.match('/login');
+            if (cachedLogin) return cachedLogin;
+
+            // Только если совсем нет кэша маршрутов — отдаём OFFLINE_HTML
             return new Response(OFFLINE_HTML, {
               status: 200,
               headers: { 'Content-Type': 'text/html; charset=utf-8' },
