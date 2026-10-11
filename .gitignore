@@ -54,3 +54,4 @@ test-results/
 
 # Auto-generated service worker version
 lib/swVersion.generated.js
+lib/swVersion.generated.js
