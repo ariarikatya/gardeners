@@ -173,15 +173,19 @@ export async function POST(req) {
         ].filter(Boolean).join(', ');
 
         if (order.status === 'Аукцион') {
-          // Защита от повторной отправки пуша для того же заказа
+          // Защита от повторной отправки пуша для того же заказа (окно 10 минут)
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
           const alreadyPushed = await prisma.clientPushLog.findFirst({
             where: {
               event: 'push_send_result',
+              createdAt: { gte: tenMinutesAgo },
               payload: { contains: order.id },
             },
           });
           if (alreadyPushed) {
-            console.log(`[AuctionPush] Skip duplicate push for order ${order.id}, push already logged in ClientPushLog.`);
+            console.log(
+              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
+            );
             return;
           }
 
@@ -781,6 +785,22 @@ export async function PUT(req) {
 
         // 1. Аукцион
         if (order.status === 'Аукцион' && existing.status !== 'Аукцион') {
+          // Защита от повторной рассылки того же аукциона в течение 10 минут
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+          const alreadyPushed = await prisma.clientPushLog.findFirst({
+            where: {
+              event: 'push_send_result',
+              createdAt: { gte: tenMinutesAgo },
+              payload: { contains: order.id },
+            },
+          });
+          if (alreadyPushed) {
+            console.log(
+              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
+            );
+            return;
+          }
+
           let serviceName = '';
           if (order.serviceId) {
             const svc = await prisma.service.findUnique({ where: { id: order.serviceId } });

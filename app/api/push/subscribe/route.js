@@ -27,6 +27,12 @@ export async function POST(req) {
 
     let savedSub;
     if (userId) {
+      // Backfill: привязываем ранее анонимную подписку (userId = null) для того же endpoint к пришедшему userId
+      await prisma.pushSubscription.updateMany({
+        where: { endpoint, userId: null },
+        data: { userId },
+      }).catch(() => {});
+
       savedSub = await prisma.pushSubscription.upsert({
         where: {
           userId_endpoint: {

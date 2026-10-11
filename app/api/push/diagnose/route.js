@@ -175,6 +175,7 @@ export async function GET(req) {
       subscriptionAliveNow,
       lastDeliveryAttempt,
       mySubscriptionsCount: mySubs.length,
+      unlinkedSubscriptionsCount: formattedSubs.filter((s) => !s.userId).length,
       totalSubscriptionsCount: formattedSubs.length,
       subscriptions: formattedSubs,
       testSend: testSendResults,
