@@ -154,13 +154,6 @@ export async function POST(req) {
           order.address ? `Адрес: ${order.address}` : null,
         ].filter(Boolean).join(', ');
 
-        await sendToRoles(['ADMIN', 'LEADER'], {
-          title: '🌿 Новый заказ',
-          body: bodyParts,
-          tag: order.id,
-          url: '/admin',
-        });
-
         if (order.status === 'Аукцион') {
           let targetServiceIds = [];
           if (order.serviceIds) {
@@ -176,15 +169,24 @@ export async function POST(req) {
           }
 
           let targetUserIds = [];
+          let fallbackAll = false;
           if (targetServiceIds.length > 0) {
-            const matchingUsers = await prisma.user.findMany({
-              where: {
-                role: 'GARDENER',
-                gardener: { services: { some: { id: { in: targetServiceIds } } } }
-              },
-              select: { id: true }
-            });
-            targetUserIds = matchingUsers.map(u => u.id);
+            try {
+              const matchingUsers = await prisma.user.findMany({
+                where: {
+                  role: 'GARDENER',
+                  OR: [
+                    { gardener: { services: { some: { id: { in: targetServiceIds } } } } },
+                    { gardener: { services: { none: {} } } },
+                    { gardener: null },
+                  ],
+                },
+                select: { id: true },
+              });
+              targetUserIds = Array.from(new Set(matchingUsers.map((u) => u.id)));
+            } catch (queryErr) {
+              console.error('[AuctionPush] Error querying matching gardener users:', queryErr.message);
+            }
           }
 
           const pushOptions = {
@@ -194,25 +196,40 @@ export async function POST(req) {
             url: '/gardener',
             actions: [
               { action: 'claim', title: '⚡ Взять' },
-              { action: 'view', title: '👁 Посмотреть' }
+              { action: 'view', title: '👁 Посмотреть' },
             ],
             orderId: order.id,
           };
 
+          let result;
           if (targetUserIds.length > 0) {
-            await sendToUsers(targetUserIds, pushOptions);
+            result = await sendToUsers(targetUserIds, pushOptions);
           } else {
-            await sendToRoles(['GARDENER'], pushOptions);
+            fallbackAll = true;
+            result = await sendToRoles(['GARDENER'], pushOptions);
           }
-        } else if (order.gardenerId) {
-          const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
-          if (gUser) {
-            await sendToUser(gUser.id, {
-              title: '🌿 Вам назначен заказ',
-              body: bodyParts,
-              tag: order.id,
-              url: '/gardener',
-            });
+
+          console.log(
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
+          );
+        } else {
+          await sendToRoles(['ADMIN', 'LEADER'], {
+            title: '🌿 Новый заказ',
+            body: bodyParts,
+            tag: order.id,
+            url: '/admin',
+          });
+
+          if (order.gardenerId) {
+            const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
+            if (gUser) {
+              await sendToUser(gUser.id, {
+                title: '🌿 Вам назначен заказ',
+                body: bodyParts,
+                tag: order.id,
+                url: '/gardener',
+              });
+            }
           }
         }
       } catch (err) {
@@ -569,7 +586,7 @@ export async function PUT(req) {
       include: { service: true }
     });
 
-    if (updateData.status && existing && existing.status !== updateData.status) {
+    if (updateData.status && updateData.status !== 'Аукцион' && existing && existing.status !== updateData.status) {
       (async () => {
         try {
           let serviceName = order.service?.name || '';
@@ -750,15 +767,24 @@ export async function PUT(req) {
           }
 
           let targetUserIds = [];
+          let fallbackAll = false;
           if (targetServiceIds.length > 0) {
-            const matchingUsers = await prisma.user.findMany({
-              where: {
-                role: 'GARDENER',
-                gardener: { services: { some: { id: { in: targetServiceIds } } } }
-              },
-              select: { id: true }
-            });
-            targetUserIds = matchingUsers.map(u => u.id);
+            try {
+              const matchingUsers = await prisma.user.findMany({
+                where: {
+                  role: 'GARDENER',
+                  OR: [
+                    { gardener: { services: { some: { id: { in: targetServiceIds } } } } },
+                    { gardener: { services: { none: {} } } },
+                    { gardener: null },
+                  ],
+                },
+                select: { id: true },
+              });
+              targetUserIds = Array.from(new Set(matchingUsers.map((u) => u.id)));
+            } catch (queryErr) {
+              console.error('[AuctionPush] Error querying matching gardener users:', queryErr.message);
+            }
           }
 
           const pushOptions = {
@@ -768,16 +794,22 @@ export async function PUT(req) {
             url: '/gardener',
             actions: [
               { action: 'claim', title: '⚡ Взять' },
-              { action: 'view', title: '👁 Посмотреть' }
+              { action: 'view', title: '👁 Посмотреть' },
             ],
             orderId: order.id,
           };
 
+          let result;
           if (targetUserIds.length > 0) {
-            await sendToUsers(targetUserIds, pushOptions);
+            result = await sendToUsers(targetUserIds, pushOptions);
           } else {
-            await sendToRoles(['GARDENER'], pushOptions);
+            fallbackAll = true;
+            result = await sendToRoles(['GARDENER'], pushOptions);
           }
+
+          console.log(
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
+          );
           return;
         }
 
@@ -827,7 +859,7 @@ export async function PUT(req) {
 
         // 4. Смена/назначение садовника (новый заказ для садовника)
         const isGardenerChanged = updateData.gardenerId && existing && existing.gardenerId !== updateData.gardenerId;
-        if (isGardenerChanged) {
+        if (isGardenerChanged && order.status !== 'Аукцион') {
           if (order.gardenerId) {
             const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
             if (g && g.vkId && process.env.VK_GROUP_TOKEN) {
