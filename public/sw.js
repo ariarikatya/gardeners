@@ -56,10 +56,39 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// === MESSAGE: ручное обновление ===
+let isOfflineSessionActive = false;
+
+async function getGardenerCacheAge() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const metaRes = await cache.match('/gardener-meta');
+    if (metaRes) {
+      const data = await metaRes.json();
+      if (data && data.ts) {
+        return Date.now() - data.ts;
+      }
+    }
+    const cachedGardener = await cache.match('/gardener');
+    if (cachedGardener) {
+      const dateHeader = cachedGardener.headers.get('Date');
+      if (dateHeader) {
+        const dateMs = new Date(dateHeader).getTime();
+        if (!isNaN(dateMs)) return Date.now() - dateMs;
+      }
+      return 0;
+    }
+  } catch (e) {}
+  return Infinity;
+}
+
+// === MESSAGE: ручное обновление и флаг офлайн-сессии ===
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+  if (event.data) {
+    if (event.data.type === 'SKIP_WAITING') {
+      self.skipWaiting();
+    } else if (event.data.type === 'OFFLINE_SESSION') {
+      isOfflineSessionActive = Boolean(event.data.active);
+    }
   }
 });
 
@@ -68,26 +97,25 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Однократный ретрай для авто-входа при сетевой ошибке / таймауте
-  if (url.pathname === '/api/auth/auto-login' && request.method === 'POST') {
-    event.respondWith(
-      (async () => {
-        try {
-          return await fetch(request.clone());
-        } catch (err1) {
+  // Для ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
+  if (url.pathname.startsWith('/api/')) {
+    if (request.method !== 'GET') {
+      event.respondWith(
+        (async () => {
           try {
             return await fetch(request.clone());
-          } catch (err2) {
-            throw err2;
+          } catch (err1) {
+            try {
+              return await fetch(request.clone());
+            } catch (err2) {
+              throw err2;
+            }
           }
-        }
-      })()
-    );
+        })()
+      );
+    }
     return;
   }
-
-  // Остальные API — только сеть
-  if (url.pathname.startsWith('/api/')) return;
 
   // === НАВИГАЦИЯ (HTML страницы) ===
   if (request.mode === 'navigate') {
@@ -101,6 +129,9 @@ self.addEventListener('fetch', (event) => {
               try {
                 if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                   cache.put('/gardener', resClone);
+                  cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
+                    headers: { 'Content-Type': 'application/json' }
+                  }));
                 } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
                   cache.put('/login', resClone);
                 }
@@ -110,19 +141,26 @@ self.addEventListener('fetch', (event) => {
           return res;
         };
 
-        // 1. Первая сетевая попытка
+        const cachedGardener = await caches.match('/gardener');
+        const age = await getGardenerCacheAge();
+        const MAX_AGE_24H = 24 * 60 * 60 * 1000;
+
+        // Если активна офлайн-сессия, есть кэш /gardener и ему <24ч — отдаём его сразу
+        if (isOfflineSessionActive && cachedGardener && age < MAX_AGE_24H && (url.pathname === '/gardener' || url.pathname.startsWith('/gardener'))) {
+          return cachedGardener;
+        }
+
+        // В остальных случаях пробуем сеть
         try {
           return await tryFetchAndCache();
         } catch (err1) {
-          // 2. Повторная сетевая попытка
           try {
             return await tryFetchAndCache();
           } catch (err2) {
-            // 3. Сеть недоступна -> проверяем пригодный кэш
+            // Сеть недоступна -> проверяем пригодный кэш
             const exactCached = await caches.match(request);
             if (exactCached) return exactCached;
 
-            const cachedGardener = await caches.match('/gardener');
             if (cachedGardener) return cachedGardener;
 
             const cachedLogin = await caches.match('/login');

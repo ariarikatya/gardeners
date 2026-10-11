@@ -223,11 +223,13 @@ async function runTests() {
   assert.ok(queuedClaimIds.has('auc-999'), 'Queued claim ID set should contain auc-999 for "в очереди" UI badge');
   console.log('  ✓ Offline auction claim correctly enqueued with status "в очереди, отправится при связи"');
 
-  // 5. Restore network connection and drain queue to server
+  // 5. Restore network connection and drain queue to server with Authorization header
   mockNetworkOnline = true;
   let serverReceivedClaim = null;
+  let receivedAuthHeader = null;
 
   const mockServerSyncFetch = async (url, options) => {
+    receivedAuthHeader = options.headers['Authorization'] || options.headers['authorization'];
     if (url === '/api/gardener/auction' && options.method === 'POST') {
       serverReceivedClaim = JSON.parse(options.body);
       return {
@@ -242,9 +244,13 @@ async function runTests() {
   let syncedCount = 0;
   for (const item of [...mockIndexedDB.action_queue]) {
     item.status = 'syncing';
+    const token = mockLocalStorage.auth_token;
+    const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': item.idempotencyKey };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
     const res = await mockServerSyncFetch(item.url, {
       method: item.method,
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': item.idempotencyKey },
+      headers,
       body: JSON.stringify(item.payload)
     });
     if (res.ok) {
@@ -255,9 +261,10 @@ async function runTests() {
 
   assert.strictEqual(syncedCount, 1, 'One queued item should be synced');
   assert.strictEqual(mockIndexedDB.action_queue.length, 0, 'Queue should be empty after sync');
+  assert.strictEqual(receivedAuthHeader, 'Bearer mock_token_777', 'Authorization header should contain Bearer token during drain sync');
   assert.ok(serverReceivedClaim, 'Server should have received the claim request');
   assert.strictEqual(serverReceivedClaim.orderId, 'auc-999', 'Server received claim for auc-999');
-  console.log('  ✓ Network restored -> queued claim successfully drained to server and toast displayed');
+  console.log('  ✓ Network restored -> queued claim successfully drained with Authorization Bearer header to server');
   console.log('✅ Test 5 passed!\n');
 
   console.log('🎉 All offline queue tests passed successfully!');

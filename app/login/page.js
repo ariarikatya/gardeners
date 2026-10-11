@@ -27,7 +27,18 @@ export default function LoginPage() {
     }
   }, []);
 
-  const redirectByRole = (role) => {
+  const notifySwOfflineSession = (active) => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'OFFLINE_SESSION',
+        active: Boolean(active),
+        ts: Date.now(),
+      });
+    }
+  };
+
+  const redirectByRole = (role, isOffline = false) => {
+    notifySwOfflineSession(isOffline);
     if (role === 'ADMIN') {
       router.push('/admin');
     } else if (role === 'LEADER') {
@@ -40,9 +51,9 @@ export default function LoginPage() {
   const handleOfflineLogin = () => {
     try {
       const role = localStorage.getItem('auth_role') || 'GARDENER';
-      redirectByRole(role);
+      redirectByRole(role, true);
     } catch (e) {
-      redirectByRole('GARDENER');
+      redirectByRole('GARDENER', true);
     }
   };
 
