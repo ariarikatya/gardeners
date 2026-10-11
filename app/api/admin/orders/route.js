@@ -248,20 +248,31 @@ export async function POST(req) {
           };
 
           let result;
+          let retryResult = null;
           let retryFallback = false;
+          let missedUserIds = [];
+
           if (targetUserIds.length > 0) {
-            result = await sendToUsers(targetUserIds, pushOptions);
-            if ((!result || result.deliveredCount === 0) && !fallbackAll) {
+            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true });
+
+            // Вычисляем пользователей, которым не удалось успешно доставить ни одного пуша
+            const successfulUserIds = new Set(result?.details?.filter((d) => d.success && d.userId)?.map((d) => d.userId) || []);
+            missedUserIds = targetUserIds.filter((id) => !successfulUserIds.has(id));
+
+            if (missedUserIds.length > 0) {
               retryFallback = true;
-              result = await sendToRoles(['GARDENER'], pushOptions);
+              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true });
             }
           } else {
             fallbackAll = true;
             result = await sendToRoles(['GARDENER'], pushOptions);
           }
 
+          const totalDelivered = (result?.deliveredCount ?? 0) + (retryResult?.deliveredCount ?? 0);
+          const totalFailed = (result?.failedCount ?? 0) + (retryResult?.failedCount ?? 0);
+
           console.log(
-            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], unlinkedIncluded=true, fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, missedUserIds=[${missedUserIds.join(', ')}], deliveredCount=${totalDelivered}, failedCount=${totalFailed}`
           );
         } else {
           await sendToRoles(['ADMIN', 'LEADER'], {
@@ -881,20 +892,31 @@ export async function PUT(req) {
           };
 
           let result;
+          let retryResult = null;
           let retryFallback = false;
+          let missedUserIds = [];
+
           if (targetUserIds.length > 0) {
-            result = await sendToUsers(targetUserIds, pushOptions);
-            if ((!result || result.deliveredCount === 0) && !fallbackAll) {
+            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true });
+
+            // Вычисляем пользователей, которым не удалось успешно доставить ни одного пуша
+            const successfulUserIds = new Set(result?.details?.filter((d) => d.success && d.userId)?.map((d) => d.userId) || []);
+            missedUserIds = targetUserIds.filter((id) => !successfulUserIds.has(id));
+
+            if (missedUserIds.length > 0) {
               retryFallback = true;
-              result = await sendToRoles(['GARDENER'], pushOptions);
+              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true });
             }
           } else {
             fallbackAll = true;
             result = await sendToRoles(['GARDENER'], pushOptions);
           }
 
+          const totalDelivered = (result?.deliveredCount ?? 0) + (retryResult?.deliveredCount ?? 0);
+          const totalFailed = (result?.failedCount ?? 0) + (retryResult?.failedCount ?? 0);
+
           console.log(
-            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], unlinkedIncluded=true, fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, missedUserIds=[${missedUserIds.join(', ')}], deliveredCount=${totalDelivered}, failedCount=${totalFailed}`
           );
           return;
         }
