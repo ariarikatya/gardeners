@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-fbbe269';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261011-cc6d09e';
 const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -75,33 +75,27 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
-        // 1. Первая сетевая попытка с таймаутом 5с
-        try {
+        const tryFetchAndCache = async () => {
           const res = await fetchWithTimeout(request, 5000);
-          if (res && res.status === 200) {
+          if (res && res.ok && !res.redirected) {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
               try {
-                if (url.pathname.startsWith('/gardener')) cache.put('/gardener', resClone);
-                else if (url.pathname === '/login' || url.pathname.startsWith('/login')) cache.put('/login', resClone);
+                if (url.pathname === '/gardener') cache.put('/gardener', resClone);
+                else if (url.pathname === '/login') cache.put('/login', resClone);
               } catch (e) {}
             }).catch(() => {});
           }
           return res;
+        };
+
+        // 1. Первая сетевая попытка
+        try {
+          return await tryFetchAndCache();
         } catch (err1) {
           // 2. Повторная сетевая попытка
           try {
-            const res2 = await fetchWithTimeout(request, 5000);
-            if (res2 && res2.status === 200) {
-              const resClone = res2.clone();
-              caches.open(CACHE_NAME).then((cache) => {
-                try {
-                  if (url.pathname.startsWith('/gardener')) cache.put('/gardener', resClone);
-                  else if (url.pathname === '/login' || url.pathname.startsWith('/login')) cache.put('/login', resClone);
-                } catch (e) {}
-              }).catch(() => {});
-            }
-            return res2;
+            return await tryFetchAndCache();
           } catch (err2) {
             // 3. Сеть недоступна -> оффлайн фоллбэк
             if (url.pathname.startsWith('/gardener')) {
@@ -199,6 +193,9 @@ self.addEventListener('notificationclick', (event) => {
         if (targetUrl.startsWith('/gardener') && client.url.includes('/gardener')) {
           if ('navigate' in client && targetUrl.includes('?claim=')) {
             client.navigate(targetUrl);
+            if ('postMessage' in client && orderId) {
+              client.postMessage({ type: 'CLAIM_ORDER', orderId });
+            }
           }
           if ('focus' in client) return client.focus();
         } else if (targetUrl.startsWith('/admin') && client.url.includes('/admin')) {

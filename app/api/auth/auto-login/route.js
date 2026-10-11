@@ -26,7 +26,7 @@ export async function POST(req) {
       gardenerId: user.gardenerId,
     });
 
-    const response = NextResponse.json({ success: true, role: user.role });
+    const response = NextResponse.json({ success: true, role: user.role, token });
 
     response.cookies.set('token', token, {
       httpOnly: true,

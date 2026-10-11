@@ -15,6 +15,7 @@
     "test:stop-day-edit": "node scripts/test-stop-day-edit.js",
     "test:fine-edit-delete": "node scripts/test-fine-edit-delete.js",
     "test:offline-queue": "node scripts/test-offline-queue.js",
+    "test:auction-filter": "node scripts/test-auction-filter.js",
     "test:push-sw-version": "node scripts/test-push-sw-version.js",
     "test:push-pwa-env": "node scripts/test-push-pwa-env.js",
     "test:push-logs": "node scripts/test-push-logs.js",

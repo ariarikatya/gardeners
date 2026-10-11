@@ -137,6 +137,7 @@ export default function GardenerDashboard() {
   const [queueCount, setQueueCount] = useState(0);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
   const [conflictError, setConflictError] = useState(null);
+  const [showSyncedToast, setShowSyncedToast] = useState(false);
 
   // Портфолио садовника
   const [gardenerProfile, setGardenerProfile] = useState(null);
@@ -283,6 +284,8 @@ export default function GardenerDashboard() {
       setQueueCount(q.filter(i => i.status !== 'conflict').length);
       if (result.syncedCount > 0) {
         await Promise.all([fetchOrders(true), fetchProfile()]);
+        setShowSyncedToast(true);
+        setTimeout(() => setShowSyncedToast(false), 4000);
       }
     } catch (e) {
       console.error('handleSyncQueue error:', e);
@@ -476,6 +479,15 @@ export default function GardenerDashboard() {
         const newUrl = window.location.pathname + window.location.search.replace(/([?&])claim=[^&]*&?/, '$1').replace(/[?&]$/, '');
         window.history.replaceState({}, document.title, newUrl);
         handleClaimOrder(claimId);
+      }
+
+      if ('serviceWorker' in navigator) {
+        const handleSwMessage = (event) => {
+          if (event.data && event.data.type === 'CLAIM_ORDER' && event.data.orderId) {
+            handleClaimOrder(event.data.orderId);
+          }
+        };
+        navigator.serviceWorker.addEventListener('message', handleSwMessage);
       }
     }
 
@@ -1358,10 +1370,18 @@ export default function GardenerDashboard() {
       </header>
 
       {/* Оффлайн баннер */}
-      {isOffline && (
-        <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2">
-          <span>📡 Нет сети — показаны сохранённые заказы</span>
-          {lastCacheTime && <span className="opacity-90 font-normal">(последнее обновление: {lastCacheTime})</span>}
+      {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
+        <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>📡 Оффлайн, сохранено {queueCount}</span>
+          <span>(отправим при связи)</span>
+          {lastCacheTime && <span className="opacity-90 font-normal">· данные от {lastCacheTime}</span>}
+        </div>
+      )}
+
+      {/* Синхронизировано тост */}
+      {showSyncedToast && (
+        <div className="bg-emerald-600 text-white text-xs font-semibold px-4 py-2 text-center shadow flex items-center justify-center gap-2 transition-all">
+          <span>✅ Синхронизировано</span>
         </div>
       )}
 

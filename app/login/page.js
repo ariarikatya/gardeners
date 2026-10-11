@@ -6,6 +6,7 @@ export default function LoginPage() {
   const [phone, setPhone] = useState('');
   const [savedPhone, setSavedPhone] = useState(null);
   const [isSavedPhoneMode, setIsSavedPhoneMode] = useState(false);
+  const [showOfflineOption, setShowOfflineOption] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -13,9 +14,13 @@ export default function LoginPage() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem('auth_phone');
+      const token = localStorage.getItem('auth_token');
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
+      }
+      if (token && typeof window !== 'undefined' && !navigator.onLine) {
+        setShowOfflineOption(true);
       }
     } catch (e) {
       // localStorage error fallback
@@ -32,10 +37,27 @@ export default function LoginPage() {
     }
   };
 
+  const handleOfflineLogin = () => {
+    try {
+      const role = localStorage.getItem('auth_role') || 'GARDENER';
+      redirectByRole(role);
+    } catch (e) {
+      redirectByRole('GARDENER');
+    }
+  };
+
   const handleAutoLogin = async () => {
     if (!savedPhone) return;
     setError('');
     setLoading(true);
+
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      const storedToken = localStorage.getItem('auth_token');
+      if (storedToken) {
+        handleOfflineLogin();
+        return;
+      }
+    }
 
     try {
       const res = await fetch('/api/auth/auto-login', {
@@ -52,10 +74,16 @@ export default function LoginPage() {
 
       const cleanPhone = String(savedPhone).replace(/\D/g, '');
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
+      if (data.token) localStorage.setItem('auth_token', data.token);
+      if (data.role) localStorage.setItem('auth_role', data.role);
 
       redirectByRole(data.role);
     } catch (err) {
-      setError(err.message);
+      const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      if (storedToken) {
+        setShowOfflineOption(true);
+      }
+      setError(err.message || 'Ошибка подключения');
     } finally {
       setLoading(false);
     }
@@ -115,6 +143,16 @@ export default function LoginPage() {
             >
               {loading ? 'Вход...' : 'Войти'}
             </button>
+
+            {showOfflineOption && (
+              <button
+                type="button"
+                onClick={handleOfflineLogin}
+                className="w-full flex justify-center py-3 px-4 border border-amber-300 rounded-lg shadow-sm text-lg font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
+              >
+                📡 Войти офлайн
+              </button>
+            )}
 
             <button
               type="button"
