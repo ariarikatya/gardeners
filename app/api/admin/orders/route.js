@@ -114,29 +114,47 @@ export async function POST(req) {
       }
     }
 
-    const order = await prisma.order.create({
-      data: {
-        date: orderDate,
-        dayOfWeek,
-        clientName,
-        address,
-        district: district || null,
-        clientPhone,
-        description,
-        priceContract: parseFloat(priceContract) || 0,
-        priceFact: parseFloat(priceFact) || 0,
-        employeeSalary: sal,
-        companyShare: share,
-        status: status || 'Новый заказ',
-        comment,
-        refusalReason: refusalReason || null,
-        gardenerId: gardenerId || null,
-        serviceId: serviceId || null,
-        serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
-        isCash: typeof isCash === 'boolean' ? isCash : true,
-        amoDealId: leadAmoDealId,
-      },
-    });
+    // Защита от повторного создания заказа при повторе запроса/amoCRM фолбэке
+    let order = null;
+    if (leadAmoDealId) {
+      order = await prisma.order.findFirst({
+        where: { amoDealId: leadAmoDealId, date: orderDate },
+      });
+    } else if (clientPhone && address) {
+      order = await prisma.order.findFirst({
+        where: {
+          clientPhone: String(clientPhone).trim(),
+          address: String(address).trim(),
+          date: orderDate,
+        },
+      });
+    }
+
+    if (!order) {
+      order = await prisma.order.create({
+        data: {
+          date: orderDate,
+          dayOfWeek,
+          clientName,
+          address,
+          district: district || null,
+          clientPhone,
+          description,
+          priceContract: parseFloat(priceContract) || 0,
+          priceFact: parseFloat(priceFact) || 0,
+          employeeSalary: sal,
+          companyShare: share,
+          status: status || 'Новый заказ',
+          comment,
+          refusalReason: refusalReason || null,
+          gardenerId: gardenerId || null,
+          serviceId: serviceId || null,
+          serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
+          isCash: typeof isCash === 'boolean' ? isCash : true,
+          amoDealId: leadAmoDealId,
+        },
+      });
+    }
 
     // Web push notifications for dispatchers & gardeners (fire-and-forget)
     (async () => {
@@ -154,14 +172,23 @@ export async function POST(req) {
           order.address ? `Адрес: ${order.address}` : null,
         ].filter(Boolean).join(', ');
 
-        await sendToRoles(['ADMIN', 'LEADER'], {
-          title: '🌿 Новый заказ',
-          body: bodyParts,
-          tag: order.id,
-          url: '/admin',
-        });
-
         if (order.status === 'Аукцион') {
+          // Защита от повторной отправки пуша для того же заказа (окно 10 минут)
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+          const alreadyPushed = await prisma.clientPushLog.findFirst({
+            where: {
+              event: 'push_send_result',
+              createdAt: { gte: tenMinutesAgo },
+              payload: { contains: order.id },
+            },
+          });
+          if (alreadyPushed) {
+            console.log(
+              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
+            );
+            return;
+          }
+
           let targetServiceIds = [];
           if (order.serviceIds) {
             try {
@@ -176,15 +203,36 @@ export async function POST(req) {
           }
 
           let targetUserIds = [];
+          let fallbackAll = false;
           if (targetServiceIds.length > 0) {
-            const matchingUsers = await prisma.user.findMany({
-              where: {
-                role: 'GARDENER',
-                gardener: { services: { some: { id: { in: targetServiceIds } } } }
-              },
-              select: { id: true }
-            });
-            targetUserIds = matchingUsers.map(u => u.id);
+            try {
+              const matchingUsers = await prisma.user.findMany({
+                where: {
+                  role: 'GARDENER',
+                  OR: [
+                    { gardener: { services: { some: { id: { in: targetServiceIds } } } } },
+                    { gardener: { services: { none: {} } } },
+                    { gardener: null },
+                  ],
+                },
+                select: { id: true },
+              });
+              targetUserIds = Array.from(new Set(matchingUsers.map((u) => u.id)));
+            } catch (queryErr) {
+              console.error('[AuctionPush] Error querying matching gardener users:', queryErr.message);
+            }
+          }
+
+          if (gardenerId) {
+            try {
+              const g = await prisma.gardener.findUnique({ where: { id: gardenerId } });
+              if (g && g.partnerId) {
+                const pUser = await prisma.user.findFirst({ where: { gardenerId: g.partnerId } });
+                if (pUser && !targetUserIds.includes(pUser.id)) {
+                  targetUserIds.push(pUser.id);
+                }
+              }
+            } catch (pErr) {}
           }
 
           const pushOptions = {
@@ -194,25 +242,56 @@ export async function POST(req) {
             url: '/gardener',
             actions: [
               { action: 'claim', title: '⚡ Взять' },
-              { action: 'view', title: '👁 Посмотреть' }
+              { action: 'view', title: '👁 Посмотреть' },
             ],
             orderId: order.id,
           };
 
+          let result;
+          let retryResult = null;
+          let retryFallback = false;
+          let missedUserIds = [];
+
           if (targetUserIds.length > 0) {
-            await sendToUsers(targetUserIds, pushOptions);
+            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true });
+
+            // Вычисляем пользователей, которым не удалось успешно доставить ни одного пуша
+            const successfulUserIds = new Set(result?.details?.filter((d) => d.success && d.userId)?.map((d) => d.userId) || []);
+            missedUserIds = targetUserIds.filter((id) => !successfulUserIds.has(id));
+
+            if (missedUserIds.length > 0) {
+              retryFallback = true;
+              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true });
+            }
           } else {
-            await sendToRoles(['GARDENER'], pushOptions);
+            fallbackAll = true;
+            result = await sendToRoles(['GARDENER'], pushOptions);
           }
-        } else if (order.gardenerId) {
-          const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
-          if (gUser) {
-            await sendToUser(gUser.id, {
-              title: '🌿 Вам назначен заказ',
-              body: bodyParts,
-              tag: order.id,
-              url: '/gardener',
-            });
+
+          const totalDelivered = (result?.deliveredCount ?? 0) + (retryResult?.deliveredCount ?? 0);
+          const totalFailed = (result?.failedCount ?? 0) + (retryResult?.failedCount ?? 0);
+
+          console.log(
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], unlinkedIncluded=true, fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, missedUserIds=[${missedUserIds.join(', ')}], deliveredCount=${totalDelivered}, failedCount=${totalFailed}`
+          );
+        } else {
+          await sendToRoles(['ADMIN', 'LEADER'], {
+            title: '🌿 Новый заказ',
+            body: bodyParts,
+            tag: order.id,
+            url: '/admin',
+          });
+
+          if (order.gardenerId) {
+            const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
+            if (gUser) {
+              await sendToUser(gUser.id, {
+                title: '🌿 Вам назначен заказ',
+                body: bodyParts,
+                tag: order.id,
+                url: '/gardener',
+              });
+            }
           }
         }
       } catch (err) {
@@ -412,7 +491,7 @@ export async function POST(req) {
             });
 
             const partnerUser = await prisma.user.findFirst({ where: { gardenerId: partner.id } });
-            if (partnerUser) {
+            if (partnerUser && status !== 'Аукцион' && order.status !== 'Аукцион') {
               const dateStr = partnerOrder.date ? new Date(partnerOrder.date).toISOString().split('T')[0] : '';
               const pBodyParts = [
                 `Адрес: ${partnerOrder.address || 'Не указан'}`,
@@ -569,7 +648,7 @@ export async function PUT(req) {
       include: { service: true }
     });
 
-    if (updateData.status && existing && existing.status !== updateData.status) {
+    if (updateData.status && updateData.status !== 'Аукцион' && existing && existing.status !== updateData.status) {
       (async () => {
         try {
           let serviceName = order.service?.name || '';
@@ -717,6 +796,22 @@ export async function PUT(req) {
 
         // 1. Аукцион
         if (order.status === 'Аукцион' && existing.status !== 'Аукцион') {
+          // Защита от повторной рассылки того же аукциона в течение 10 минут
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+          const alreadyPushed = await prisma.clientPushLog.findFirst({
+            where: {
+              event: 'push_send_result',
+              createdAt: { gte: tenMinutesAgo },
+              payload: { contains: order.id },
+            },
+          });
+          if (alreadyPushed) {
+            console.log(
+              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
+            );
+            return;
+          }
+
           let serviceName = '';
           if (order.serviceId) {
             const svc = await prisma.service.findUnique({ where: { id: order.serviceId } });
@@ -750,15 +845,38 @@ export async function PUT(req) {
           }
 
           let targetUserIds = [];
+          let fallbackAll = false;
           if (targetServiceIds.length > 0) {
-            const matchingUsers = await prisma.user.findMany({
-              where: {
-                role: 'GARDENER',
-                gardener: { services: { some: { id: { in: targetServiceIds } } } }
-              },
-              select: { id: true }
-            });
-            targetUserIds = matchingUsers.map(u => u.id);
+            try {
+              const matchingUsers = await prisma.user.findMany({
+                where: {
+                  role: 'GARDENER',
+                  OR: [
+                    { gardener: { services: { some: { id: { in: targetServiceIds } } } } },
+                    { gardener: { services: { none: {} } } },
+                    { gardener: null },
+                  ],
+                },
+                select: { id: true },
+              });
+              targetUserIds = Array.from(new Set(matchingUsers.map((u) => u.id)));
+            } catch (queryErr) {
+              console.error('[AuctionPush] Error querying matching gardener users:', queryErr.message);
+            }
+          }
+
+          // Добавляем напарника садовника в targetUserIds, чтобы не было отдельной рассылки с тем же tag=order.id
+          const partnerGardenerId = order.gardenerId || existing.gardenerId;
+          if (partnerGardenerId) {
+            try {
+              const g = await prisma.gardener.findUnique({ where: { id: partnerGardenerId } });
+              if (g && g.partnerId) {
+                const pUser = await prisma.user.findFirst({ where: { gardenerId: g.partnerId } });
+                if (pUser && !targetUserIds.includes(pUser.id)) {
+                  targetUserIds.push(pUser.id);
+                }
+              }
+            } catch (pErr) {}
           }
 
           const pushOptions = {
@@ -768,16 +886,38 @@ export async function PUT(req) {
             url: '/gardener',
             actions: [
               { action: 'claim', title: '⚡ Взять' },
-              { action: 'view', title: '👁 Посмотреть' }
+              { action: 'view', title: '👁 Посмотреть' },
             ],
             orderId: order.id,
           };
 
+          let result;
+          let retryResult = null;
+          let retryFallback = false;
+          let missedUserIds = [];
+
           if (targetUserIds.length > 0) {
-            await sendToUsers(targetUserIds, pushOptions);
+            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true });
+
+            // Вычисляем пользователей, которым не удалось успешно доставить ни одного пуша
+            const successfulUserIds = new Set(result?.details?.filter((d) => d.success && d.userId)?.map((d) => d.userId) || []);
+            missedUserIds = targetUserIds.filter((id) => !successfulUserIds.has(id));
+
+            if (missedUserIds.length > 0) {
+              retryFallback = true;
+              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true });
+            }
           } else {
-            await sendToRoles(['GARDENER'], pushOptions);
+            fallbackAll = true;
+            result = await sendToRoles(['GARDENER'], pushOptions);
           }
+
+          const totalDelivered = (result?.deliveredCount ?? 0) + (retryResult?.deliveredCount ?? 0);
+          const totalFailed = (result?.failedCount ?? 0) + (retryResult?.failedCount ?? 0);
+
+          console.log(
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], unlinkedIncluded=true, fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, missedUserIds=[${missedUserIds.join(', ')}], deliveredCount=${totalDelivered}, failedCount=${totalFailed}`
+          );
           return;
         }
 
@@ -827,7 +967,7 @@ export async function PUT(req) {
 
         // 4. Смена/назначение садовника (новый заказ для садовника)
         const isGardenerChanged = updateData.gardenerId && existing && existing.gardenerId !== updateData.gardenerId;
-        if (isGardenerChanged) {
+        if (isGardenerChanged && order.status !== 'Аукцион') {
           if (order.gardenerId) {
             const g = await prisma.gardener.findUnique({ where: { id: order.gardenerId } });
             if (g && g.vkId && process.env.VK_GROUP_TOKEN) {

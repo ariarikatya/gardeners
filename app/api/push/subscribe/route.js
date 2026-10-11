@@ -27,6 +27,12 @@ export async function POST(req) {
 
     let savedSub;
     if (userId) {
+      // Backfill: привязываем все ранее существовавшие подписки с тем же endpoint к пришедшему userId
+      await prisma.pushSubscription.updateMany({
+        where: { endpoint, OR: [{ userId: null }, { userId: { not: userId } }] },
+        data: { userId },
+      }).catch(() => {});
+
       savedSub = await prisma.pushSubscription.upsert({
         where: {
           userId_endpoint: {
@@ -46,7 +52,8 @@ export async function POST(req) {
         },
       });
     } else {
-      const existing = await prisma.pushSubscription.findFirst({ where: { endpoint, userId: null } });
+      // Без userId: ищем любую подписку с этим endpoint, чтобы обновить, а не плодить дубликаты
+      const existing = await prisma.pushSubscription.findFirst({ where: { endpoint } });
       if (existing) {
         savedSub = await prisma.pushSubscription.update({
           where: { id: existing.id },
@@ -58,6 +65,14 @@ export async function POST(req) {
         });
       }
     }
+
+    // Удаляем дублирующие записи по тому же endpoint, сохраняя только активную savedSub
+    await prisma.pushSubscription.deleteMany({
+      where: {
+        endpoint,
+        id: { not: savedSub.id },
+      },
+    }).catch(() => {});
 
     console.log(`[WebPush] subscribe saved: id=${savedSub.id} userId=${userId} clientVersion=${clientVersion} endpoint=${endpoint.slice(0, 60)}...`);
     if (!userId) {
