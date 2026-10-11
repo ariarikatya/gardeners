@@ -1,7 +1,44 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-23bd1b6';
-const APP_SHELL = ['/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261010-fbbe269';
+const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
-// === INSTALL: сразу берём контроль ===
+const OFFLINE_HTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Нет сети | Анемон Агро</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
+    h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 12px; }
+    p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
+    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; }
+    button:active { background: #047857; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📡 Нет связи с сервером</h1>
+    <p>Не удалось подключиться к сети. Проверьте интернет или подключение к Wi-Fi и повторите попытку.</p>
+    <button onclick="window.location.reload()">Повторить попытку</button>
+  </div>
+</body>
+</html>`;
+
+async function fetchWithTimeout(request, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(request, { signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+// === INSTALL: сразу берём контроль и кэшируем APP_SHELL ===
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
@@ -34,13 +71,13 @@ self.addEventListener('fetch', (event) => {
   // API — только сеть, никогда не кэшируем
   if (url.pathname.startsWith('/api/')) return;
 
-  // === НАВИГАЦИЯ (HTML страницы): ТОЛЬКО сеть, без fallback на старый HTML ===
-  // Это главное исправление: больше не будет белого экрана от устаревших страниц
+  // === НАВИГАЦИЯ (HTML страницы) ===
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
-        .then((res) => {
-          // Обновляем кэш свежей копией для офлайн-доступа садовников
+      (async () => {
+        // 1. Первая сетевая попытка с таймаутом 5с
+        try {
+          const res = await fetchWithTimeout(request, 5000);
           if (res && res.status === 200) {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
@@ -51,21 +88,37 @@ self.addEventListener('fetch', (event) => {
             }).catch(() => {});
           }
           return res;
-        })
-        .catch(async () => {
-          // Оффлайн: показываем только если это /gardener или /login
-          if (url.pathname.startsWith('/gardener')) {
-            const cached = await caches.match('/gardener');
-            if (cached) return cached;
+        } catch (err1) {
+          // 2. Повторная сетевая попытка
+          try {
+            const res2 = await fetchWithTimeout(request, 5000);
+            if (res2 && res2.status === 200) {
+              const resClone = res2.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                try {
+                  if (url.pathname.startsWith('/gardener')) cache.put('/gardener', resClone);
+                  else if (url.pathname === '/login' || url.pathname.startsWith('/login')) cache.put('/login', resClone);
+                } catch (e) {}
+              }).catch(() => {});
+            }
+            return res2;
+          } catch (err2) {
+            // 3. Сеть недоступна -> оффлайн фоллбэк
+            if (url.pathname.startsWith('/gardener')) {
+              const cachedGardener = await caches.match('/gardener');
+              if (cachedGardener) return cachedGardener;
+            } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+              const cachedLogin = await caches.match('/login');
+              if (cachedLogin) return cachedLogin;
+            }
+            // Показываем автономную оффлайн-страницу вместо устаревшего приложения
+            return new Response(OFFLINE_HTML, {
+              status: 200,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            });
           }
-          const cachedLogin = await caches.match('/login');
-          if (cachedLogin) return cachedLogin;
-          // Иначе — стандартная ошибка сети браузера (НЕ старый мусорный HTML)
-          return new Response('Оффлайн. Проверьте подключение к интернету.', {
-            status: 503,
-            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-          });
-        })
+        }
+      })()
     );
     return;
   }
@@ -105,7 +158,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// === PUSH: без изменений ===
+// === PUSH: с поддержкой действий (actions) и orderId ===
 self.addEventListener('push', (event) => {
   let data = {};
   if (event.data) {
@@ -118,18 +171,35 @@ self.addEventListener('push', (event) => {
     badge: '/icon-192.png',
     tag: data.tag || undefined,
     requireInteraction: true,
-    data: { url: data.url || '/admin' },
+    data: {
+      url: data.url || '/admin',
+      orderId: data.orderId || data.tag || undefined,
+    },
+    actions: data.actions || undefined,
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || '/admin';
+  const action = event.action;
+  const notificationData = event.notification.data || {};
+  const orderId = notificationData.orderId || event.notification.tag;
+
+  let targetUrl = notificationData.url || '/admin';
+  if (action === 'claim') {
+    targetUrl = orderId ? `/gardener?claim=${orderId}` : '/gardener';
+  } else if (action === 'view') {
+    targetUrl = notificationData.url || '/gardener';
+  }
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (targetUrl.startsWith('/gardener') && client.url.includes('/gardener')) {
+          if ('navigate' in client && targetUrl.includes('?claim=')) {
+            client.navigate(targetUrl);
+          }
           if ('focus' in client) return client.focus();
         } else if (targetUrl.startsWith('/admin') && client.url.includes('/admin')) {
           if ('focus' in client) {

@@ -4,7 +4,7 @@ import { verifyToken } from '@/lib/jwt';
 import { forwardToAmo } from '@/lib/amo';
 import amoApi from '@/lib/amoApi';
 import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
-import { sendToRoles, sendToUser, sendToAll } from '@/lib/webPush';
+import { sendToRoles, sendToUser, sendToUsers, sendToAll } from '@/lib/webPush';
 import { calculateOrderSplit } from '@/lib/money';
 import { toDateKey } from '@/lib/dates';
 
@@ -162,12 +162,35 @@ export async function POST(req) {
         });
 
         if (order.status === 'Аукцион') {
-          await sendToRoles(['GARDENER'], {
+          let targetUserIds = [];
+          if (order.serviceId) {
+            const matchingUsers = await prisma.user.findMany({
+              where: {
+                role: 'GARDENER',
+                gardener: { services: { some: { id: order.serviceId } } }
+              },
+              select: { id: true }
+            });
+            targetUserIds = matchingUsers.map(u => u.id);
+          }
+
+          const pushOptions = {
             title: '❗ Объявлен аукцион!',
             body: bodyParts,
             tag: order.id,
             url: '/gardener',
-          });
+            actions: [
+              { action: 'claim', title: '⚡ Взять' },
+              { action: 'view', title: '👁 Посмотреть' }
+            ],
+            orderId: order.id,
+          };
+
+          if (targetUserIds.length > 0) {
+            await sendToUsers(targetUserIds, pushOptions);
+          } else {
+            await sendToRoles(['GARDENER'], pushOptions);
+          }
         } else if (order.gardenerId) {
           const gUser = await prisma.user.findFirst({ where: { gardenerId: order.gardenerId } });
           if (gUser) {
@@ -323,6 +346,7 @@ export async function POST(req) {
             date: order.date,
             district: order.district,
             serviceName,
+            serviceId: order.serviceId,
             description: order.description
           }, prisma);
         } else if (order.gardenerId && process.env.VK_GROUP_TOKEN) {
@@ -689,6 +713,7 @@ export async function PUT(req) {
             date: order.date,
             district: order.district,
             serviceName,
+            serviceId: order.serviceId,
             description: order.description
           }, prisma);
 
@@ -698,12 +723,35 @@ export async function PUT(req) {
             serviceName ? `Услуга: ${serviceName}` : null,
           ].filter(Boolean).join(', ');
 
-          await sendToRoles(['GARDENER'], {
+          let targetUserIds = [];
+          if (order.serviceId) {
+            const matchingUsers = await prisma.user.findMany({
+              where: {
+                role: 'GARDENER',
+                gardener: { services: { some: { id: order.serviceId } } }
+              },
+              select: { id: true }
+            });
+            targetUserIds = matchingUsers.map(u => u.id);
+          }
+
+          const pushOptions = {
             title: '❗ Объявлен аукцион!',
             body: auctionBody,
             tag: order.id,
             url: '/gardener',
-          });
+            actions: [
+              { action: 'claim', title: '⚡ Взять' },
+              { action: 'view', title: '👁 Посмотреть' }
+            ],
+            orderId: order.id,
+          };
+
+          if (targetUserIds.length > 0) {
+            await sendToUsers(targetUserIds, pushOptions);
+          } else {
+            await sendToRoles(['GARDENER'], pushOptions);
+          }
           return;
         }
 

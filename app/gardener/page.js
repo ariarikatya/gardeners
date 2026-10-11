@@ -469,6 +469,16 @@ export default function GardenerDashboard() {
     fetchOrders();
     fetchProfile();
 
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const claimId = urlParams.get('claim');
+      if (claimId) {
+        const newUrl = window.location.pathname + window.location.search.replace(/([?&])claim=[^&]*&?/, '$1').replace(/[?&]$/, '');
+        window.history.replaceState({}, document.title, newUrl);
+        handleClaimOrder(claimId);
+      }
+    }
+
     const interval = setInterval(() => {
       if (typeof window !== 'undefined' && navigator.onLine) {
         fetchOrders(true);
