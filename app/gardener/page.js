@@ -137,6 +137,7 @@ export default function GardenerDashboard() {
   const [queueCount, setQueueCount] = useState(0);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
   const [conflictError, setConflictError] = useState(null);
+  const [showSyncedToast, setShowSyncedToast] = useState(false);
 
   // Портфолио садовника
   const [gardenerProfile, setGardenerProfile] = useState(null);
@@ -232,10 +233,11 @@ export default function GardenerDashboard() {
 
   const loadFromCache = async () => {
     try {
-      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, pendingQueue] = await Promise.all([
+      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
         getCache('orders'),
         getCache('profile'),
         getCache('operations'),
+        getCache('auction'),
         getQueue(),
       ]);
 
@@ -260,6 +262,10 @@ export default function GardenerDashboard() {
         setOperations(cachedOpsObj.data || []);
       }
 
+      if (cachedAuctionObj && cachedAuctionObj.data) {
+        setAuctionOrders(cachedAuctionObj.data || []);
+      }
+
       const activeQueueCount = (pendingQueue || []).filter(i => i.status !== 'conflict').length;
       setQueueCount(activeQueueCount);
     } catch (e) {
@@ -282,7 +288,9 @@ export default function GardenerDashboard() {
       const q = await getQueue();
       setQueueCount(q.filter(i => i.status !== 'conflict').length);
       if (result.syncedCount > 0) {
-        await Promise.all([fetchOrders(true), fetchProfile()]);
+        await Promise.all([fetchOrders(true), fetchProfile(), fetchAuction()]);
+        setShowSyncedToast(true);
+        setTimeout(() => setShowSyncedToast(false), 4000);
       }
     } catch (e) {
       console.error('handleSyncQueue error:', e);
@@ -343,15 +351,26 @@ export default function GardenerDashboard() {
     }
   };
 
-  const fetchAuction = async () => {
-    if (typeof window !== 'undefined' && !navigator.onLine) return;
+  const fetchAuction = async (isManualRefresh = false) => {
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      if (isManualRefresh) {
+        alert('Нет сети — показаны сохранённые данные');
+      }
+      return;
+    }
     setLoadingAuction(true);
     try {
       const res = await fetch('/api/gardener/auction');
+      if (!res.ok) throw new Error('Ошибка получения аукционов');
       const data = await res.json();
-      setAuctionOrders(data.orders || []);
+      const list = data.orders || [];
+      setAuctionOrders(list);
+      saveCache('auction', list);
     } catch (e) {
       console.error(e);
+      if (isManualRefresh) {
+        alert('Нет сети — показаны сохранённые данные');
+      }
     } finally {
       setLoadingAuction(false);
     }
@@ -476,6 +495,15 @@ export default function GardenerDashboard() {
         const newUrl = window.location.pathname + window.location.search.replace(/([?&])claim=[^&]*&?/, '$1').replace(/[?&]$/, '');
         window.history.replaceState({}, document.title, newUrl);
         handleClaimOrder(claimId);
+      }
+
+      if ('serviceWorker' in navigator) {
+        const handleSwMessage = (event) => {
+          if (event.data && event.data.type === 'CLAIM_ORDER' && event.data.orderId) {
+            handleClaimOrder(event.data.orderId);
+          }
+        };
+        navigator.serviceWorker.addEventListener('message', handleSwMessage);
       }
     }
 
@@ -1358,10 +1386,18 @@ export default function GardenerDashboard() {
       </header>
 
       {/* Оффлайн баннер */}
-      {isOffline && (
-        <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2">
-          <span>📡 Нет сети — показаны сохранённые заказы</span>
-          {lastCacheTime && <span className="opacity-90 font-normal">(последнее обновление: {lastCacheTime})</span>}
+      {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
+        <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>📡 Оффлайн, сохранено {queueCount}</span>
+          <span>(отправим при связи)</span>
+          {lastCacheTime && <span className="opacity-90 font-normal">· данные от {lastCacheTime}</span>}
+        </div>
+      )}
+
+      {/* Синхронизировано тост */}
+      {showSyncedToast && (
+        <div className="bg-emerald-600 text-white text-xs font-semibold px-4 py-2 text-center shadow flex items-center justify-center gap-2 transition-all">
+          <span>✅ Синхронизировано</span>
         </div>
       )}
 
@@ -1679,8 +1715,13 @@ export default function GardenerDashboard() {
           <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-bold text-emerald-900">Аукцион заказов</h2>
-                <button type="button" onClick={fetchAuction} className="text-xs text-emerald-700 underline">Обновить</button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-bold text-emerald-900">Аукцион заказов</h2>
+                  {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && lastCacheTime && (
+                    <span className="text-xs text-slate-500 font-normal">данные от {lastCacheTime}</span>
+                  )}
+                </div>
+                <button type="button" onClick={() => fetchAuction(true)} className="text-xs text-emerald-700 underline">Обновить</button>
               </div>
               <p className="text-xs text-slate-500 mb-4">
                 Свободные заказы, которые диспетчер выставил на аукцион. Кто первый нажимает «Забрать заказ» — тот и становится исполнителем!

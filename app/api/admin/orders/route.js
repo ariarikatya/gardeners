@@ -162,12 +162,25 @@ export async function POST(req) {
         });
 
         if (order.status === 'Аукцион') {
+          let targetServiceIds = [];
+          if (order.serviceIds) {
+            try {
+              const parsed = typeof order.serviceIds === 'string' ? JSON.parse(order.serviceIds) : order.serviceIds;
+              if (Array.isArray(parsed)) targetServiceIds = parsed.filter(Boolean);
+            } catch (e) {
+              if (typeof order.serviceIds === 'string' && order.serviceIds.trim()) targetServiceIds = [order.serviceIds.trim()];
+            }
+          }
+          if (order.serviceId && !targetServiceIds.includes(order.serviceId)) {
+            targetServiceIds.push(order.serviceId);
+          }
+
           let targetUserIds = [];
-          if (order.serviceId) {
+          if (targetServiceIds.length > 0) {
             const matchingUsers = await prisma.user.findMany({
               where: {
                 role: 'GARDENER',
-                gardener: { services: { some: { id: order.serviceId } } }
+                gardener: { services: { some: { id: { in: targetServiceIds } } } }
               },
               select: { id: true }
             });
@@ -723,12 +736,25 @@ export async function PUT(req) {
             serviceName ? `Услуга: ${serviceName}` : null,
           ].filter(Boolean).join(', ');
 
+          let targetServiceIds = [];
+          if (order.serviceIds) {
+            try {
+              const parsed = typeof order.serviceIds === 'string' ? JSON.parse(order.serviceIds) : order.serviceIds;
+              if (Array.isArray(parsed)) targetServiceIds = parsed.filter(Boolean);
+            } catch (e) {
+              if (typeof order.serviceIds === 'string' && order.serviceIds.trim()) targetServiceIds = [order.serviceIds.trim()];
+            }
+          }
+          if (order.serviceId && !targetServiceIds.includes(order.serviceId)) {
+            targetServiceIds.push(order.serviceId);
+          }
+
           let targetUserIds = [];
-          if (order.serviceId) {
+          if (targetServiceIds.length > 0) {
             const matchingUsers = await prisma.user.findMany({
               where: {
                 role: 'GARDENER',
-                gardener: { services: { some: { id: order.serviceId } } }
+                gardener: { services: { some: { id: { in: targetServiceIds } } } }
               },
               select: { id: true }
             });
