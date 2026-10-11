@@ -135,9 +135,11 @@ export default function GardenerDashboard() {
   const [isOffline, setIsOffline] = useState(false);
   const [lastCacheTime, setLastCacheTime] = useState(null);
   const [queueCount, setQueueCount] = useState(0);
+  const [queuedClaimIds, setQueuedClaimIds] = useState(new Set());
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
   const [conflictError, setConflictError] = useState(null);
   const [showSyncedToast, setShowSyncedToast] = useState(false);
+  const [syncedToastMsg, setSyncedToastMsg] = useState('');
 
   // Портфолио садовника
   const [gardenerProfile, setGardenerProfile] = useState(null);
@@ -266,8 +268,10 @@ export default function GardenerDashboard() {
         setAuctionOrders(cachedAuctionObj.data || []);
       }
 
-      const activeQueueCount = (pendingQueue || []).filter(i => i.status !== 'conflict').length;
-      setQueueCount(activeQueueCount);
+      const activeQueue = (pendingQueue || []).filter(i => i.status !== 'conflict');
+      setQueueCount(activeQueue.length);
+      const claimIds = new Set(activeQueue.filter(i => i.actionType === 'AUCTION_CLAIM').map(i => i.payload?.orderId));
+      setQueuedClaimIds(claimIds);
     } catch (e) {
       console.error('Error loading offline cache:', e);
     }
@@ -286,9 +290,13 @@ export default function GardenerDashboard() {
         }
       );
       const q = await getQueue();
-      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      const activeQueue = q.filter(i => i.status !== 'conflict');
+      setQueueCount(activeQueue.length);
+      const claimIds = new Set(activeQueue.filter(i => i.actionType === 'AUCTION_CLAIM').map(i => i.payload?.orderId));
+      setQueuedClaimIds(claimIds);
       if (result.syncedCount > 0) {
         await Promise.all([fetchOrders(true), fetchProfile(), fetchAuction()]);
+        setSyncedToastMsg(`Связь восстановлена, ${result.syncedCount} ${result.syncedCount === 1 ? 'заявка отправлена' : result.syncedCount < 5 ? 'заявки отправлены' : 'заявок отправлено'}`);
         setShowSyncedToast(true);
         setTimeout(() => setShowSyncedToast(false), 4000);
       }
@@ -353,6 +361,7 @@ export default function GardenerDashboard() {
 
   const fetchAuction = async (isManualRefresh = false) => {
     if (typeof window !== 'undefined' && !navigator.onLine) {
+      setIsOffline(true);
       if (isManualRefresh) {
         alert('Нет сети — показаны сохранённые данные');
       }
@@ -365,9 +374,10 @@ export default function GardenerDashboard() {
       const data = await res.json();
       const list = data.orders || [];
       setAuctionOrders(list);
-      saveCache('auction', list);
+      await saveCache('auction', list);
     } catch (e) {
       console.error(e);
+      setIsOffline(true);
       if (isManualRefresh) {
         alert('Нет сети — показаны сохранённые данные');
       }
@@ -449,7 +459,10 @@ export default function GardenerDashboard() {
         payload: { orderId }
       });
       const q = await getQueue();
-      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      const activeQueue = q.filter(i => i.status !== 'conflict');
+      setQueueCount(activeQueue.length);
+      const claimIds = new Set(activeQueue.filter(i => i.actionType === 'AUCTION_CLAIM').map(i => i.payload?.orderId));
+      setQueuedClaimIds(claimIds);
       alert('Запрос забрать заказ с аукциона сохранён и будет отправлен при подключении.');
       setClaimingId(null);
       return;
@@ -476,7 +489,10 @@ export default function GardenerDashboard() {
         payload: { orderId }
       });
       const q = await getQueue();
-      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      const activeQueue = q.filter(i => i.status !== 'conflict');
+      setQueueCount(activeQueue.length);
+      const claimIds = new Set(activeQueue.filter(i => i.actionType === 'AUCTION_CLAIM').map(i => i.payload?.orderId));
+      setQueuedClaimIds(claimIds);
       alert('Сетевая ошибка. Действие добавлено в очередь синхронизации.');
     } finally {
       setClaimingId(null);
@@ -487,6 +503,7 @@ export default function GardenerDashboard() {
     loadFromCache();
     fetchOrders();
     fetchProfile();
+    fetchAuction();
 
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
@@ -1388,16 +1405,15 @@ export default function GardenerDashboard() {
       {/* Оффлайн баннер */}
       {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
         <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
-          <span>📡 Оффлайн, сохранено {queueCount}</span>
-          <span>(отправим при связи)</span>
-          {lastCacheTime && <span className="opacity-90 font-normal">· данные от {lastCacheTime}</span>}
+          <span>⚉ Офлайн-режим: показаны сохранённые данные {lastCacheTime ? `от ${lastCacheTime}` : ''}</span>
+          {queueCount > 0 && <span>(в очереди: {queueCount})</span>}
         </div>
       )}
 
       {/* Синхронизировано тост */}
       {showSyncedToast && (
         <div className="bg-emerald-600 text-white text-xs font-semibold px-4 py-2 text-center shadow flex items-center justify-center gap-2 transition-all">
-          <span>✅ Синхронизировано</span>
+          <span>✅ {syncedToastMsg || 'Синхронизировано'}</span>
         </div>
       )}
 
@@ -1735,28 +1751,38 @@ export default function GardenerDashboard() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {auctionOrders.map(order => (
-                    <div key={order.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-200 text-amber-900">🔔 Аукцион</span>
-                        <span className="text-xs font-bold text-slate-700">📅 {order.date ? order.date.split('T')[0] : ''}</span>
-                      </div>
-                      <div className="text-sm font-bold text-slate-800">📍 Район: {order.district || 'Не указан'}</div>
-                      <div className="text-xs text-slate-600 mt-1">🌿 Услуги: {order.service?.name || 'Не указаны'}</div>
-                      {order.description && <div className="text-xs text-slate-600 mt-2 bg-white p-2.5 rounded-lg border border-slate-200">{order.description}</div>}
-                      {order.priceContract > 0 && <div className="text-xs font-semibold text-emerald-800 mt-2">Сумма по договору: {order.priceContract} ₽</div>}
+                  {auctionOrders.map(order => {
+                    const isClaimQueued = queuedClaimIds.has(order.id);
+                    return (
+                      <div key={order.id} className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-200 text-amber-900">🔔 Аукцион</span>
+                          <span className="text-xs font-bold text-slate-700">📅 {order.date ? order.date.split('T')[0] : ''}</span>
+                        </div>
+                        <div className="text-sm font-bold text-slate-800">📍 Район: {order.district || 'Не указан'}</div>
+                        <div className="text-xs text-slate-600 mt-1">🌿 Услуги: {order.service?.name || 'Не указаны'}</div>
+                        {order.description && <div className="text-xs text-slate-600 mt-2 bg-white p-2.5 rounded-lg border border-slate-200">{order.description}</div>}
+                        {order.priceContract > 0 && <div className="text-xs font-semibold text-emerald-800 mt-2">Сумма по договору: {order.priceContract} ₽</div>}
 
-                      <div className="mt-4 flex justify-end">
-                        <button type="button"
-                          disabled={claimingId === order.id}
-                          onClick={() => handleClaimOrder(order.id)}
-                          className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50 text-sm"
-                        >
-                          {claimingId === order.id ? 'Забираю...' : '⚡ Забрать заказ'}
-                        </button>
+                        {isClaimQueued && (
+                          <div className="text-xs bg-amber-100 text-amber-900 border border-amber-300 p-2 rounded-lg font-medium flex items-center justify-between mt-3">
+                            <span>⏳ в очереди, отправится при связи</span>
+                            <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-bold">В очереди</span>
+                          </div>
+                        )}
+
+                        <div className="mt-4 flex justify-end">
+                          <button type="button"
+                            disabled={claimingId === order.id || isClaimQueued}
+                            onClick={() => handleClaimOrder(order.id)}
+                            className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold rounded-xl shadow-md transition-all disabled:opacity-50 text-sm"
+                          >
+                            {claimingId === order.id ? 'Забираю...' : isClaimQueued ? 'В очереди' : '⚡ Забрать заказ'}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -4,7 +4,9 @@ import { verifyToken } from '@/lib/jwt';
 
 
 export async function GET(req) {
-  const token = req.cookies.get('token')?.value;
+  const authHeader = req.headers.get('authorization');
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+  const token = req.cookies.get('token')?.value || bearerToken;
   if (!token) {
     return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
   }

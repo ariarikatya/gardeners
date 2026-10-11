@@ -3,7 +3,9 @@ import { verifyToken } from '@/lib/jwt';
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get('token')?.value;
+  const authHeader = request.headers.get('authorization');
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+  const token = request.cookies.get('token')?.value || bearerToken;
 
   const isAdminPage = pathname.startsWith('/admin');
   const isGardenerPage = pathname.startsWith('/gardener');

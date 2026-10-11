@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261011-cc6d09e';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261011-9aa4ca4';
 const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -56,10 +56,39 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// === MESSAGE: ручное обновление ===
+let isOfflineSessionActive = false;
+
+async function getGardenerCacheAge() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const metaRes = await cache.match('/gardener-meta');
+    if (metaRes) {
+      const data = await metaRes.json();
+      if (data && data.ts) {
+        return Date.now() - data.ts;
+      }
+    }
+    const cachedGardener = await cache.match('/gardener');
+    if (cachedGardener) {
+      const dateHeader = cachedGardener.headers.get('Date');
+      if (dateHeader) {
+        const dateMs = new Date(dateHeader).getTime();
+        if (!isNaN(dateMs)) return Date.now() - dateMs;
+      }
+      return 0;
+    }
+  } catch (e) {}
+  return Infinity;
+}
+
+// === MESSAGE: ручное обновление и флаг офлайн-сессии ===
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+  if (event.data) {
+    if (event.data.type === 'SKIP_WAITING') {
+      self.skipWaiting();
+    } else if (event.data.type === 'OFFLINE_SESSION') {
+      isOfflineSessionActive = Boolean(event.data.active);
+    }
   }
 });
 
@@ -68,8 +97,25 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // API — только сеть, никогда не кэшируем
-  if (url.pathname.startsWith('/api/')) return;
+  // Для ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
+  if (url.pathname.startsWith('/api/')) {
+    if (request.method !== 'GET') {
+      event.respondWith(
+        (async () => {
+          try {
+            return await fetch(request.clone());
+          } catch (err1) {
+            try {
+              return await fetch(request.clone());
+            } catch (err2) {
+              throw err2;
+            }
+          }
+        })()
+      );
+    }
+    return;
+  }
 
   // === НАВИГАЦИЯ (HTML страницы) ===
   if (request.mode === 'navigate') {
@@ -81,31 +127,46 @@ self.addEventListener('fetch', (event) => {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
               try {
-                if (url.pathname === '/gardener') cache.put('/gardener', resClone);
-                else if (url.pathname === '/login') cache.put('/login', resClone);
+                if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+                  cache.put('/gardener', resClone);
+                  cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
+                    headers: { 'Content-Type': 'application/json' }
+                  }));
+                } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                  cache.put('/login', resClone);
+                }
               } catch (e) {}
             }).catch(() => {});
           }
           return res;
         };
 
-        // 1. Первая сетевая попытка
+        const cachedGardener = await caches.match('/gardener');
+        const age = await getGardenerCacheAge();
+        const MAX_AGE_24H = 24 * 60 * 60 * 1000;
+
+        // Если активна офлайн-сессия, есть кэш /gardener и ему <24ч — отдаём его сразу
+        if (isOfflineSessionActive && cachedGardener && age < MAX_AGE_24H && (url.pathname === '/gardener' || url.pathname.startsWith('/gardener'))) {
+          return cachedGardener;
+        }
+
+        // В остальных случаях пробуем сеть
         try {
           return await tryFetchAndCache();
         } catch (err1) {
-          // 2. Повторная сетевая попытка
           try {
             return await tryFetchAndCache();
           } catch (err2) {
-            // 3. Сеть недоступна -> оффлайн фоллбэк
-            if (url.pathname.startsWith('/gardener')) {
-              const cachedGardener = await caches.match('/gardener');
-              if (cachedGardener) return cachedGardener;
-            } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
-              const cachedLogin = await caches.match('/login');
-              if (cachedLogin) return cachedLogin;
-            }
-            // Показываем автономную оффлайн-страницу вместо устаревшего приложения
+            // Сеть недоступна -> проверяем пригодный кэш
+            const exactCached = await caches.match(request);
+            if (exactCached) return exactCached;
+
+            if (cachedGardener) return cachedGardener;
+
+            const cachedLogin = await caches.match('/login');
+            if (cachedLogin) return cachedLogin;
+
+            // Только если совсем нет кэша маршрутов — отдаём OFFLINE_HTML
             return new Response(OFFLINE_HTML, {
               status: 200,
               headers: { 'Content-Type': 'text/html; charset=utf-8' },
