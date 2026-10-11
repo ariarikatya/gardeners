@@ -114,29 +114,47 @@ export async function POST(req) {
       }
     }
 
-    const order = await prisma.order.create({
-      data: {
-        date: orderDate,
-        dayOfWeek,
-        clientName,
-        address,
-        district: district || null,
-        clientPhone,
-        description,
-        priceContract: parseFloat(priceContract) || 0,
-        priceFact: parseFloat(priceFact) || 0,
-        employeeSalary: sal,
-        companyShare: share,
-        status: status || 'Новый заказ',
-        comment,
-        refusalReason: refusalReason || null,
-        gardenerId: gardenerId || null,
-        serviceId: serviceId || null,
-        serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
-        isCash: typeof isCash === 'boolean' ? isCash : true,
-        amoDealId: leadAmoDealId,
-      },
-    });
+    // Защита от повторного создания заказа при повторе запроса/amoCRM фолбэке
+    let order = null;
+    if (leadAmoDealId) {
+      order = await prisma.order.findFirst({
+        where: { amoDealId: leadAmoDealId, date: orderDate },
+      });
+    } else if (clientPhone && address) {
+      order = await prisma.order.findFirst({
+        where: {
+          clientPhone: String(clientPhone).trim(),
+          address: String(address).trim(),
+          date: orderDate,
+        },
+      });
+    }
+
+    if (!order) {
+      order = await prisma.order.create({
+        data: {
+          date: orderDate,
+          dayOfWeek,
+          clientName,
+          address,
+          district: district || null,
+          clientPhone,
+          description,
+          priceContract: parseFloat(priceContract) || 0,
+          priceFact: parseFloat(priceFact) || 0,
+          employeeSalary: sal,
+          companyShare: share,
+          status: status || 'Новый заказ',
+          comment,
+          refusalReason: refusalReason || null,
+          gardenerId: gardenerId || null,
+          serviceId: serviceId || null,
+          serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
+          isCash: typeof isCash === 'boolean' ? isCash : true,
+          amoDealId: leadAmoDealId,
+        },
+      });
+    }
 
     // Web push notifications for dispatchers & gardeners (fire-and-forget)
     (async () => {
@@ -155,6 +173,18 @@ export async function POST(req) {
         ].filter(Boolean).join(', ');
 
         if (order.status === 'Аукцион') {
+          // Защита от повторной отправки пуша для того же заказа
+          const alreadyPushed = await prisma.clientPushLog.findFirst({
+            where: {
+              event: 'push_send_result',
+              payload: { contains: order.id },
+            },
+          });
+          if (alreadyPushed) {
+            console.log(`[AuctionPush] Skip duplicate push for order ${order.id}, push already logged in ClientPushLog.`);
+            return;
+          }
+
           let targetServiceIds = [];
           if (order.serviceIds) {
             try {
@@ -189,6 +219,18 @@ export async function POST(req) {
             }
           }
 
+          if (gardenerId) {
+            try {
+              const g = await prisma.gardener.findUnique({ where: { id: gardenerId } });
+              if (g && g.partnerId) {
+                const pUser = await prisma.user.findFirst({ where: { gardenerId: g.partnerId } });
+                if (pUser && !targetUserIds.includes(pUser.id)) {
+                  targetUserIds.push(pUser.id);
+                }
+              }
+            } catch (pErr) {}
+          }
+
           const pushOptions = {
             title: '❗ Объявлен аукцион!',
             body: bodyParts,
@@ -202,15 +244,20 @@ export async function POST(req) {
           };
 
           let result;
+          let retryFallback = false;
           if (targetUserIds.length > 0) {
             result = await sendToUsers(targetUserIds, pushOptions);
+            if ((!result || result.deliveredCount === 0) && !fallbackAll) {
+              retryFallback = true;
+              result = await sendToRoles(['GARDENER'], pushOptions);
+            }
           } else {
             fallbackAll = true;
             result = await sendToRoles(['GARDENER'], pushOptions);
           }
 
           console.log(
-            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
           );
         } else {
           await sendToRoles(['ADMIN', 'LEADER'], {
@@ -429,7 +476,7 @@ export async function POST(req) {
             });
 
             const partnerUser = await prisma.user.findFirst({ where: { gardenerId: partner.id } });
-            if (partnerUser) {
+            if (partnerUser && status !== 'Аукцион' && order.status !== 'Аукцион') {
               const dateStr = partnerOrder.date ? new Date(partnerOrder.date).toISOString().split('T')[0] : '';
               const pBodyParts = [
                 `Адрес: ${partnerOrder.address || 'Не указан'}`,
@@ -787,6 +834,20 @@ export async function PUT(req) {
             }
           }
 
+          // Добавляем напарника садовника в targetUserIds, чтобы не было отдельной рассылки с тем же tag=order.id
+          const partnerGardenerId = order.gardenerId || existing.gardenerId;
+          if (partnerGardenerId) {
+            try {
+              const g = await prisma.gardener.findUnique({ where: { id: partnerGardenerId } });
+              if (g && g.partnerId) {
+                const pUser = await prisma.user.findFirst({ where: { gardenerId: g.partnerId } });
+                if (pUser && !targetUserIds.includes(pUser.id)) {
+                  targetUserIds.push(pUser.id);
+                }
+              }
+            } catch (pErr) {}
+          }
+
           const pushOptions = {
             title: '❗ Объявлен аукцион!',
             body: auctionBody,
@@ -800,15 +861,20 @@ export async function PUT(req) {
           };
 
           let result;
+          let retryFallback = false;
           if (targetUserIds.length > 0) {
             result = await sendToUsers(targetUserIds, pushOptions);
+            if ((!result || result.deliveredCount === 0) && !fallbackAll) {
+              retryFallback = true;
+              result = await sendToRoles(['GARDENER'], pushOptions);
+            }
           } else {
             fallbackAll = true;
             result = await sendToRoles(['GARDENER'], pushOptions);
           }
 
           console.log(
-            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
+            `[AuctionPush] orderId=${order.id}, targetUserIds=[${targetUserIds.join(', ')}], fallbackAll=${fallbackAll}, retryFallback=${retryFallback}, deliveredCount=${result?.deliveredCount ?? 0}, failedCount=${result?.failedCount ?? 0}`
           );
           return;
         }
