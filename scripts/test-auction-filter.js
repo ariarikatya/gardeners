@@ -25,8 +25,16 @@ async function testAuctionFilter() {
   queriedWhere = null;
   await notifyAuction({ serviceId: 'svc_matched', date: '2026-10-10' }, mockPrisma);
   console.log('Test 1 (matched serviceId): queriedWhere =', JSON.stringify(queriedWhere));
-  if (!queriedWhere.services || queriedWhere.services.some.id !== 'svc_matched') {
-    throw new Error('Test 1 failed: Expected serviceId filter');
+  if (!queriedWhere.services || queriedWhere.services.some.id['in'][0] !== 'svc_matched') {
+    throw new Error('Test 1 failed: Expected serviceId filter in array');
+  }
+
+  // 1b. Multi-service serviceIds=['a', 'b']
+  queriedWhere = null;
+  await notifyAuction({ serviceIds: ['a', 'b'], date: '2026-10-10' }, mockPrisma);
+  console.log('Test 1b (multi serviceIds): queriedWhere =', JSON.stringify(queriedWhere));
+  if (!queriedWhere.services || JSON.stringify(queriedWhere.services.some.id['in']) !== JSON.stringify(['a', 'b'])) {
+    throw new Error('Test 1b failed: Expected serviceIds filter with $in: ["a", "b"]');
   }
 
   // 2. Service with no gardeners -> fallback
@@ -35,7 +43,8 @@ async function testAuctionFilter() {
     gardener: {
       findMany: async ({ where }) => {
         queries.push(where);
-        if (where?.services?.some?.id === 'svc_empty') {
+        const targetIds = where?.services?.some?.id?.in || [];
+        if (targetIds.includes('svc_empty')) {
           return [];
         }
         return [{ id: 'g1', vkId: '123' }, { id: 'g2', vkId: '456' }];
