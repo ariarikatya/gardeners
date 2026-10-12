@@ -23,23 +23,34 @@ async function checkAuctionAlreadyPushed(orderId) {
   if (!orderId) return { alreadyPushed: false, deliveredCount: 0, failedCount: 0 };
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
+  function unwrapPayload(raw) {
+    let current = raw;
+    while (typeof current === 'string') {
+      try {
+        current = JSON.parse(current);
+      } catch (e) {
+        break;
+      }
+    }
+    return current || {};
+  }
+
   try {
     let recentLogs = [];
     try {
       recentLogs = await prisma.clientPushLog.findMany({
         where: {
-          event: { in: ['push_send_summary', 'push_send_result'] },
+          event: 'push_send_summary',
           createdAt: { gte: tenMinutesAgo },
-          payload: { path: ['orderId'], equals: String(orderId) },
+          payload: { path: ['title'], equals: '❗ Объявлен аукцион!' },
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
       });
     } catch (pathFilterErr) {
-      // Fallback query if JSON path filter is not supported by Prisma/database
       recentLogs = await prisma.clientPushLog.findMany({
         where: {
-          event: { in: ['push_send_summary', 'push_send_result'] },
+          event: 'push_send_summary',
           createdAt: { gte: tenMinutesAgo },
         },
         orderBy: { createdAt: 'desc' },
@@ -54,32 +65,23 @@ async function checkAuctionAlreadyPushed(orderId) {
           continue;
         }
 
-        const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : (log.payload || {});
+        const payload = unwrapPayload(log.payload);
         const isAuctionTitle = payload.title === '❗ Объявлен аукцион!';
         if (!isAuctionTitle) {
           continue;
         }
 
         const logOrderId = payload.orderId ? String(payload.orderId) : null;
-        const isMatchingOrder = logOrderId
-          ? logOrderId === String(orderId)
-          : (typeof log.payload === 'string' ? log.payload.includes(String(orderId)) : JSON.stringify(payload).includes(String(orderId)));
-        const isGardenerRole = !payload.role || payload.role === 'GARDENER';
+        const isMatchingOrder = logOrderId === String(orderId);
+        const isGardenerRole = payload.role === 'GARDENER';
 
         if (isMatchingOrder && isGardenerRole) {
-          if (log.event === 'push_send_summary') {
-            const delivered = typeof payload.deliveredCount === 'number' ? payload.deliveredCount : 0;
-            const failed = typeof payload.failedCount === 'number' ? payload.failedCount : 0;
-            if (delivered > 0) {
-              return { alreadyPushed: true, deliveredCount: delivered, failedCount: failed };
-            }
-            return { alreadyPushed: false, deliveredCount: 0, failedCount: failed };
-          } else if (log.event === 'push_send_result') {
-            const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
-            if (isSuccess) {
-              return { alreadyPushed: true, deliveredCount: 1, failedCount: 0 };
-            }
+          const delivered = typeof payload.deliveredCount === 'number' ? payload.deliveredCount : 0;
+          const failed = typeof payload.failedCount === 'number' ? payload.failedCount : 0;
+          if (delivered > 0) {
+            return { alreadyPushed: true, deliveredCount: delivered, failedCount: failed };
           }
+          return { alreadyPushed: false, deliveredCount: 0, failedCount: failed };
         }
       } catch (e) {}
     }
