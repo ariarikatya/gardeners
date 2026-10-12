@@ -19,6 +19,88 @@ async function getStopBlock(gardenerId, dateLike) {
   });
 }
 
+async function checkAuctionAlreadyPushed(orderId) {
+  if (!orderId) return { alreadyPushed: false, alreadyPushedUserIds: new Set(), deliveredCount: 0, failedCount: 0 };
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+  function unwrapPayload(raw) {
+    let current = raw;
+    while (typeof current === 'string') {
+      try {
+        current = JSON.parse(current);
+      } catch (e) {
+        break;
+      }
+    }
+    return current || {};
+  }
+
+  const alreadyPushedUserIds = new Set();
+  let deliveredCount = 0;
+  let failedCount = 0;
+
+  try {
+    let recentLogs = [];
+    try {
+      recentLogs = await prisma.clientPushLog.findMany({
+        where: {
+          event: 'push_send_result',
+          createdAt: { gte: tenMinutesAgo },
+          payload: { path: ['orderId'], equals: String(orderId) },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      });
+    } catch (pathFilterErr) {
+      recentLogs = await prisma.clientPushLog.findMany({
+        where: {
+          event: 'push_send_result',
+          createdAt: { gte: tenMinutesAgo },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      });
+    }
+
+    for (const log of recentLogs) {
+      try {
+        const logDate = log.createdAt ? new Date(log.createdAt) : null;
+        if (logDate && logDate < tenMinutesAgo) {
+          continue;
+        }
+
+        const payload = unwrapPayload(log.payload);
+        const isAuctionTitle = payload.title === '❗ Объявлен аукцион!';
+        if (!isAuctionTitle) {
+          continue;
+        }
+
+        const logOrderId = payload.orderId ? String(payload.orderId) : null;
+        const isMatchingOrder = logOrderId === String(orderId);
+        const isGardenerRole = payload.role === 'GARDENER';
+
+        if (isMatchingOrder && isGardenerRole) {
+          const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
+          if (isSuccess) {
+            deliveredCount++;
+            if (log.userId) {
+              alreadyPushedUserIds.add(log.userId);
+            }
+          } else {
+            failedCount++;
+          }
+        }
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.error('[checkAuctionAlreadyPushed] Database query error:', err.message);
+    return { alreadyPushed: false, alreadyPushedUserIds: new Set(), deliveredCount: 0, failedCount: 0 };
+  }
+
+  const alreadyPushed = deliveredCount > 0 || alreadyPushedUserIds.size > 0;
+  return { alreadyPushed, alreadyPushedUserIds, deliveredCount, failedCount };
+}
+
 
 const ADMIN_PANEL_URL = 'https://anemonagro.ru/admin';
 
@@ -173,21 +255,7 @@ export async function POST(req) {
         ].filter(Boolean).join(', ');
 
         if (order.status === 'Аукцион') {
-          // Защита от повторной отправки пуша для того же заказа (окно 10 минут)
-          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-          const alreadyPushed = await prisma.clientPushLog.findFirst({
-            where: {
-              event: 'push_send_result',
-              createdAt: { gte: tenMinutesAgo },
-              payload: { contains: order.id },
-            },
-          });
-          if (alreadyPushed) {
-            console.log(
-              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
-            );
-            return;
-          }
+          const pushCheck = await checkAuctionAlreadyPushed(order.id);
 
           let targetServiceIds = [];
           if (order.serviceIds) {
@@ -235,6 +303,18 @@ export async function POST(req) {
             } catch (pErr) {}
           }
 
+          // Исключаем садовников, которые уже успешно получили этот пуш за последние 10 минут
+          if (pushCheck.alreadyPushedUserIds && pushCheck.alreadyPushedUserIds.size > 0) {
+            targetUserIds = targetUserIds.filter((uid) => !pushCheck.alreadyPushedUserIds.has(uid));
+          }
+
+          if (pushCheck.alreadyPushed && targetUserIds.length === 0 && targetServiceIds.length > 0) {
+            console.log(
+              `[AuctionPush] orderId=${order.id}, alreadyPushed=true, skipped=true, deliveredCount=${pushCheck.deliveredCount}, failedCount=${pushCheck.failedCount}, targetUserIds=[], fallbackAll=false, retryFallback=false`
+            );
+            return;
+          }
+
           const pushOptions = {
             title: '❗ Объявлен аукцион!',
             body: bodyParts,
@@ -245,6 +325,7 @@ export async function POST(req) {
               { action: 'view', title: '👁 Посмотреть' },
             ],
             orderId: order.id,
+            role: 'GARDENER',
           };
 
           let result;
@@ -796,21 +877,7 @@ export async function PUT(req) {
 
         // 1. Аукцион
         if (order.status === 'Аукцион' && existing.status !== 'Аукцион') {
-          // Защита от повторной рассылки того же аукциона в течение 10 минут
-          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-          const alreadyPushed = await prisma.clientPushLog.findFirst({
-            where: {
-              event: 'push_send_result',
-              createdAt: { gte: tenMinutesAgo },
-              payload: { contains: order.id },
-            },
-          });
-          if (alreadyPushed) {
-            console.log(
-              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
-            );
-            return;
-          }
+          const pushCheck = await checkAuctionAlreadyPushed(order.id);
 
           let serviceName = '';
           if (order.serviceId) {
@@ -879,6 +946,18 @@ export async function PUT(req) {
             } catch (pErr) {}
           }
 
+          // Исключаем садовников, которые уже успешно получили этот пуш за последние 10 минут
+          if (pushCheck.alreadyPushedUserIds && pushCheck.alreadyPushedUserIds.size > 0) {
+            targetUserIds = targetUserIds.filter((uid) => !pushCheck.alreadyPushedUserIds.has(uid));
+          }
+
+          if (pushCheck.alreadyPushed && targetUserIds.length === 0 && targetServiceIds.length > 0) {
+            console.log(
+              `[AuctionPush] orderId=${order.id}, alreadyPushed=true, skipped=true, deliveredCount=${pushCheck.deliveredCount}, failedCount=${pushCheck.failedCount}, targetUserIds=[], fallbackAll=false, retryFallback=false`
+            );
+            return;
+          }
+
           const pushOptions = {
             title: '❗ Объявлен аукцион!',
             body: auctionBody,
@@ -889,6 +968,7 @@ export async function PUT(req) {
               { action: 'view', title: '👁 Посмотреть' },
             ],
             orderId: order.id,
+            role: 'GARDENER',
           };
 
           let result;
