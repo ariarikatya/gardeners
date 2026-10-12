@@ -69,7 +69,68 @@ async function testAuctionFilter() {
     throw new Error('Test 3 failed: Expected single unfiltered query');
   }
 
-  console.log('✅ ALL AUCTION FILTER TESTS PASSED SUCCESSFULLY!');
+  // 4. Test checkAuctionAlreadyPushed logic (deduplication based on title + orderId + statusCode 200)
+  console.log('--- TESTING AUCTION PUSH DEDUPLICATION LOGIC ---');
+  function checkAuctionAlreadyPushedMock(orderId, logs) {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const recentLogs = logs.filter((l) => l.event === 'push_send_result' && new Date(l.createdAt) >= tenMinutesAgo);
+
+    return recentLogs.some((log) => {
+      try {
+        const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : (log.payload || {});
+        const isAuctionTitle = payload.title === '❗ Объявлен аукцион!';
+        const logOrderId = payload.orderId ? String(payload.orderId) : null;
+        const isMatchingOrder = logOrderId
+          ? logOrderId === String(orderId)
+          : (typeof log.payload === 'string' ? log.payload.includes(String(orderId)) : JSON.stringify(payload).includes(String(orderId)));
+        const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
+        return isAuctionTitle && isMatchingOrder && isSuccess;
+      } catch (e) {
+        return false;
+      }
+    });
+  }
+
+  const orderId = 'order-123';
+  const now = new Date().toISOString();
+
+  // 4a. Log with different event title (e.g. "🌿 Заявка обновлена") should NOT block auction push
+  const logsNonAuction = [
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      payload: JSON.stringify({ statusCode: 201, title: '🌿 Заявка обновлена', orderId: 'order-123' }),
+    },
+  ];
+  if (checkAuctionAlreadyPushedMock(orderId, logsNonAuction) !== false) {
+    throw new Error('Test 4a failed: Non-auction title should not set alreadyPushed=true');
+  }
+
+  // 4b. Log with auction title but failed statusCode (e.g. 500) should NOT block retry auction push
+  const logsFailedAuction = [
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      payload: JSON.stringify({ statusCode: 500, title: '❗ Объявлен аукцион!', orderId: 'order-123' }),
+    },
+  ];
+  if (checkAuctionAlreadyPushedMock(orderId, logsFailedAuction) !== false) {
+    throw new Error('Test 4b failed: Failed auction attempt should not set alreadyPushed=true');
+  }
+
+  // 4c. Log with auction title and successful statusCode (201) SHOULD block duplicate auction push
+  const logsSuccessfulAuction = [
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      payload: JSON.stringify({ statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123' }),
+    },
+  ];
+  if (checkAuctionAlreadyPushedMock(orderId, logsSuccessfulAuction) !== true) {
+    throw new Error('Test 4c failed: Successful auction push should set alreadyPushed=true');
+  }
+
+  console.log('✅ ALL AUCTION FILTER & DEDUPLICATION TESTS PASSED SUCCESSFULLY!');
 }
 
 testAuctionFilter().catch((err) => {

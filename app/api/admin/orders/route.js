@@ -19,6 +19,34 @@ async function getStopBlock(gardenerId, dateLike) {
   });
 }
 
+async function checkAuctionAlreadyPushed(orderId) {
+  if (!orderId) return false;
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const recentLogs = await prisma.clientPushLog.findMany({
+    where: {
+      event: 'push_send_result',
+      createdAt: { gte: tenMinutesAgo },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+
+  return recentLogs.some((log) => {
+    try {
+      const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : (log.payload || {});
+      const isAuctionTitle = payload.title === '❗ Объявлен аукцион!';
+      const logOrderId = payload.orderId ? String(payload.orderId) : null;
+      const isMatchingOrder = logOrderId
+        ? logOrderId === String(orderId)
+        : (typeof log.payload === 'string' ? log.payload.includes(String(orderId)) : JSON.stringify(payload).includes(String(orderId)));
+      const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
+      return isAuctionTitle && isMatchingOrder && isSuccess;
+    } catch (e) {
+      return false;
+    }
+  });
+}
+
 
 const ADMIN_PANEL_URL = 'https://anemonagro.ru/admin';
 
@@ -173,18 +201,11 @@ export async function POST(req) {
         ].filter(Boolean).join(', ');
 
         if (order.status === 'Аукцион') {
-          // Защита от повторной отправки пуша для того же заказа (окно 10 минут)
-          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-          const alreadyPushed = await prisma.clientPushLog.findFirst({
-            where: {
-              event: 'push_send_result',
-              createdAt: { gte: tenMinutesAgo },
-              payload: { contains: order.id },
-            },
-          });
+          // Защита от повторной отправки пуша для того же заказа (окно 10 минут, если хотя бы одна предыдущая попытка была успешной)
+          const alreadyPushed = await checkAuctionAlreadyPushed(order.id);
           if (alreadyPushed) {
             console.log(
-              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
+              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate successful push within 10m window logged in ClientPushLog)`
             );
             return;
           }
@@ -796,18 +817,11 @@ export async function PUT(req) {
 
         // 1. Аукцион
         if (order.status === 'Аукцион' && existing.status !== 'Аукцион') {
-          // Защита от повторной рассылки того же аукциона в течение 10 минут
-          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-          const alreadyPushed = await prisma.clientPushLog.findFirst({
-            where: {
-              event: 'push_send_result',
-              createdAt: { gte: tenMinutesAgo },
-              payload: { contains: order.id },
-            },
-          });
+          // Защита от повторной рассылки того же аукциона в течение 10 минут (если предыдущая рассылка была успешной)
+          const alreadyPushed = await checkAuctionAlreadyPushed(order.id);
           if (alreadyPushed) {
             console.log(
-              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate push within 10m window logged in ClientPushLog)`
+              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=0, failedCount=0, skipped=true (duplicate successful push within 10m window logged in ClientPushLog)`
             );
             return;
           }
