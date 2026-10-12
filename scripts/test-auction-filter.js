@@ -146,6 +146,19 @@ async function testAuctionFilter() {
     throw new Error('Test 4c failed: summary with deliveredCount=0 should override individual result logs and allow resend');
   }
 
+  // (d) Successful summary older than 10 minutes -> alreadyPushed=false
+  const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+  const logsSummaryOlderThan10m = [
+    {
+      event: 'push_send_summary',
+      createdAt: elevenMinutesAgo,
+      payload: JSON.stringify({ title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 5, failedCount: 0 }),
+    },
+  ];
+  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryOlderThan10m) !== false) {
+    throw new Error('Test 4d failed: successful summary older than 10 minutes should return alreadyPushed=false');
+  }
+
   console.log('✅ ALL AUCTION FILTER & DEDUPLICATION TESTS PASSED SUCCESSFULLY!');
 }
 

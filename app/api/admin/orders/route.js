@@ -28,10 +28,16 @@ async function checkAuctionAlreadyPushed(orderId) {
       createdAt: { gte: tenMinutesAgo },
     },
     orderBy: { createdAt: 'desc' },
+    take: 200,
   });
 
   for (const log of recentLogs) {
     try {
+      const logDate = log.createdAt ? new Date(log.createdAt) : null;
+      if (logDate && logDate < tenMinutesAgo) {
+        continue;
+      }
+
       const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : (log.payload || {});
       const isAuctionTitle = payload.title === '❗ Объявлен аукцион!';
       const logOrderId = payload.orderId ? String(payload.orderId) : null;
@@ -219,7 +225,7 @@ export async function POST(req) {
           const pushCheck = await checkAuctionAlreadyPushed(order.id);
           if (pushCheck.alreadyPushed) {
             console.log(
-              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=${pushCheck.deliveredCount}, failedCount=${pushCheck.failedCount}, skipped=true (duplicate successful push within 10m window logged in ClientPushLog)`
+              `[AuctionPush] orderId=${order.id}, alreadyPushed=true, skipped=true, deliveredCount=${pushCheck.deliveredCount}, failedCount=${pushCheck.failedCount}, targetUserIds=[], fallbackAll=false, retryFallback=false`
             );
             return;
           }
@@ -835,7 +841,7 @@ export async function PUT(req) {
           const pushCheck = await checkAuctionAlreadyPushed(order.id);
           if (pushCheck.alreadyPushed) {
             console.log(
-              `[AuctionPush] orderId=${order.id}, targetUserIds=[], fallbackAll=false, retryFallback=false, deliveredCount=${pushCheck.deliveredCount}, failedCount=${pushCheck.failedCount}, skipped=true (duplicate successful push within 10m window logged in ClientPushLog)`
+              `[AuctionPush] orderId=${order.id}, alreadyPushed=true, skipped=true, deliveredCount=${pushCheck.deliveredCount}, failedCount=${pushCheck.failedCount}, targetUserIds=[], fallbackAll=false, retryFallback=false`
             );
             return;
           }
