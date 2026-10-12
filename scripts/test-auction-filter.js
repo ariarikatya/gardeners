@@ -69,13 +69,15 @@ async function testAuctionFilter() {
     throw new Error('Test 3 failed: Expected single unfiltered query');
   }
 
-  // 4. Test checkAuctionAlreadyPushed logic (deduplication based on title + orderId + statusCode 200)
+  // 4. Test checkAuctionAlreadyPushed logic (deduplication based on summary deliveredCount > 0, title, orderId, role='GARDENER')
   console.log('--- TESTING AUCTION PUSH DEDUPLICATION LOGIC ---');
   function checkAuctionAlreadyPushedMock(orderId, logs) {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-    const recentLogs = logs.filter((l) => l.event === 'push_send_result' && new Date(l.createdAt) >= tenMinutesAgo);
+    const recentLogs = logs.filter(
+      (l) => (l.event === 'push_send_summary' || l.event === 'push_send_result') && new Date(l.createdAt) >= tenMinutesAgo
+    );
 
-    return recentLogs.some((log) => {
+    for (const log of recentLogs) {
       try {
         const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : (log.payload || {});
         const isAuctionTitle = payload.title === '❗ Объявлен аукцион!';
@@ -83,51 +85,65 @@ async function testAuctionFilter() {
         const isMatchingOrder = logOrderId
           ? logOrderId === String(orderId)
           : (typeof log.payload === 'string' ? log.payload.includes(String(orderId)) : JSON.stringify(payload).includes(String(orderId)));
-        const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
-        return isAuctionTitle && isMatchingOrder && isSuccess;
-      } catch (e) {
-        return false;
-      }
-    });
+        const isGardenerRole = !payload.role || payload.role === 'GARDENER';
+
+        if (isAuctionTitle && isMatchingOrder && isGardenerRole) {
+          if (log.event === 'push_send_summary') {
+            const delivered = typeof payload.deliveredCount === 'number' ? payload.deliveredCount : 0;
+            if (delivered > 0) return true;
+            return false;
+          } else if (log.event === 'push_send_result') {
+            const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
+            if (isSuccess) return true;
+          }
+        }
+      } catch (e) {}
+    }
+    return false;
   }
 
   const orderId = 'order-123';
   const now = new Date().toISOString();
 
-  // 4a. Log with different event title (e.g. "🌿 Заявка обновлена") should NOT block auction push
-  const logsNonAuction = [
+  // (a) Summary с deliveredCount=0 -> alreadyPushed=false
+  const logsSummaryZeroDelivered = [
     {
-      event: 'push_send_result',
+      event: 'push_send_summary',
       createdAt: now,
-      payload: JSON.stringify({ statusCode: 201, title: '🌿 Заявка обновлена', orderId: 'order-123' }),
+      payload: JSON.stringify({ title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 0, failedCount: 2 }),
     },
   ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsNonAuction) !== false) {
-    throw new Error('Test 4a failed: Non-auction title should not set alreadyPushed=true');
+  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryZeroDelivered) !== false) {
+    throw new Error('Test 4a failed: summary with deliveredCount=0 should return alreadyPushed=false');
   }
 
-  // 4b. Log with auction title but failed statusCode (e.g. 500) should NOT block retry auction push
-  const logsFailedAuction = [
+  // (b) Summary с deliveredCount>0 -> alreadyPushed=true
+  const logsSummaryDeliveredOk = [
     {
-      event: 'push_send_result',
+      event: 'push_send_summary',
       createdAt: now,
-      payload: JSON.stringify({ statusCode: 500, title: '❗ Объявлен аукцион!', orderId: 'order-123' }),
+      payload: JSON.stringify({ title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 3, failedCount: 0 }),
     },
   ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsFailedAuction) !== false) {
-    throw new Error('Test 4b failed: Failed auction attempt should not set alreadyPushed=true');
+  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryDeliveredOk) !== true) {
+    throw new Error('Test 4b failed: summary with deliveredCount>0 should return alreadyPushed=true');
   }
 
-  // 4c. Log with auction title and successful statusCode (201) SHOULD block duplicate auction push
-  const logsSuccessfulAuction = [
+  // (c) Success-подписка с userId=null при summary deliveredCount=0 -> alreadyPushed=false
+  const logsSuccessSubButZeroDeliveredSummary = [
+    {
+      event: 'push_send_summary',
+      createdAt: new Date(Date.now() + 100).toISOString(),
+      payload: JSON.stringify({ title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 0, failedCount: 1 }),
+    },
     {
       event: 'push_send_result',
       createdAt: now,
-      payload: JSON.stringify({ statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123' }),
+      payload: JSON.stringify({ statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123', subscriptionId: 'sub-anon', userId: null }),
     },
   ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsSuccessfulAuction) !== true) {
-    throw new Error('Test 4c failed: Successful auction push should set alreadyPushed=true');
+  if (checkAuctionAlreadyPushedMock(orderId, logsSuccessSubButZeroDeliveredSummary) !== false) {
+    throw new Error('Test 4c failed: summary with deliveredCount=0 should override individual result logs and allow resend');
   }
 
   console.log('✅ ALL AUCTION FILTER & DEDUPLICATION TESTS PASSED SUCCESSFULLY!');
