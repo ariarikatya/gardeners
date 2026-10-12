@@ -86,12 +86,16 @@ async function testAuctionFilter() {
   function checkAuctionAlreadyPushedMock(orderId, logs, simulateDbError = false) {
     if (simulateDbError) {
       console.error('[checkAuctionAlreadyPushed] Database query error: Simulated DB failure');
-      return false;
+      return { alreadyPushed: false, alreadyPushedUserIds: new Set(), deliveredCount: 0, failedCount: 0 };
     }
 
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const alreadyPushedUserIds = new Set();
+    let deliveredCount = 0;
+    let failedCount = 0;
+
     const recentLogs = logs.filter(
-      (l) => l.event === 'push_send_summary' && new Date(l.createdAt) >= tenMinutesAgo
+      (l) => l.event === 'push_send_result' && new Date(l.createdAt) >= tenMinutesAgo
     );
 
     for (const log of recentLogs) {
@@ -105,82 +109,106 @@ async function testAuctionFilter() {
         const isGardenerRole = payload.role === 'GARDENER';
 
         if (isMatchingOrder && isGardenerRole) {
-          const delivered = typeof payload.deliveredCount === 'number' ? payload.deliveredCount : 0;
-          if (delivered > 0) return true;
-          return false;
+          const isSuccess = typeof payload.statusCode === 'number' && payload.statusCode >= 200 && payload.statusCode < 300;
+          if (isSuccess) {
+            deliveredCount++;
+            if (log.userId) alreadyPushedUserIds.add(log.userId);
+          } else {
+            failedCount++;
+          }
         }
       } catch (e) {}
     }
-    return false;
+
+    const alreadyPushed = deliveredCount > 0 || alreadyPushedUserIds.size > 0;
+    return { alreadyPushed, alreadyPushedUserIds, deliveredCount, failedCount };
   }
 
   const orderId = 'order-123';
   const now = new Date().toISOString();
 
-  // (a) Summary с deliveredCount > 0 для "❗ Объявлен аукцион!" и GARDENER -> alreadyPushed=true
-  const logsSummaryDeliveredOk = [
-    {
-      event: 'push_send_summary',
-      createdAt: now,
-      payload: { title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 3, failedCount: 0 },
-    },
-  ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryDeliveredOk) !== true) {
-    throw new Error('Test 4a failed: summary with deliveredCount>0 should return alreadyPushed=true');
-  }
-
-  // (b) Summary с deliveredCount = 0 -> alreadyPushed=false
-  const logsSummaryZeroDelivered = [
-    {
-      event: 'push_send_summary',
-      createdAt: now,
-      payload: { title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 0, failedCount: 2 },
-    },
-  ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryZeroDelivered) !== false) {
-    throw new Error('Test 4b failed: summary with deliveredCount=0 should return alreadyPushed=false');
-  }
-
-  // (c) push_send_result only without summary -> alreadyPushed=false
-  const logsResultOnlyNoSummary = [
+  // (1) Пуш другого типа («🌿 Новый заказ», ADMIN/LEADER) по тому же заказу НЕ ставит alreadyPushed
+  const logsAdminUpdate = [
     {
       event: 'push_send_result',
       createdAt: now,
+      userId: 'admin-1',
+      payload: { statusCode: 201, title: '🌿 Новый заказ', orderId: 'order-123', role: 'ADMIN' },
+    },
+  ];
+  if (checkAuctionAlreadyPushedMock(orderId, logsAdminUpdate).alreadyPushed !== false) {
+    throw new Error('Test 1 failed: ADMIN update push should NOT set alreadyPushed=true');
+  }
+
+  // (2) Полностью неудачная попытка → повтор разрешён
+  const logsFailedAttempt = [
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      userId: 'g1',
+      payload: { statusCode: 500, title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER' },
+    },
+  ];
+  if (checkAuctionAlreadyPushedMock(orderId, logsFailedAttempt).alreadyPushed !== false) {
+    throw new Error('Test 2 failed: completely failed push attempt should return alreadyPushed=false');
+  }
+
+  // (3) Частичная доставка → повтор только недошедшим (alreadyPushedUserIds содержит только g1)
+  const logsPartialDelivery = [
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      userId: 'g1',
+      payload: { statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER' },
+    },
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      userId: 'g2',
+      payload: { statusCode: 500, title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER' },
+    },
+  ];
+  const partialCheck = checkAuctionAlreadyPushedMock(orderId, logsPartialDelivery);
+  let allTargetUserIds = ['g1', 'g2', 'g3'];
+  let remainingTargets = allTargetUserIds.filter((uid) => !partialCheck.alreadyPushedUserIds.has(uid));
+  if (JSON.stringify(remainingTargets) !== JSON.stringify(['g2', 'g3'])) {
+    throw new Error('Test 3 failed: partial delivery should exclude already pushed user g1 and retry only missed users [g2, g3]');
+  }
+
+  // (4) Успех всем в пределах 10 мин → skip (remainingTargets становится пустым)
+  const logsFullSuccess = [
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      userId: 'g1',
+      payload: { statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER' },
+    },
+    {
+      event: 'push_send_result',
+      createdAt: now,
+      userId: 'g2',
       payload: { statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER' },
     },
   ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsResultOnlyNoSummary) !== false) {
-    throw new Error('Test 4c failed: push_send_result without summary should return alreadyPushed=false');
+  const fullCheck = checkAuctionAlreadyPushedMock(orderId, logsFullSuccess);
+  let targetGroup = ['g1', 'g2'];
+  let remainingGroup = targetGroup.filter((uid) => !fullCheck.alreadyPushedUserIds.has(uid));
+  if (remainingGroup.length !== 0) {
+    throw new Error('Test 4 failed: full success within 10 min should leave 0 remaining targets');
   }
 
-  // (d) "🌿 Заявка обновлена" ADMIN log -> alreadyPushed=false
-  const logsAdminUpdate = [
-    {
-      event: 'push_send_summary',
-      createdAt: now,
-      payload: { title: '🌿 Заявка обновлена', orderId: 'order-123', role: 'ADMIN', deliveredCount: 5, failedCount: 0 },
-    },
-  ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsAdminUpdate) !== false) {
-    throw new Error('Test 4d failed: ADMIN update push should not set alreadyPushed=true');
-  }
-
-  // (e) DB error in checkAuctionAlreadyPushed -> alreadyPushed=false
-  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryDeliveredOk, true) !== false) {
-    throw new Error('Test 4e failed: DB error in checkAuctionAlreadyPushed should return alreadyPushed=false');
-  }
-
-  // (f) Successful summary older than 10 minutes -> alreadyPushed=false
+  // (5) Успех старше 10 мин → не skip
   const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000).toISOString();
-  const logsSummaryOlderThan10m = [
+  const logsOlderThan10m = [
     {
-      event: 'push_send_summary',
+      event: 'push_send_result',
       createdAt: elevenMinutesAgo,
-      payload: { title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER', deliveredCount: 5, failedCount: 0 },
+      userId: 'g1',
+      payload: { statusCode: 201, title: '❗ Объявлен аукцион!', orderId: 'order-123', role: 'GARDENER' },
     },
   ];
-  if (checkAuctionAlreadyPushedMock(orderId, logsSummaryOlderThan10m) !== false) {
-    throw new Error('Test 4f failed: successful summary older than 10 minutes should return alreadyPushed=false');
+  if (checkAuctionAlreadyPushedMock(orderId, logsOlderThan10m).alreadyPushed !== false) {
+    throw new Error('Test 5 failed: successful push older than 10 minutes should return alreadyPushed=false');
   }
 
   console.log('✅ ALL AUCTION FILTER & DEDUPLICATION TESTS PASSED SUCCESSFULLY!');
