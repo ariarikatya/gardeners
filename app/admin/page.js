@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import PushButton from '@/components/PushButton';
+import PhotoThumb from '@/components/PhotoThumb';
 import { clientNotify } from '@/lib/clientNotify';
+import { fetchWithAutoLogin } from '@/lib/fetchWithAuth';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -479,12 +481,12 @@ export default function AdminDashboard() {
       const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
       const [resG, resO, resD, resB, resS, resMe] = await Promise.all([
-        fetch('/api/admin/gardeners'),
-        fetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
-        fetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
-        fetch(`/api/admin/blockday?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
-        fetch('/api/admin/services'),
-        fetch('/api/auth/me')
+        fetchWithAutoLogin('/api/admin/gardeners'),
+        fetchWithAutoLogin(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        fetchWithAutoLogin(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        fetchWithAutoLogin(`/api/admin/blockday?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        fetchWithAutoLogin('/api/admin/services'),
+        fetchWithAutoLogin('/api/auth/me')
       ]);
       if (resMe.ok) {
         const meData = await resMe.json();
@@ -2431,10 +2433,10 @@ export default function AdminDashboard() {
                     try {
                       const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
                       return arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                        <div key={i} className="block">
+                          <PhotoThumb src={u} alt={`До ${i+1}`} width={64} height={64} />
                           <span className="text-[10px] text-slate-400">До</span>
-                        </a>
+                        </div>
                       ));
                     } catch (e) { return null; }
                   })()}
@@ -2444,10 +2446,10 @@ export default function AdminDashboard() {
                     try {
                       const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
                       return arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                        <div key={i} className="block">
+                          <PhotoThumb src={u} alt={`После ${i+1}`} width={64} height={64} />
                           <span className="text-[10px] text-slate-400">После</span>
-                        </a>
+                        </div>
                       ));
                     } catch (e) { return null; }
                   })()}
@@ -2456,7 +2458,7 @@ export default function AdminDashboard() {
                     const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
                     try {
                       const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
-                      return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
+                      return arr.map((u, i) => <div key={i} className="block"><PhotoThumb src={u} alt={`Акт ${i + 1}`} width={64} height={64} /><span className="text-[10px] text-slate-400">Акт</span></div>);
                     } catch (e) { return null; }
                   })()}
                 </div>

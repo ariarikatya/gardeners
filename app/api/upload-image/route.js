@@ -47,8 +47,7 @@ export async function POST(req) {
       } catch (e) {}
     }
 
-    const proxyUrl = `/api/images?path=${encodeURIComponent(savedPath)}`;
-    return NextResponse.json({ success: true, url: proxyUrl, path: savedPath });
+    return NextResponse.json({ success: true, url: savedPath, path: savedPath });
   } catch (error) {
     console.error('Upload image error:', error);
     return NextResponse.json({ error: 'Upload failed: ' + error.message }, { status: 500 });

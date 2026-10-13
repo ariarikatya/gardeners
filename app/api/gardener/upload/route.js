@@ -53,7 +53,7 @@ export async function POST(req) {
     const type = incomingForm.get('type') || 'order';
     const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
     const timestamp = Date.now();
-    const resultUrls = [];
+    const resultPaths = [];
 
     const apiKey = process.env.IMGBB_API_KEY;
 
@@ -68,7 +68,6 @@ export async function POST(req) {
         // 2. Local Fallback if Yandex is unreachable
         const localRes = saveLocalFallback({ folderPath: folderName, fileName, fileBuffer: item.fileBuffer });
         savedPath = localRes.relativePath || localRes.localPath;
-        // Schedule retry queue
         scheduleYandexUpload({ folderPath, fileName, fileBuffer: item.fileBuffer });
         const drainTask = drainQueue(20000);
         try {
@@ -88,13 +87,14 @@ export async function POST(req) {
         } catch (e) {}
       }
 
-      const proxyUrl = `/api/images?path=${encodeURIComponent(savedPath)}`;
-      resultUrls.push(proxyUrl);
+      resultPaths.push(savedPath);
     }
 
     return NextResponse.json({
-      url: resultUrls[0],
-      urls: resultUrls,
+      url: resultPaths[0],
+      urls: resultPaths,
+      path: resultPaths[0],
+      paths: resultPaths,
     });
   } catch (e) {
     console.error('Upload error:', e);

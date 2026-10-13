@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
+import PhotoThumb from '@/components/PhotoThumb';
 
 export default function GardenerModalEditor({ gardener, type, onClose, onSave }) {
   // type: 'skills' | 'inventory' | 'preparations' | 'works' | 'reviews'
@@ -263,7 +264,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                         <div className="flex items-center gap-3">
                           {item.image ? (
                             <div className="relative group">
-                              <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                              <PhotoThumb src={item.image} alt={item.name} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
                               <button
                                 onClick={() => setItems(items.map((it, i) => i === idx ? { ...it, image: null } : it))}
                                 className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
@@ -321,7 +322,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                           <div className="flex flex-wrap gap-2 items-center">
                             {workImgList.map((img, photoIdx) => (
                               <div key={photoIdx} className="relative group">
-                                <img src={img} alt={`${item.title} ${photoIdx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                                <PhotoThumb src={img} alt={`${item.title} ${photoIdx+1}`} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteWorkPhoto(idx, photoIdx)}
@@ -467,7 +468,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
               <div className="flex items-center gap-2">
                 {invImage && (
                   <div className="relative">
-                    <img src={invImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                    <PhotoThumb src={invImage} alt="Превью" width={64} height={64} />
                     <button type="button" onClick={() => setInvImage('')} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
                   </div>
                 )}
@@ -522,7 +523,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
               <div className="flex items-center gap-2">
                 {prepImage && (
                   <div className="relative">
-                    <img src={prepImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                    <PhotoThumb src={prepImage} alt="Превью" width={64} height={64} />
                     <button type="button" onClick={() => setPrepImage('')} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
                   </div>
                 )}
@@ -550,7 +551,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                   <div className="flex flex-wrap gap-2">
                     {workImages.map((img, i) => (
                       <div key={i} className="relative">
-                        <img src={img} alt={`Предпросмотр ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                        <PhotoThumb src={img} alt={`Предпросмотр ${i+1}`} width={64} height={64} />
                         <button type="button" onClick={() => setWorkImages(workImages.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
                       </div>
                     ))}

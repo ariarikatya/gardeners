@@ -2,7 +2,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
+import PhotoThumb from '@/components/PhotoThumb';
 import { clientNotify } from '@/lib/clientNotify';
+import { fetchWithAutoLogin } from '@/lib/fetchWithAuth';
 import { saveCache, getCache, filterOrdersForOffline } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 
@@ -310,8 +312,8 @@ export default function GardenerDashboard() {
   const fetchOrders = async (silent = false) => {
     try {
       const [resOrders, resOps] = await Promise.all([
-        fetch('/api/gardener/orders'),
-        fetch('/api/gardener/operations')
+        fetchWithAutoLogin('/api/gardener/orders'),
+        fetchWithAutoLogin('/api/gardener/operations')
       ]);
 
       if (!resOrders.ok && !resOps.ok) {
@@ -846,8 +848,9 @@ export default function GardenerDashboard() {
             formData.append('clientName', actionOrder.clientName || '');
           }
           const data = await xhrUpload('/api/gardener/upload', formData, (pct) => setUploadProgress(pct));
-          if (data.url) {
-            uploaded.push(data.url);
+          const rawPath = data.path || data.url;
+          if (rawPath) {
+            uploaded.push(rawPath);
             successCount++;
           } else {
             failCount++;
@@ -1519,7 +1522,7 @@ export default function GardenerDashboard() {
                             <div className="flex flex-wrap gap-2 items-center">
                               {imgList.map((imgUrl, pIdx) => (
                                 <div key={pIdx} className="relative group">
-                                  <img src={imgUrl} alt={`${work.title} ${pIdx+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                                  <PhotoThumb src={imgUrl} alt={`${work.title} ${pIdx+1}`} width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -2162,7 +2165,7 @@ export default function GardenerDashboard() {
                       {photoBeforeItems.map((item) => (
                         <div key={item.id} className="relative group flex flex-col items-center">
                           <div className="relative">
-                            <img src={item.url} alt="До" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <PhotoThumb src={item.url} alt="До" width={64} height={64} />
                             <button
                               type="button"
                               onClick={() => setPhotoBeforeItems(prev => prev.filter(x => x.id !== item.id))}
@@ -2211,7 +2214,7 @@ export default function GardenerDashboard() {
                       {photoAfterItems.map((item) => (
                         <div key={item.id} className="relative group flex flex-col items-center">
                           <div className="relative">
-                            <img src={item.url} alt="После" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <PhotoThumb src={item.url} alt="После" width={64} height={64} />
                             <button
                               type="button"
                               onClick={() => setPhotoAfterItems(prev => prev.filter(x => x.id !== item.id))}
@@ -2257,7 +2260,7 @@ export default function GardenerDashboard() {
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoActUrls.map((url, index) => <div key={url || index} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
+                      {photoActUrls.map((url, index) => <div key={url || index} className="relative"><PhotoThumb src={url} alt={`Акт ${index + 1}`} width={64} height={64} /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
                       <button
                         type="button"
                         onClick={(e) => {

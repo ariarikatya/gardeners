@@ -32,6 +32,42 @@ sleep 3 && pm2 logs anemon --lines 20   # Убедиться в отсутств
 
 ---
 
+## Настройка Yandex.Disk OAuth API
+
+1. **Получение токенов Яндекс.Диска:**
+   - Перейдите на [Яндекс OAuth](https://oauth.yandex.ru/)
+   - Создайте приложение с правами на Яндекс.Диск (`cloud_api:disk.write`, `cloud_api:disk.read`)
+   - Скопируйте `Client ID` и `Client Secret`
+
+2. **Конфигурация в `/opt/anemon/.env`:**
+   ```env
+   YANDEX_OAUTH_CLIENT_ID=your_client_id
+   YANDEX_OAUTH_CLIENT_SECRET=your_client_secret
+   YANDEX_OAUTH_REFRESH_TOKEN=your_refresh_token
+   # Или прямой токен:
+   YANDEX_OAUTH_TOKEN=your_oauth_token
+   ```
+
+3. **Проверка статуса подключения Яндекс.Диска:**
+   Выполните curl-запрос для проверки статуса очереди и токенов:
+   ```bash
+   curl -s -X GET https://anemonagro.ru/api/gardener/yandex-status -H "Cookie: token=YOUR_AUTH_COOKIE"
+   ```
+   Ожидаемый ответ:
+   ```json
+   {
+     "configured": true,
+     "total": 0,
+     "pending": 0,
+     "uploading": 0,
+     "failed": 0,
+     "done": 0,
+     "items": []
+   }
+   ```
+
+---
+
 ## Почему пользователям больше не нужно чистить кэш / переустанавливать PWA
 
 1. **Автоматический уникальный CACHE_NAME:**

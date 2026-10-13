@@ -12,11 +12,14 @@ async function main() {
         { photoBefore: { startsWith: 'http' } },
         { photoAfter: { startsWith: 'http' } },
         { photoAct: { startsWith: 'http' } },
+        { photoBefore: { startsWith: '/api/images' } },
+        { photoAfter: { startsWith: '/api/images' } },
+        { photoAct: { startsWith: '/api/images' } },
       ],
     },
   });
 
-  console.log(`Found ${orders.length} orders with ImgBB photos to migrate.`);
+  console.log(`Found ${orders.length} orders to migrate.`);
 
   for (const order of orders) {
     let updated = false;
@@ -25,33 +28,46 @@ async function main() {
     const fields = ['photoBefore', 'photoAfter', 'photoAct'];
     for (const field of fields) {
       const val = order[field];
-      if (val && typeof val === 'string' && val.startsWith('http') && !val.includes('/api/images')) {
-        try {
-          console.log(`Downloading order ${order.id} ${field}: ${val.slice(0, 50)}...`);
-          const res = await fetch(val);
-          if (res.ok) {
-            const arrayBuf = await res.arrayBuffer();
-            const buffer = Buffer.from(arrayBuf);
-            const fileName = `migrated_${field}_${order.id.slice(0, 8)}_${Date.now()}.jpg`;
-            const folderPath = `/Садовники/Migrated_Orders`;
+      if (val && typeof val === 'string') {
+        // Handle migration from previous /api/images?path= stored strings
+        if (val.startsWith('/api/images?path=')) {
+          try {
+            const parsed = decodeURIComponent(val.slice('/api/images?path='.length));
+            updateData[field] = parsed;
+            updated = true;
+          } catch (e) {}
+        } else if (val.startsWith('http')) {
+          try {
+            console.log(`Downloading order ${order.id} ${field}: ${val.slice(0, 50)}...`);
+            const res = await fetch(val);
+            if (res.ok) {
+              const arrayBuf = await res.arrayBuffer();
+              const buffer = Buffer.from(arrayBuf);
+              const fileName = `migrated_${field}_${order.id.slice(0, 8)}_${Date.now()}.jpg`;
+              const folderPath = `/Садовники/Migrated_Orders`;
 
-            const ydRes = await uploadToYandexDiskDirect({ folderPath, fileName, fileBuffer: buffer });
-            let savedPath = ydRes.success ? ydRes.ydPath : null;
+              const ydRes = await uploadToYandexDiskDirect({ folderPath, fileName, fileBuffer: buffer });
+              let savedPath = ydRes.success ? ydRes.ydPath : null;
 
-            if (!savedPath) {
-              const localRes = saveLocalFallback({ folderPath: 'Migrated_Orders', fileName, fileBuffer: buffer });
-              savedPath = localRes.relativePath || localRes.localPath;
-            }
+              if (!savedPath) {
+                const localRes = saveLocalFallback({ folderPath: 'Migrated_Orders', fileName, fileBuffer: buffer });
+                savedPath = localRes.relativePath || localRes.localPath;
+              }
 
-            if (savedPath) {
-              updateData[field] = `/api/images?path=${encodeURIComponent(savedPath)}`;
+              if (savedPath) {
+                updateData[field] = savedPath;
+                updated = true;
+              }
+            } else {
+              console.warn(`Failed to download ${field} for order ${order.id}: HTTP ${res.status}`);
+              updateData[field] = `missing:${field}`;
               updated = true;
             }
-          } else {
-            console.warn(`Failed to download ${field} for order ${order.id}: HTTP ${res.status}`);
+          } catch (err) {
+            console.error(`Error migrating order ${order.id} field ${field}:`, err.message);
+            updateData[field] = `missing:${field}`;
+            updated = true;
           }
-        } catch (err) {
-          console.error(`Error migrating order ${order.id} field ${field}:`, err.message);
         }
       }
     }

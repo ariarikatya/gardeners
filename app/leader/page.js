@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
+import PhotoThumb from '@/components/PhotoThumb';
+import { fetchWithAutoLogin } from '@/lib/fetchWithAuth';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -109,7 +111,7 @@ export default function LeaderDashboard() {
       const params = new URLSearchParams();
       if (nextStart) params.set('start', nextStart);
       if (nextEnd) params.set('end', nextEnd);
-      const res = await fetch(`/api/leader?${params.toString()}`);
+      const res = await fetchWithAutoLogin(`/api/leader?${params.toString()}`);
       if (!res.ok) {
         const errorText = await res.text();
         let errorJson;
@@ -218,7 +220,7 @@ export default function LeaderDashboard() {
     try {
       const params = new URLSearchParams();
       params.set('gardenerId', gardenerId);
-      const res = await fetch(`/api/leader/operations?${params.toString()}`);
+      const res = await fetchWithAutoLogin(`/api/leader/operations?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
       setOpsList(json.operations || []);
@@ -251,7 +253,7 @@ export default function LeaderDashboard() {
     try {
       const params = new URLSearchParams();
       params.set('gardenerId', gardenerId);
-      const res = await fetch(`/api/leader/orders?${params.toString()}`);
+      const res = await fetchWithAutoLogin(`/api/leader/orders?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
       setOrdersList(json.orders || []);
@@ -720,7 +722,7 @@ export default function LeaderDashboard() {
                             <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.type === 'expense' && (op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-[11px] ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded">Новая</span>)}</div>
                             {op.description && <div className="text-xs text-slate-500">{renderOperationDescription(op)}</div>}
                             <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
-                            {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-1"><img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200" /></a>}
+                            {op.receiptUrl && <div className="inline-block mt-1"><PhotoThumb src={op.receiptUrl} alt="Чек" width={80} height={80} className="w-20 h-20 object-cover rounded border border-slate-200" /></div>}
                           </div>
 
                           {op.type === 'expense' && <div className="flex items-center gap-2">
@@ -853,7 +855,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
 
   const loadCatalog = async () => {
     try {
-      const res = await fetch('/api/catalog');
+      const res = await fetchWithAutoLogin('/api/catalog');
       if (res.ok) {
         const data = await res.json();
         setItems(catalogType === 'inventory' ? data.inventoryItems || [] : data.preparationItems || []);
@@ -1045,7 +1047,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
             <div className="flex items-center gap-2">
               {image ? (
                 <div className="relative group flex-shrink-0">
-                  <img src={image} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                  <PhotoThumb src={image} alt="Превью" width={64} height={64} />
                   <button
                     type="button"
                     onClick={() => setImage('')}
@@ -1114,7 +1116,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
                         className="rounded text-emerald-600 flex-shrink-0"
                       />
                       {it.image ? (
-                        <img src={it.image} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                        <PhotoThumb src={it.image} alt={it.name} width={48} height={48} className="w-12 h-12 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
                       ) : (
                         <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-[9px] text-slate-400 flex-shrink-0 text-center px-1">
                           Без фото

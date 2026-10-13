@@ -1,6 +1,29 @@
 import { NextResponse } from 'next/server';
 import { verifyTokenDetailed, signToken } from '@/lib/jwt';
 
+function dispatchCanaryLog(request, cookieState, tokenErrorCode) {
+  try {
+    const origin = request.nextUrl.origin;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+
+    fetch(`${origin}/api/client-error`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        event: 'middleware_auth_denied',
+        pathname: request.nextUrl.pathname,
+        ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || request.ip || 'unknown',
+        cookieState,
+        tokenErrorCode: tokenErrorCode || 'NO_TOKEN',
+        ua: request.headers.get('user-agent') || '',
+        referer: request.headers.get('referer') || '',
+      }),
+    }).catch(() => {}).finally(() => clearTimeout(timeoutId));
+  } catch (e) {}
+}
+
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get('authorization');
@@ -26,6 +49,7 @@ export async function middleware(request) {
 
   if (!token) {
     console.warn(`[Middleware Canary] Access denied to ${pathname} (no token). IP=${remoteIp}, CookieState=${cookieState}, UA=${userAgent.slice(0, 100)}, Referer=${referer}`);
+    dispatchCanaryLog(request, cookieState, 'NO_TOKEN');
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
@@ -33,6 +57,8 @@ export async function middleware(request) {
 
   if (!payload) {
     console.warn(`[Middleware Canary] Access denied to ${pathname} (token invalid: code=${tokenError}, msg=${tokenErrorMsg}). IP=${remoteIp}, CookieState=${cookieState}, UA=${userAgent.slice(0, 100)}, Referer=${referer}`);
+    dispatchCanaryLog(request, cookieState, tokenError || 'INVALID_TOKEN');
+
     const response = NextResponse.redirect(new URL('/login', request.url));
     // Не стирать cookie, если отказ произошёл из-за ложной причины (например, смены секрета при деплое).
     // Стираем cookie только при явном протухании токена (ERR_JWT_EXPIRED).
