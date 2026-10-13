@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
+import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
@@ -310,8 +311,8 @@ export default function GardenerDashboard() {
   const fetchOrders = async (silent = false) => {
     try {
       const [resOrders, resOps] = await Promise.all([
-        fetch('/api/gardener/orders'),
-        fetch('/api/gardener/operations')
+        apiFetch('/api/gardener/orders'),
+        apiFetch('/api/gardener/operations')
       ]);
 
       if (!resOrders.ok && !resOps.ok) {
@@ -369,7 +370,7 @@ export default function GardenerDashboard() {
     }
     setLoadingAuction(true);
     try {
-      const res = await fetch('/api/gardener/auction');
+      const res = await apiFetch('/api/gardener/auction');
       if (!res.ok) throw new Error('Ошибка получения аукционов');
       const data = await res.json();
       const list = data.orders || [];
@@ -389,7 +390,7 @@ export default function GardenerDashboard() {
   const fetchProfile = async () => {
     setLoadingWorks(true);
     try {
-      const res = await fetch('/api/gardener/profile');
+      const res = await apiFetch('/api/gardener/profile');
       const data = await res.json();
       if (res.ok && data.gardener) {
         setGardenerProfile(data.gardener);
@@ -420,7 +421,7 @@ export default function GardenerDashboard() {
       return;
     }
     try {
-      const res = await fetch('/api/gardener/profile', {
+      const res = await apiFetch('/api/gardener/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ works: updatedWorks })
@@ -468,7 +469,7 @@ export default function GardenerDashboard() {
       return;
     }
     try {
-      const res = await fetch('/api/gardener/auction', {
+      const res = await apiFetch('/api/gardener/auction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId })
@@ -631,7 +632,7 @@ export default function GardenerDashboard() {
     }
 
     try {
-      const res = await fetch('/api/gardener/operations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await apiFetch('/api/gardener/operations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
       setExpenseAmount(''); setExpenseDesc(''); setExpenseReceiptUrl(''); setExpenseReceiptBlob(null);
@@ -747,7 +748,7 @@ export default function GardenerDashboard() {
     }
 
     try {
-      const res = await fetch('/api/gardener/orders', {
+      const res = await apiFetch('/api/gardener/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

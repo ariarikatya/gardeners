@@ -106,13 +106,16 @@ const ADMIN_PANEL_URL = 'https://anemonagro.ru/admin';
 
 async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
-  if (!token) return false;
+  if (!token) return { error: 'Сессия истекла', status: 401 };
   const payload = await verifyToken(token);
-  return payload && (payload.role === 'ADMIN' || payload.role === 'LEADER');
+  if (!payload) return { error: 'Сессия истекла', status: 401 };
+  if (payload.role !== 'ADMIN' && payload.role !== 'LEADER') return { error: 'Недостаточно прав', status: 403 };
+  return { payload };
 }
 
 export async function GET(req) {
-  if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { searchParams } = new URL(req.url);
   const idParam = searchParams.get('id');
@@ -142,7 +145,8 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json();
   const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash, leadId, webLeadId } = body;
@@ -600,7 +604,8 @@ export async function POST(req) {
 }
 
 export async function PUT(req) {
-  if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json();
   console.log('========== НАЧАЛО ОБРАБОТКИ ЗАКАЗА ==========');
@@ -1093,16 +1098,9 @@ export async function PUT(req) {
 export async function DELETE(req) {
   console.log('🗑️ [DELETE] Запрос на удаление получен, URL:', req.url);
 
-  const token = req.cookies.get('token')?.value;
-  let payload = null;
-  if (token) {
-    payload = await verifyToken(token);
-  }
-  console.log('🗑️ [DELETE] Токен проверен, роль:', payload?.role);
-
-  if (!payload || (payload.role !== 'ADMIN' && payload.role !== 'LEADER')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const auth = await checkAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const payload = auth.payload;
 
   try {
     const { searchParams } = new URL(req.url);

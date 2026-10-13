@@ -111,7 +111,38 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Для ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
+  // === ФАЙЛЫ / ИЗОБРАЖЕНИЯ GET /api/files/* : Network-First с гарантией сохранения MIME для iOS Safari ===
+  if (request.method === 'GET' && url.pathname.startsWith('/api/files/')) {
+    event.respondWith(
+      (async () => {
+        try {
+          const netRes = await fetch(request);
+          if (netRes && netRes.status === 200) {
+            const contentType = netRes.headers.get('content-type') || 'image/jpeg';
+            const buf = await netRes.clone().arrayBuffer();
+            const resToCache = new Response(buf, {
+              status: 200,
+              headers: {
+                'Content-Type': contentType,
+                'Cache-Control': 'public, max-age=31536000, immutable',
+              },
+            });
+            caches.open(CACHE_NAME).then((cache) => {
+              try { cache.put(request, resToCache); } catch (e) {}
+            }).catch(() => {});
+          }
+          return netRes;
+        } catch (err) {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          throw err;
+        }
+      })()
+    );
+    return;
+  }
+
+  // Для остальных ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
   if (url.pathname.startsWith('/api/')) {
     if (request.method !== 'GET') {
       event.respondWith(

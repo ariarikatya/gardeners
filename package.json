@@ -22,6 +22,7 @@
     "test:push-update-safety": "node scripts/test-push-update-safety.js",
     "test:push-rebind": "node scripts/test-push-rebind.js",
     "test:uploads": "node scripts/test-uploads.js",
+    "test:uploads-mixed": "node scripts/test-uploads-mixed-ui.js",
     "test:jwt": "node scripts/test-jwt-sliding.js"
   },
   "dependencies": {

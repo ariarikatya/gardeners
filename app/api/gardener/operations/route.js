@@ -3,12 +3,13 @@ import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
-
-async function getGardenerIdFromToken(req) {
+async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;
-  if (!token) return null;
+  if (!token) return { error: 'Сессия истекла', status: 401 };
   const payload = await verifyToken(token);
-  return payload && payload.gardenerId ? payload.gardenerId : null;
+  if (!payload) return { error: 'Сессия истекла', status: 401 };
+  if (!payload.gardenerId) return { error: 'Недостаточно прав', status: 403 };
+  return { payload };
 }
 
 function formatDateInput(date) {
@@ -25,8 +26,10 @@ function getDateRange(rawStart, rawEnd) {
 }
 
 export async function GET(req) {
-  const gardenerId = await getGardenerIdFromToken(req);
-  if (!gardenerId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkGardener(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const gardenerId = auth.payload.gardenerId;
+
   const { searchParams } = new URL(req.url);
   const startRaw = searchParams.get('start');
   const endRaw = searchParams.get('end');
@@ -37,8 +40,9 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const gardenerId = await getGardenerIdFromToken(req);
-  if (!gardenerId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkGardener(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const gardenerId = auth.payload.gardenerId;
 
   const idempotencyKey = getIdempotencyKey(req);
   const cached = getCachedIdempotencyResponse(idempotencyKey);

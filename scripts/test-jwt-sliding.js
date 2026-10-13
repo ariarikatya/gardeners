@@ -119,6 +119,54 @@ async function runJwtTests() {
   assert(newTtlDays > 29, `Expected renewed token TTL ~30 days, got ${newTtlDays.toFixed(1)} days`);
   console.log(`✅ Test 3 Passed! Token auto-renewed to ${newTtlDays.toFixed(1)} days via sliding session.`);
 
+  // Test 4: Time Travel Validation (0 days, 1 day, 6 days, 31 days)
+  console.log('Test 4: Verifying token validity across time travel offsets (0d, +1d, +6d, +31d)...');
+  const baseNow = Date.now();
+  const RealDate = global.Date;
+
+  let mockCurrentTime = baseNow;
+
+  class TimeTravelDate extends RealDate {
+    constructor(...args) {
+      if (args.length === 0) {
+        super(mockCurrentTime);
+      } else {
+        super(...args);
+      }
+    }
+    static now() {
+      return mockCurrentTime;
+    }
+  }
+
+  try {
+    global.Date = TimeTravelDate;
+
+    // 0 days (Now)
+    mockCurrentTime = baseNow;
+    const vNow = await verifyToken(token);
+    assert(vNow !== null, 'Token should be valid now (0 days)');
+
+    // +1 Day
+    mockCurrentTime = baseNow + 1 * 24 * 60 * 60 * 1000;
+    const v1d = await verifyToken(token);
+    assert(v1d !== null, 'Token should be valid after 1 day');
+
+    // +6 Days
+    mockCurrentTime = baseNow + 6 * 24 * 60 * 60 * 1000;
+    const v6d = await verifyToken(token);
+    assert(v6d !== null, 'Token should be valid after 6 days');
+
+    // +31 Days (Expired)
+    mockCurrentTime = baseNow + 31 * 24 * 60 * 60 * 1000;
+    const v31d = await verifyToken(token);
+    assert(v31d === null, 'Token MUST be invalid / expired after 31 days');
+
+    console.log('✅ Test 4 Passed! Time-travel verification: valid at 0d, +1d, +6d, and correctly expired at +31d.');
+  } finally {
+    global.Date = RealDate;
+  }
+
   console.log('\n🎉 ALL JWT & SLIDING SESSION TESTS PASSED SUCCESSFULLY!');
 }
 
