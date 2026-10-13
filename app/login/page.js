@@ -37,8 +37,28 @@ export default function LoginPage() {
     }
   };
 
+  const notifySwAuthPresence = (active) => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SET_AUTH_PRESENCE',
+          active: Boolean(active),
+          ts: Date.now(),
+        });
+      }
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.active?.postMessage({
+          type: 'SET_AUTH_PRESENCE',
+          active: Boolean(active),
+          ts: Date.now(),
+        });
+      }).catch(() => {});
+    }
+  };
+
   const redirectByRole = (role, isOffline = false) => {
     notifySwOfflineSession(isOffline);
+    notifySwAuthPresence(true);
     if (role === 'ADMIN') {
       router.push('/admin');
     } else if (role === 'LEADER') {

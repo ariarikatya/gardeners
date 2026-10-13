@@ -7,17 +7,33 @@ export default function Error({ error, reset }) {
     console.error('App level error boundary caught:', error);
 
     try {
-      fetch('/api/client-error', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: error?.message || 'Unknown render error',
-          stack: error?.stack || '',
-          digest: error?.digest || '',
-          pathname: typeof window !== 'undefined' ? window.location.pathname : '',
-          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-        }),
-      }).catch(() => {});
+      let versionCheck = 'not_checked';
+      fetch('/api/version', { method: 'HEAD' })
+        .then((res) => {
+          versionCheck = res.ok ? 'ok_' + res.status : 'fail_' + res.status;
+        })
+        .catch((err) => {
+          versionCheck = 'error_' + (err.message || 'failed');
+        })
+        .finally(() => {
+          const connection =
+            typeof navigator !== 'undefined' &&
+            (navigator.connection || navigator.mozConnection || navigator.webkitConnection);
+          fetch('/api/client-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: error?.message || 'Unknown render error',
+              stack: error?.stack || '',
+              digest: error?.digest || '',
+              pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+              effectiveType: connection?.effectiveType || 'unknown',
+              onLine: typeof navigator !== 'undefined' ? navigator.onLine : true,
+              versionCheckResult: versionCheck,
+            }),
+          }).catch(() => {});
+        });
     } catch (e) {}
   }, [error]);
 

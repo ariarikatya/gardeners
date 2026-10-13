@@ -13,6 +13,18 @@ export default function ServiceWorkerRegister() {
 
     let autoReloadTimer = null;
 
+    // Notify SW if user is logged in
+    try {
+      if (localStorage.getItem('auth_phone') || localStorage.getItem('auth_token')) {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: 'SET_AUTH_PRESENCE', active: true });
+        }
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.active?.postMessage({ type: 'SET_AUTH_PRESENCE', active: true });
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
     const handleRegister = () => {
       navigator.serviceWorker.register('/sw.js', { scope: '/' })
         .then((reg) => {

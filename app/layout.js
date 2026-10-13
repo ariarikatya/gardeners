@@ -29,7 +29,10 @@ export default function RootLayout({ children }) {
                   div.innerHTML = '<div style="background:white;padding:28px 20px;border-radius:16px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-width:380px;width:100%;text-align:center;border:1px solid #e2e8f0;">' +
                     '<h2 style="color:#065f46;margin:0 0 8px;font-size:18px;">📡 Ошибка загрузки</h2>' +
                     '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">Сбой загрузки страницы (' + (msg || 'Сеть недоступна') + '). Попробуйте обновить страницу.</p>' +
-                    '<button onclick="window.location.reload()" style="background:#059669;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;font-size:14px;">Обновить страницу</button>' +
+                    '<div style="display:flex;flex-direction:column;gap:8px;">' +
+                      '<button onclick="window.location.reload()" style="background:#059669;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-weight:bold;width:100%;font-size:14px;">Перезагрузить страницу</button>' +
+                      '<a href="/login" style="display:block;background:#e2e8f0;color:#1e293b;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600;font-size:14px;box-sizing:border-box;">Перейти на страницу входа</a>' +
+                    '</div>' +
                     '</div>';
                   if (document.body) document.body.appendChild(div);
                 }
@@ -43,6 +46,23 @@ export default function RootLayout({ children }) {
                     showFatalError('ошибка сети');
                   }
                 });
+                function checkWatchdog() {
+                  setTimeout(function() {
+                    if (document.body) {
+                      var text = (document.body.innerText || '').trim();
+                      if (text.length < 20) {
+                        showFatalError('пустая страница / зависшая гидратация');
+                      }
+                    } else {
+                      showFatalError('страница не создана');
+                    }
+                  }, 8000);
+                }
+                if (document.readyState === 'complete') {
+                  checkWatchdog();
+                } else {
+                  window.addEventListener('load', checkWatchdog);
+                }
               })();
             `
           }}

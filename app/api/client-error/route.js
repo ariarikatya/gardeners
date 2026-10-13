@@ -25,6 +25,9 @@ export async function POST(req) {
       pathname: String(body.pathname || referer).slice(0, 500),
       userAgent: String(userAgent).slice(0, 500),
       clientVersion: String(body.clientVersion || CLIENT_VERSION).slice(0, 100),
+      effectiveType: String(body.effectiveType || body.connectionType || 'unknown').slice(0, 50),
+      onLine: typeof body.onLine === 'boolean' ? body.onLine : (body.onLine !== undefined ? String(body.onLine) : 'unknown'),
+      versionCheckResult: String(body.versionCheckResult || body.versionCheck || 'unknown').slice(0, 100),
     };
 
     console.error('[ClientErrorLog]', JSON.stringify(eventPayload));

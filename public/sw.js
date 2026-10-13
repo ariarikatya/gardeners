@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261012-246f9bd';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261013-ec03c12';
 const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -12,15 +12,18 @@ const OFFLINE_HTML = `<!DOCTYPE html>
     .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
     h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 12px; }
     p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
-    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; }
-    button:active { background: #047857; }
+    .btn-primary { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; box-sizing: border-box; display: block; margin-bottom: 10px; }
+    .btn-primary:active { background: #047857; }
+    .btn-secondary { background: #e2e8f0; color: #1e293b; text-decoration: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; display: block; width: 100%; box-sizing: border-box; }
+    .btn-secondary:active { background: #cbd5e1; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>📡 Нет связи с сервером</h1>
     <p>Не удалось подключиться к сети. Проверьте интернет или подключение к Wi-Fi и повторите попытку.</p>
-    <button onclick="window.location.reload()">Повторить попытку</button>
+    <button class="btn-primary" onclick="window.location.reload()">Повторить попытку</button>
+    <a href="/login" class="btn-secondary">Открыть страницу входа</a>
   </div>
 </body>
 </html>`;
@@ -81,13 +84,26 @@ async function getGardenerCacheAge() {
   return Infinity;
 }
 
-// === MESSAGE: ручное обновление и флаг офлайн-сессии ===
+// === MESSAGE: ручное обновление, флаг офлайн-сессии и маркер авторизации ===
 self.addEventListener('message', (event) => {
   if (event.data) {
     if (event.data.type === 'SKIP_WAITING') {
       self.skipWaiting();
     } else if (event.data.type === 'OFFLINE_SESSION') {
       isOfflineSessionActive = Boolean(event.data.active);
+    } else if (event.data.type === 'SET_AUTH_PRESENCE') {
+      const active = Boolean(event.data.active);
+      caches.open(CACHE_NAME).then((cache) => {
+        if (active) {
+          cache.put('/auth-presence', new Response(JSON.stringify({ active: true, ts: Date.now() }), {
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        } else {
+          cache.delete('/auth-presence');
+        }
+      }).catch(() => {});
+    } else if (event.data.type === 'CLEAR_AUTH_PRESENCE') {
+      caches.open(CACHE_NAME).then((cache) => cache.delete('/auth-presence')).catch(() => {});
     }
   }
 });
@@ -123,23 +139,35 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const tryFetchAndCache = async () => {
           const res = await fetchWithTimeout(request, 5000);
-          if (res && res.ok && !res.redirected) {
+          if (res && res.ok) {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
               try {
-                if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
-                  cache.put('/gardener', resClone);
-                  cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
-                    headers: { 'Content-Type': 'application/json' }
-                  }));
-                } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                  // Кэшируем /login ВСЕГДА при res.ok, независимо от res.redirected
                   cache.put('/login', resClone);
+                } else if (!res.redirected) {
+                  // Защищённые страницы кэшируем только при отсутствии редиректа
+                  if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+                    cache.put('/gardener', resClone);
+                    cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
+                      headers: { 'Content-Type': 'application/json' }
+                    }));
+                  } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
+                    cache.put('/admin', resClone);
+                  } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
+                    cache.put('/leader', resClone);
+                  }
                 }
               } catch (e) {}
             }).catch(() => {});
           }
           return res;
         };
+
+        const isProtectedPage = url.pathname.startsWith('/gardener') ||
+                                url.pathname.startsWith('/admin') ||
+                                url.pathname.startsWith('/leader');
 
         const cachedGardener = await caches.match('/gardener');
         const age = await getGardenerCacheAge();
@@ -159,9 +187,16 @@ self.addEventListener('fetch', (event) => {
           } catch (err2) {
             // Сеть недоступна -> проверяем пригодный кэш
             const exactCached = await caches.match(request);
-            if (exactCached) return exactCached;
+            const hasAuthMarker = Boolean(await caches.match('/auth-presence'));
 
-            if (cachedGardener) return cachedGardener;
+            if (isProtectedPage && !hasAuthMarker) {
+              // Маркера авторизации нет — отдаём /login, а не старую защищённую страницу
+              const cachedLogin = await caches.match('/login');
+              if (cachedLogin) return cachedLogin;
+            } else {
+              if (exactCached) return exactCached;
+              if (cachedGardener && url.pathname.startsWith('/gardener')) return cachedGardener;
+            }
 
             const cachedLogin = await caches.match('/login');
             if (cachedLogin) return cachedLogin;

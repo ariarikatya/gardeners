@@ -661,17 +661,29 @@ export default function GardenerDashboard() {
   };
 
   const handleLogout = async () => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-      navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
-        if (sub) {
-          fetch('/api/push/unsubscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: sub.endpoint }),
-            credentials: 'include'
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('auth_phone');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
+      } catch (e) {}
+      if ('serviceWorker' in navigator) {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_AUTH_PRESENCE' });
+        }
+        if ('PushManager' in window) {
+          navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
+            if (sub) {
+              fetch('/api/push/unsubscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: sub.endpoint }),
+                credentials: 'include'
+              }).catch(() => {});
+            }
           }).catch(() => {});
         }
-      }).catch(() => {});
+      }
     }
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/login');

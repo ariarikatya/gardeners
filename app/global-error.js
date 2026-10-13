@@ -5,6 +5,36 @@ import { useEffect } from 'react';
 export default function GlobalError({ error, reset }) {
   useEffect(() => {
     console.error('Global error boundary caught:', error);
+
+    try {
+      let versionCheck = 'not_checked';
+      fetch('/api/version', { method: 'HEAD' })
+        .then((res) => {
+          versionCheck = res.ok ? 'ok_' + res.status : 'fail_' + res.status;
+        })
+        .catch((err) => {
+          versionCheck = 'error_' + (err.message || 'failed');
+        })
+        .finally(() => {
+          const connection =
+            typeof navigator !== 'undefined' &&
+            (navigator.connection || navigator.mozConnection || navigator.webkitConnection);
+          fetch('/api/client-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: error?.message || 'Global Error Boundary',
+              stack: error?.stack || '',
+              digest: error?.digest || '',
+              pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+              userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+              effectiveType: connection?.effectiveType || 'unknown',
+              onLine: typeof navigator !== 'undefined' ? navigator.onLine : true,
+              versionCheckResult: versionCheck,
+            }),
+          }).catch(() => {});
+        });
+    } catch (e) {}
   }, [error]);
 
   const handleClearCacheAndReload = async () => {
@@ -44,7 +74,7 @@ export default function GlobalError({ error, reset }) {
 
           <div className="flex flex-col gap-2 pt-2">
             <button
-              onClick={() => reset ? reset() : window.location.reload()}
+              onClick={() => (reset ? reset() : window.location.reload())}
               className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
             >
               🔄 Перезагрузить страницу
