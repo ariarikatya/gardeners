@@ -52,6 +52,9 @@ google-key.json
 test-*.png
 test-results/
 
+# Local image uploads directory
+uploads/
+/opt/anemon/uploads
+
 # Auto-generated service worker version
-lib/swVersion.generated.js
 lib/swVersion.generated.js

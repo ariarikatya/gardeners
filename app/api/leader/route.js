@@ -3,12 +3,13 @@ import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { round2, calculateOrderSplit } from '@/lib/money';
 
-
 async function checkLeader(req) {
   const token = req.cookies.get('token')?.value;
-  if (!token) return false;
+  if (!token) return { error: 'Сессия истекла', status: 401 };
   const payload = await verifyToken(token);
-  return payload && payload.role === 'LEADER';
+  if (!payload) return { error: 'Сессия истекла', status: 401 };
+  if (payload.role !== 'LEADER') return { error: 'Недостаточно прав', status: 403 };
+  return { payload };
 }
 
 function formatDateInput(date, isEnd = false) {
@@ -29,7 +30,8 @@ function getDateRange(rawStart, rawEnd) {
 }
 
 export async function GET(req) {
-  if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkLeader(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { searchParams } = new URL(req.url);
   const startRaw = searchParams.get('start');
@@ -75,7 +77,6 @@ export async function GET(req) {
     return round2(sum + share);
   }, 0));
 
-  // Загрузим операции лидера за период и сгруппируем по садовнику
   const operations = await prisma.operation.findMany({ where: { createdAt: { gte: start, lte: end } } });
   const approvedExpenses = operations
     .filter(op => op.type === 'expense' && op.approved)
@@ -214,7 +215,8 @@ export async function GET(req) {
 }
 
 export async function PUT(req) {
-  if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkLeader(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { id, bonusPercent, finePercent, writeoffPercent } = await req.json();
   if (!id) return NextResponse.json({ error: 'Не указан садовник' }, { status: 400 });

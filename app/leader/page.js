@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
@@ -109,7 +110,7 @@ export default function LeaderDashboard() {
       const params = new URLSearchParams();
       if (nextStart) params.set('start', nextStart);
       if (nextEnd) params.set('end', nextEnd);
-      const res = await fetch(`/api/leader?${params.toString()}`);
+      const res = await apiFetch(`/api/leader?${params.toString()}`);
       if (!res.ok) {
         const errorText = await res.text();
         let errorJson;
@@ -163,7 +164,7 @@ export default function LeaderDashboard() {
       }
 
       for (const op of opsToCreate) {
-        const res = await fetch('/api/leader/operations', {
+        const res = await apiFetch('/api/leader/operations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gardenerId: gardener.id, type: op.type, amount: op.amount, description: op.description })
@@ -206,7 +207,7 @@ export default function LeaderDashboard() {
     try {
       const params = new URLSearchParams();
       params.set('gardenerId', gardenerId);
-      const res = await fetch(`/api/leader/operations?${params.toString()}`);
+      const res = await apiFetch(`/api/leader/operations?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
       setOpsList(json.operations || []);
@@ -222,7 +223,7 @@ export default function LeaderDashboard() {
   const deleteOperation = async (id, confirmMsg = 'Удалить операцию?') => {
     if (!confirm(confirmMsg)) return;
     try {
-      const res = await fetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка удаления');
       // обновим список
@@ -239,7 +240,7 @@ export default function LeaderDashboard() {
     try {
       const params = new URLSearchParams();
       params.set('gardenerId', gardenerId);
-      const res = await fetch(`/api/leader/orders?${params.toString()}`);
+      const res = await apiFetch(`/api/leader/orders?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
       setOrdersList(json.orders || []);
@@ -298,7 +299,7 @@ export default function LeaderDashboard() {
     }
 
     try {
-      const res = await fetch('/api/leader/order-paid', {
+      const res = await apiFetch('/api/leader/order-paid', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: orderId, paidTo: nextSerialized })

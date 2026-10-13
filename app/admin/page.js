@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import PushButton from '@/components/PushButton';
+import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 
 const emptyOrderForm = {
@@ -391,7 +392,7 @@ export default function AdminDashboard() {
 
   const loadWebLeads = async (silent = false) => {
     try {
-      const resW = await fetch('/api/admin/webleads');
+      const resW = await apiFetch('/api/admin/webleads');
       if (resW.ok) {
         const dataW = await resW.json();
         const incomingLeads = dataW.webLeads || [];
@@ -479,12 +480,12 @@ export default function AdminDashboard() {
       const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
       const [resG, resO, resD, resB, resS, resMe] = await Promise.all([
-        fetch('/api/admin/gardeners'),
-        fetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
-        fetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
-        fetch(`/api/admin/blockday?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
-        fetch('/api/admin/services'),
-        fetch('/api/auth/me')
+        apiFetch('/api/admin/gardeners'),
+        apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        apiFetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        apiFetch(`/api/admin/blockday?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        apiFetch('/api/admin/services'),
+        apiFetch('/api/auth/me')
       ]);
       if (resMe.ok) {
         const meData = await resMe.json();
@@ -742,7 +743,7 @@ export default function AdminDashboard() {
       ? { id: selectedOrder.id, ...formDataCustom }
       : { ...formDataCustom, fromLead: !!convertingLeadId };
 
-    const res = await fetch(endpoint, {
+    const res = await apiFetch(endpoint, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -781,7 +782,7 @@ export default function AdminDashboard() {
     if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
 
     console.log('🖱️ [FRONTEND] Вызываю удаление заказа ID:', selectedOrder.id);
-    const res = await fetch(`/api/admin/orders?id=${selectedOrder.id}`, {
+    const res = await apiFetch(`/api/admin/orders?id=${selectedOrder.id}`, {
       method: 'DELETE',
     });
     const responseText = await res.text();

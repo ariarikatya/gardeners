@@ -2,17 +2,20 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 
-
 async function gardenerFromRequest(req) {
   const token = req.cookies.get('token')?.value;
-  if (!token) return null;
+  if (!token) return { error: 'Сессия истекла', status: 401 };
   const payload = await verifyToken(token);
-  return payload?.role === 'GARDENER' ? payload : null;
+  if (!payload) return { error: 'Сессия истекла', status: 401 };
+  if (payload.role !== 'GARDENER') return { error: 'Недостаточно прав', status: 403 };
+  return { payload };
 }
 
 export async function GET(req) {
-  const payload = await gardenerFromRequest(req);
-  if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await gardenerFromRequest(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const payload = auth.payload;
+
   const expenses = await prisma.expense.findMany({
     where: { gardenerId: payload.gardenerId },
     orderBy: { date: 'desc' },
@@ -21,8 +24,10 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const payload = await gardenerFromRequest(req);
-  if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await gardenerFromRequest(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const payload = auth.payload;
+
   const { date, amount, description, receiptUrl } = await req.json();
   const parsedAmount = parseFloat(amount);
   if (!date || !parsedAmount || parsedAmount <= 0 || !description?.trim()) {
@@ -35,8 +40,10 @@ export async function POST(req) {
 }
 
 export async function DELETE(req) {
-  const payload = await gardenerFromRequest(req);
-  if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await gardenerFromRequest(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const payload = auth.payload;
+
   const { id } = await req.json();
   await prisma.expense.deleteMany({ where: { id, gardenerId: payload.gardenerId } });
   return NextResponse.json({ success: true });

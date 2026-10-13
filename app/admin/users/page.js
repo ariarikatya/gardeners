@@ -753,7 +753,7 @@ export default function AdminUsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Фото садовника (ImgBB)</label>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">Фото садовника</label>
                 <div className="flex items-center gap-2">
                   {editingGardener.photoUrl && (
                     <img src={editingGardener.photoUrl} alt={editingGardener.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />

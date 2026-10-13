@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261012-246f9bd';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261013-ec03c12';
 const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -12,8 +12,9 @@ const OFFLINE_HTML = `<!DOCTYPE html>
     .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
     h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 12px; }
     p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
-    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; }
-    button:active { background: #047857; }
+    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
+    button.secondary { background: #e2e8f0; color: #1e293b; }
+    button:active { opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -21,6 +22,7 @@ const OFFLINE_HTML = `<!DOCTYPE html>
     <h1>📡 Нет связи с сервером</h1>
     <p>Не удалось подключиться к сети. Проверьте интернет или подключение к Wi-Fi и повторите попытку.</p>
     <button onclick="window.location.reload()">Повторить попытку</button>
+    <button class="secondary" onclick="caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/login'; })">Очистить кэш и войти</button>
   </div>
 </body>
 </html>`;
@@ -46,7 +48,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// === ACTIVATE: чистим всё старое ===
+// === ACTIVATE: чистим все старые версии кэша ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -92,12 +94,55 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// Helper for caching valid responses only
+function safeCachePut(cacheName, request, response) {
+  if (!response || !response.ok || response.status >= 300 || response.redirected || response.type === 'opaque') {
+    return;
+  }
+  caches.open(cacheName).then((cache) => {
+    try {
+      cache.put(request, response.clone());
+    } catch (e) {}
+  }).catch(() => {});
+}
+
 // === FETCH: умное кэширование ===
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Для ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
+  // === ФАЙЛЫ / ИЗОБРАЖЕНИЯ GET /api/files/* : Network-First с гарантией сохранения MIME для iOS Safari ===
+  if (request.method === 'GET' && url.pathname.startsWith('/api/files/')) {
+    event.respondWith(
+      (async () => {
+        try {
+          const netRes = await fetch(request);
+          if (netRes && netRes.status === 200) {
+            const contentType = netRes.headers.get('content-type') || 'image/jpeg';
+            const buf = await netRes.clone().arrayBuffer();
+            const resToCache = new Response(buf, {
+              status: 200,
+              headers: {
+                'Content-Type': contentType,
+                'Cache-Control': 'public, max-age=31536000, immutable',
+              },
+            });
+            caches.open(CACHE_NAME).then((cache) => {
+              try { cache.put(request, resToCache); } catch (e) {}
+            }).catch(() => {});
+          }
+          return netRes;
+        } catch (err) {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          throw err;
+        }
+      })()
+    );
+    return;
+  }
+
+  // Для остальных ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
   if (url.pathname.startsWith('/api/')) {
     if (request.method !== 'GET') {
       event.respondWith(
@@ -123,7 +168,8 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const tryFetchAndCache = async () => {
           const res = await fetchWithTimeout(request, 5000);
-          if (res && res.ok && !res.redirected) {
+          // Никогда НЕ кэшировать ответы с редиректами (!res.redirected, status 200) или ошибками (status < 400)
+          if (res && res.ok && res.status === 200 && !res.redirected) {
             const resClone = res.clone();
             caches.open(CACHE_NAME).then((cache) => {
               try {
@@ -145,8 +191,11 @@ self.addEventListener('fetch', (event) => {
         const age = await getGardenerCacheAge();
         const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 
-        // Если активна офлайн-сессия, есть кэш /gardener и ему <24ч — отдаём его сразу
+        // Если активна офлайн-сессия, есть кэш /gardener и ему <24ч — отдаём его сразу,
+        // но запускаем фоновую ревалидацию
         if (isOfflineSessionActive && cachedGardener && age < MAX_AGE_24H && (url.pathname === '/gardener' || url.pathname.startsWith('/gardener'))) {
+          // Background revalidation
+          tryFetchAndCache().catch(() => {});
           return cachedGardener;
         }
 
@@ -159,12 +208,12 @@ self.addEventListener('fetch', (event) => {
           } catch (err2) {
             // Сеть недоступна -> проверяем пригодный кэш
             const exactCached = await caches.match(request);
-            if (exactCached) return exactCached;
+            if (exactCached && exactCached.ok && exactCached.status === 200) return exactCached;
 
-            if (cachedGardener) return cachedGardener;
+            if (cachedGardener && cachedGardener.ok) return cachedGardener;
 
             const cachedLogin = await caches.match('/login');
-            if (cachedLogin) return cachedLogin;
+            if (cachedLogin && cachedLogin.ok) return cachedLogin;
 
             // Только если совсем нет кэша маршрутов — отдаём OFFLINE_HTML
             return new Response(OFFLINE_HTML, {
@@ -182,13 +231,10 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
       caches.match(request).then((cached) => {
-        if (cached) return cached;
+        if (cached && cached.ok && cached.status === 200) return cached;
         return fetch(request).then((res) => {
-          if (res && res.status === 200 && res.type !== 'error') {
-            const resClone = res.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              try { cache.put(request, resClone); } catch (e) {}
-            }).catch(() => {});
+          if (res && res.status === 200 && res.ok && !res.redirected) {
+            safeCachePut(CACHE_NAME, request, res);
           }
           return res;
         });
@@ -201,11 +247,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(request)
       .then((res) => {
-        if (res && res.status === 200 && res.type !== 'error') {
-          const resClone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            try { cache.put(request, resClone); } catch (e) {}
-          }).catch(() => {});
+        // Кэшировать только успешные (HTTP 200, res.ok, не редирект) ответы
+        if (res && res.status === 200 && res.ok && !res.redirected && res.type !== 'error') {
+          safeCachePut(CACHE_NAME, request, res);
         }
         return res;
       })

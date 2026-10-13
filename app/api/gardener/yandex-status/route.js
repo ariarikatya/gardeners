@@ -4,23 +4,24 @@ import { getQueueStatus, drainQueue } from '@/lib/yandexDisk';
 
 async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;
-  if (!token) return null;
+  if (!token) return { error: 'Сессия истекла', status: 401 };
   const payload = await verifyToken(token);
-  if (!payload || payload.role !== 'GARDENER') return null;
-  return payload;
+  if (!payload) return { error: 'Сессия истекла', status: 401 };
+  if (payload.role !== 'GARDENER') return { error: 'Недостаточно прав', status: 403 };
+  return { payload };
 }
 
 export async function GET(req) {
-  const payload = await checkGardener(req);
-  if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkGardener(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const status = getQueueStatus();
   return NextResponse.json(status);
 }
 
 export async function POST(req) {
-  const payload = await checkGardener(req);
-  if (!payload) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const auth = await checkGardener(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   await drainQueue(40000);
   const status = getQueueStatus();
