@@ -11,22 +11,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('auth_phone');
-      const token = localStorage.getItem('auth_token');
-      if (saved) {
-        setSavedPhone(saved);
-        setIsSavedPhoneMode(true);
-      }
-      if (token && typeof window !== 'undefined' && !navigator.onLine) {
-        setShowOfflineOption(true);
-      }
-    } catch (e) {
-      // localStorage error fallback
-    }
-  }, []);
-
   const notifySwOfflineSession = (active) => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
       navigator.serviceWorker.controller.postMessage({
@@ -57,8 +41,9 @@ export default function LoginPage() {
     }
   };
 
-  const handleAutoLogin = async () => {
-    if (!savedPhone) return;
+  const handleAutoLoginWithPhone = async (targetPhone) => {
+    const phoneToUse = targetPhone || savedPhone;
+    if (!phoneToUse) return;
     setError('');
     setLoading(true);
 
@@ -71,7 +56,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/auto-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: savedPhone }),
+        body: JSON.stringify({ phone: phoneToUse }),
       });
       const data = await res.json();
 
@@ -80,7 +65,7 @@ export default function LoginPage() {
         throw new Error(data.error || 'Ошибка при входе');
       }
 
-      const cleanPhone = String(savedPhone).replace(/\D/g, '');
+      const cleanPhone = String(phoneToUse).replace(/\D/g, '');
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) localStorage.setItem('auth_role', data.role);
@@ -91,7 +76,7 @@ export default function LoginPage() {
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
-      if (isNetworkErr && (storedPhone || storedToken || savedPhone)) {
+      if (isNetworkErr && (storedPhone || storedToken || phoneToUse)) {
         handleOfflineLogin();
         return;
       }
@@ -104,6 +89,26 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  const handleAutoLogin = () => handleAutoLoginWithPhone(savedPhone);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('auth_phone');
+      const token = localStorage.getItem('auth_token');
+      if (saved) {
+        setSavedPhone(saved);
+        setIsSavedPhoneMode(true);
+        // Automatically attempt auto-login on mount if savedPhone exists
+        handleAutoLoginWithPhone(saved);
+      }
+      if (token && typeof window !== 'undefined' && !navigator.onLine) {
+        setShowOfflineOption(true);
+      }
+    } catch (e) {
+      // localStorage error fallback
+    }
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();

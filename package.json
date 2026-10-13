@@ -20,7 +20,9 @@
     "test:push-pwa-env": "node scripts/test-push-pwa-env.js",
     "test:push-logs": "node scripts/test-push-logs.js",
     "test:push-update-safety": "node scripts/test-push-update-safety.js",
-    "test:push-rebind": "node scripts/test-push-rebind.js"
+    "test:push-rebind": "node scripts/test-push-rebind.js",
+    "test:uploads": "node scripts/test-uploads.js",
+    "test:jwt": "node scripts/test-jwt-sliding.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -30,6 +32,7 @@
     "next": "14.2.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "sharp": "^0.35.5",
     "webdav": "^5.11.0",
     "xlsx": "^0.18.5"
   },

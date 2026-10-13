@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { signToken } from '@/lib/jwt';
 
+function isRequestSecure(req) {
+  if (process.env.NODE_ENV !== 'production') return false;
+  if (process.env.DISABLE_SECURE_COOKIES === 'true') return false;
+  const proto = req.headers.get('x-forwarded-proto') || req.nextUrl?.protocol || '';
+  return proto.includes('https');
+}
+
 export async function POST(req) {
   try {
     const { phone } = await req.json();
@@ -30,7 +37,7 @@ export async function POST(req) {
 
     response.cookies.set('token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: isRequestSecure(req),
       maxAge: 60 * 60 * 24 * 365, // 365 дней
       sameSite: 'lax',
       path: '/',
