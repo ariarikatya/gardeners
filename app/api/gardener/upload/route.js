@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { waitUntil } from '@vercel/functions';
 import { verifyToken } from '@/lib/jwt';
 import prisma from '@/lib/prisma';
 import { scheduleYandexUpload, drainQueue } from '@/lib/yandexDisk';
@@ -65,12 +64,7 @@ export async function POST(req) {
     }
 
     const drainTask = drainQueue(40000);
-
-    try {
-      waitUntil(drainTask);
-    } catch (err) {
-      drainTask.catch(e => console.error('[external-yadisk] drainQueue error:', e));
-    }
+    drainTask.catch(e => console.error('[external-yadisk] drainQueue error:', e));
 
     return NextResponse.json({
       url: urls[0],

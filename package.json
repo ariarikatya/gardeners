@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "@vercel/functions": "^3.9.9",
     "check-disk-space": "^3.4.0",
     "googleapis": "^140.0.1",
     "jose": "^5.0.0",
