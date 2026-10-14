@@ -166,62 +166,61 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
-        const tryFetchAndCache = async () => {
-          const res = await fetchWithTimeout(request, 5000);
-          // Никогда НЕ кэшировать ответы с редиректами (!res.redirected, status 200) или ошибками (status < 400)
-          if (res && res.ok && res.status === 200 && !res.redirected) {
-            const resClone = res.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              try {
-                if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
-                  cache.put('/gardener', resClone);
-                  cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
-                    headers: { 'Content-Type': 'application/json' }
-                  }));
-                } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
-                  cache.put('/login', resClone);
-                }
-              } catch (e) {}
-            }).catch(() => {});
+        try {
+          const netRes = await fetchWithTimeout(request, 5000);
+          if (netRes) {
+            // Если сервер ответил редиректом (например, middleware редиректит неавторизованного на /login)
+            // ВОЗВРАЩАЕМ РЕДИРЕКТ СРАЗУ, БЕЗ ФОЛЛБЭКОВ НА КЭШ /gardener!
+            if (netRes.redirected || (netRes.status >= 300 && netRes.status < 400)) {
+              return netRes;
+            }
+            if (netRes.ok && netRes.status === 200) {
+              const resClone = netRes.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                try {
+                  if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+                    cache.put('/gardener', resClone);
+                    cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
+                      headers: { 'Content-Type': 'application/json' }
+                    }));
+                  } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                    cache.put('/login', resClone);
+                  }
+                } catch (e) {}
+              }).catch(() => {});
+            }
+            return netRes;
           }
-          return res;
-        };
+        } catch (err) {
+          // Исключение сети (true offline)
+        }
+
+        // Кэш-фоллбэки ТОЛЬКО при сбое сети (оффлайн):
+        const isLoginRequest = url.pathname === '/login' || url.pathname.startsWith('/login');
+        if (isLoginRequest) {
+          const cachedLogin = await caches.match('/login');
+          if (cachedLogin && cachedLogin.ok && cachedLogin.status === 200) {
+            return cachedLogin;
+          }
+        }
 
         const cachedGardener = await caches.match('/gardener');
         const age = await getGardenerCacheAge();
         const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 
-        // Если активна офлайн-сессия, есть кэш /gardener и ему <24ч — отдаём его сразу,
-        // но запускаем фоновую ревалидацию
         if (isOfflineSessionActive && cachedGardener && age < MAX_AGE_24H && (url.pathname === '/gardener' || url.pathname.startsWith('/gardener'))) {
-          // Background revalidation
-          tryFetchAndCache().catch(() => {});
           return cachedGardener;
         }
 
-        // В остальных случаях пробуем сеть
-        try {
-          return await tryFetchAndCache();
-        } catch (err1) {
-          try {
-            return await tryFetchAndCache();
-          } catch (err2) {
-            // Сеть недоступна -> проверяем пригодный кэш
-            const exactCached = await caches.match(request);
-            if (exactCached && exactCached.ok && exactCached.status === 200) return exactCached;
-
-            if (cachedGardener && cachedGardener.ok) return cachedGardener;
-
-            const cachedLogin = await caches.match('/login');
-            if (cachedLogin && cachedLogin.ok) return cachedLogin;
-
-            // Только если совсем нет кэша маршрутов — отдаём OFFLINE_HTML
-            return new Response(OFFLINE_HTML, {
-              status: 200,
-              headers: { 'Content-Type': 'text/html; charset=utf-8' },
-            });
-          }
+        const exactCached = await caches.match(request);
+        if (exactCached && exactCached.ok && exactCached.status === 200) {
+          return exactCached;
         }
+
+        return new Response(OFFLINE_HTML, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        });
       })()
     );
     return;

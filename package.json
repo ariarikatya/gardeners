@@ -23,7 +23,8 @@
     "test:push-rebind": "node scripts/test-push-rebind.js",
     "test:uploads": "node scripts/test-uploads.js",
     "test:uploads-mixed": "node scripts/test-uploads-mixed-ui.js",
-    "test:jwt": "node scripts/test-jwt-sliding.js"
+    "test:jwt": "node scripts/test-jwt-sliding.js",
+    "test:logout": "node scripts/test-logout.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

@@ -513,20 +513,45 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-      navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
-        if (sub) {
-          fetch('/api/push/unsubscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: sub.endpoint }),
-            credentials: 'include'
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('manual_logout', '1');
+        localStorage.removeItem('auth_phone');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
+        localStorage.removeItem('auth_session_cached');
+
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'OFFLINE_SESSION',
+            active: false,
+          });
+        }
+
+        if ('PushManager' in window && 'serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
+            if (sub) {
+              fetch('/api/push/unsubscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: sub.endpoint }),
+                credentials: 'include'
+              }).catch(() => {});
+            }
           }).catch(() => {});
         }
-      }).catch(() => {});
+      }
+    } catch (e) {}
+
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
+
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login');
+    } else {
+      router.push('/login');
     }
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
   };
 
   const [syncing, setSyncing] = useState(false);
