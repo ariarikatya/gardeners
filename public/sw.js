@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261013-ec03c12';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261014-ec03c12';
 const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
