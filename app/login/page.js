@@ -101,16 +101,20 @@ export default function LoginPage() {
   useEffect(() => {
     try {
       const isManualLogout = typeof window !== 'undefined' && sessionStorage.getItem('manual_logout') === '1';
+
+      if (isManualLogout) {
+        sessionStorage.removeItem('manual_logout');
+        setIsSavedPhoneMode(false);
+        setSavedPhone(null);
+        return;
+      }
+
       const saved = localStorage.getItem('auth_phone');
       const token = localStorage.getItem('auth_token');
 
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
-        // Automatically attempt auto-login on mount ONLY if user did not manually log out
-        if (!isManualLogout) {
-          handleAutoLoginWithPhone(saved);
-        }
       }
       if (token && typeof window !== 'undefined' && !navigator.onLine) {
         setShowOfflineOption(true);
@@ -172,6 +176,8 @@ export default function LoginPage() {
     }
   };
 
+  const formattedSavedPhone = savedPhone ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : '';
+
   if (isSavedPhoneMode && savedPhone) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12 sm:px-6 lg:px-8">
@@ -181,7 +187,7 @@ export default function LoginPage() {
               Вход в систему
             </h2>
             <p className="mt-2 text-center text-base text-slate-600 font-medium">
-              Войти как <span className="font-bold text-slate-900">{savedPhone}</span>?
+              Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>? Это ваш номер?
             </p>
           </div>
 
@@ -198,7 +204,7 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-lg font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:bg-emerald-400"
             >
-              {loading ? 'Вход...' : 'Войти'}
+              {loading ? 'Вход...' : 'Да, войти'}
             </button>
 
             {showOfflineOption && (
@@ -220,7 +226,7 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full flex justify-center py-3 px-4 border border-slate-300 rounded-lg shadow-sm text-base font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
             >
-              Другой номер
+              Нет, ввести другой номер
             </button>
           </div>
         </div>

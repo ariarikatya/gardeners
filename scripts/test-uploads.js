@@ -122,15 +122,36 @@ async function runUploadsTests() {
     assert(resForbidden.status === 403, `Expected status 403 for path traversal, got ${resForbidden.status}`);
     console.log('✅ Test 4 Passed! Path traversal blocked with 403.');
 
-    // Test 5: Disk space check guard
-    console.log('Test 5: Testing disk space check guard...');
+    // Test 5: Statfs zero handling and fallback chain
+    console.log('Test 5: Testing statfs zero handling & fail-open fallback chain...');
     const origStatfs = fs.statfsSync;
     try {
-      // Mock statfs to return < 2 GB
+      // Mock statfsSync to return zeros (simulating the VPS bug)
+      fs.statfsSync = () => ({
+        bsize: 0,
+        blocks: 0,
+        bavail: 0
+      });
+
+      const spaceResult = await checkDiskSpace(testUploadsDir);
+      assert(spaceResult.freeBytes > 0, 'Expected checkDiskSpace fallback to yield freeBytes > 0 when statfs is 0');
+      assert(['check-disk-space', 'df', 'fail-open'].includes(spaceResult.source), `Expected fallback source, got ${spaceResult.source}`);
+
+      // Upload must succeed with zero statfs due to fallback / fail-open
+      const fallbackUrl = await saveUploadedImage(testPngBuffer);
+      assert(fallbackUrl.startsWith('/api/files/'), 'Upload should succeed when statfs returns zeros');
+      console.log(`✅ Test 5 Passed! Statfs zero handled gracefully via source "${spaceResult.source}".`);
+    } finally {
+      fs.statfsSync = origStatfs;
+    }
+
+    // Test 6: Valid low disk space blocking (< 2 GB)
+    console.log('Test 6: Testing valid low disk space blocking (< 2 GB)...');
+    try {
       fs.statfsSync = () => ({
         bsize: 4096,
-        bavail: 100000, // ~400 MB
-        blocks: 1000000
+        blocks: 1000000,
+        bavail: 100000 // ~400 MB
       });
 
       let diskErrorCaught = false;
@@ -140,8 +161,8 @@ async function runUploadsTests() {
         diskErrorCaught = true;
         assert(err.message.includes('Недостаточно свободного места'), `Unexpected error message: ${err.message}`);
       }
-      assert(diskErrorCaught, 'Expected low disk space error to be thrown');
-      console.log('✅ Test 5 Passed! Low disk space caught.');
+      assert(diskErrorCaught, 'Expected low disk space error to be thrown when free space < 2 GB');
+      console.log('✅ Test 6 Passed! Low disk space (< 2 GB) correctly caught.');
     } finally {
       fs.statfsSync = origStatfs;
     }
