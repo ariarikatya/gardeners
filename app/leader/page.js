@@ -137,7 +137,6 @@ export default function LeaderDashboard() {
     try {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('manual_logout', '1');
-        localStorage.removeItem('auth_phone');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');

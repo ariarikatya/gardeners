@@ -10,7 +10,26 @@ mkdir -p /opt/anemon/uploads
 
 В файле `/opt/anemon/.env`:
 - `UPLOADS_DIR=/opt/anemon/uploads`
+- `MIN_FREE_MB=2000` (порог свободного места на сервере в МБ, по умолчанию 2000 МБ / 2 ГБ)
 - `JWT_SECRET=зафиксированный_секретный_ключ` (обязательно зафиксировать, чтобы токены пользователей не сбрасывались при перезапуске PM2).
+
+Переменная `UPLOADS_DIR` также прописана в `ecosystem.config.js` для гарантированной передачи окружения процессом PM2:
+
+```javascript
+module.exports = {
+  apps: [
+    {
+      name: 'anemon',
+      script: 'node_modules/next/dist/bin/next',
+      args: 'start',
+      env: {
+        NODE_ENV: 'production',
+        UPLOADS_DIR: '/opt/anemon/uploads'
+      }
+    }
+  ]
+};
+```
 
 ## Безопасный цикл обновления (Zero Downtime / Version Skew Safety)
 

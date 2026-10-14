@@ -104,9 +104,10 @@ export default function LoginPage() {
 
       if (isManualLogout) {
         sessionStorage.removeItem('manual_logout');
-        setIsSavedPhoneMode(false);
-        setSavedPhone(null);
-        return;
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_role');
+        }
       }
 
       const saved = localStorage.getItem('auth_phone');
