@@ -188,7 +188,7 @@ export default function LoginPage() {
               Вход в систему
             </h2>
             <p className="mt-2 text-center text-base text-slate-600 font-medium">
-              Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>? Это ваш номер?
+              Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>?<br />Это ваш номер?
             </p>
           </div>
 

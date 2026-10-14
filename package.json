@@ -23,6 +23,7 @@
     "test:push-rebind": "node scripts/test-push-rebind.js",
     "test:uploads": "node scripts/test-uploads.js",
     "test:uploads-mixed": "node scripts/test-uploads-mixed-ui.js",
+    "test:upload-image": "node scripts/upload-image.test.js",
     "test:jwt": "node scripts/test-jwt-sliding.js",
     "test:logout": "node scripts/test-logout.js",
     "test:login-flow": "node scripts/test-login-flow.js"
