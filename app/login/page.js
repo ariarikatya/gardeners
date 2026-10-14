@@ -34,6 +34,7 @@ export default function LoginPage() {
 
   const handleOfflineLogin = () => {
     try {
+      if (typeof window !== 'undefined') sessionStorage.removeItem('manual_logout');
       const role = localStorage.getItem('auth_role') || 'GARDENER';
       redirectByRole(role, true);
     } catch (e) {
@@ -47,6 +48,10 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('manual_logout');
+    }
+
     if (typeof window !== 'undefined' && !navigator.onLine) {
       handleOfflineLogin();
       return;
@@ -57,6 +62,7 @@ export default function LoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: phoneToUse }),
+        credentials: 'include',
       });
       const data = await res.json();
 
@@ -94,13 +100,17 @@ export default function LoginPage() {
 
   useEffect(() => {
     try {
+      const isManualLogout = typeof window !== 'undefined' && sessionStorage.getItem('manual_logout') === '1';
       const saved = localStorage.getItem('auth_phone');
       const token = localStorage.getItem('auth_token');
+
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
-        // Automatically attempt auto-login on mount if savedPhone exists
-        handleAutoLoginWithPhone(saved);
+        // Automatically attempt auto-login on mount ONLY if user did not manually log out
+        if (!isManualLogout) {
+          handleAutoLoginWithPhone(saved);
+        }
       }
       if (token && typeof window !== 'undefined' && !navigator.onLine) {
         setShowOfflineOption(true);
@@ -114,6 +124,10 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('manual_logout');
+    }
 
     const cleanPhone = phone.replace(/\D/g, '');
     const isNetworkOffline = typeof window !== 'undefined' && !navigator.onLine;
@@ -131,6 +145,7 @@ export default function LoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone }),
+        credentials: 'include',
       });
       const data = await res.json();
 
