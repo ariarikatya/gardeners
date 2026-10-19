@@ -17,7 +17,7 @@ Deployment notes — scheduled tasks and VK notifications
 
 ## Установка серверного планировщика (systemd timer для напоминаний)
 
-Пошаговая инструкция по настройке `systemd` на сервере (например, `/opt/anemon`):
+Пошаговая инструкция по настройке `systemd` на сервере (`/opt/anemon`):
 
 1. **Скопировать unit-файлы в системную директорию**:
    ```bash
@@ -56,6 +56,54 @@ Deployment notes — scheduled tasks and VK notifications
    journalctl -u run-scheduled.service -n 50 --no-pager
    ```
 
+## Диагностика: напоминание не отправилось
+
+Если в 10:00 МСК (звонки) или 19:00 МСК (карточки) садовники не получили пуш-уведомление, выполните следующую пошаговую диагностику на сервере:
+
+1. **Проверить активность systemd-таймера**:
+   ```bash
+   systemctl list-timers | grep run-scheduled
+   ```
+   Убедитесь, что таймер находится в состоянии `active (waiting)` и колонки `NEXT` / `LEFT` показывают ближайший запуск на `:00` или `:30` минут текущего часа.
+
+2. **Проверить статус сервиса**:
+   ```bash
+   systemctl status run-scheduled.service
+   ```
+   Проверьте, что последний запуск завершился с кодом `code=exited, status=0/SUCCESS`.
+
+3. **Просмотреть журналы выполнения за сегодня**:
+   ```bash
+   journalctl -u run-scheduled.service --since today -n 100 --no-pager
+   ```
+   Ищите сообщения:
+   - `[reminders] ...` — статус отправки напоминаний.
+   - `[WebPush] ERROR: VAPID keys missing...` — отсутствие VAPID-ключей.
+
+4. **Проверить env-файл `/etc/gardening-site.env`**:
+   Убедитесь, что файл существует и содержит все необходимые переменные:
+   - `DATABASE_URL`
+   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
+   - `VAPID_PRIVATE_KEY`
+   - `VAPID_SUBJECT`
+
+5. **Ручной запуск скрипта напоминаний**:
+   ```bash
+   cd /opt/anemon
+   node scripts/run-order-reminders.js
+   ```
+   Если текущее время находится вне окон (10:00–11:59 или 19:00–20:59 МСК), скрипт выведет `time_threshold_not_reached`.
+
+6. **Тест с обходом порога времени (`ignoreTimeThreshold`)**:
+   Для проверки доставки уведомлений в любое время без сжигания продуктовой идемпотентности выполните POST-запрос с токеном авторизации:
+   ```bash
+   curl -X POST https://your-domain.com/api/push/test \
+     -H "Content-Type: application/json" \
+     -d '{"type":"call"}' \
+     -b "token=YOUR_JWT_TOKEN"
+   ```
+   Это отправит тестовое напоминание `order_reminder_test`, подтверждающее работоспособность Web Push канала.
+
 2) Vercel scheduler
 
 - If deploying to Vercel, use 'Vercel Scheduled Functions' or an external service to call the HTTP endpoint:
@@ -69,7 +117,7 @@ Deployment notes — scheduled tasks and VK notifications
 - API helper implemented at lib/vkApi.js that calls VK method messages.send.
 - When leader approves an operation via PUT /api/leader/operations, system will attempt to send a VK message to gardener.vkId (if present) and VK token is configured.
 
-- Message example: "Ваша трата на 1000 ₽ по заказу <orderId> была подтверждена на 800 ₽."
+- Message example: "Ваша трата на 1000 ₽ по заказу <orderId> была подтверждана на 800 ₽."
 
 Security and notes:
 - VK community tokens should be stored in environment variables and not committed.
@@ -125,19 +173,6 @@ Security and notes:
    curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d '{"type":"call"}' -b "token=YOUR_JWT_TOKEN"
    ```
    Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
-
-## Диагностика Web Push
-
-1. **Проверка переменных окружения VAPID**:
-   - На сервере или в Vercel проверьте переменные окружения:
-     - `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
-     - `VAPID_PRIVATE_KEY`
-     - `VAPID_SUBJECT` (например `mailto:admin@example.com`)
-
-2. **Просмотр логов таймера на сервере**:
-   ```bash
-   journalctl -u run-scheduled.service -n 50 --no-pager
-   ```
 
 5) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
 

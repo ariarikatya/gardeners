@@ -1,5 +1,5 @@
 # Systemd service to run scheduled order reminders for Gardening app
-# Copy this file to /etc/systemd/system/run-scheduled.service and adjust paths and user if needed.
+# Copy this file to /etc/systemd/system/run-scheduled.service and adjust user/paths if needed.
 
 [Unit]
 Description=Run scheduled order reminders for Gardening site
@@ -8,14 +8,16 @@ After=network-online.target
 
 [Service]
 Type=simple
-# User that should run the job (e.g. www-data or root)
-User=www-data
-# Working directory - change to actual application deployment path (e.g. /opt/anemon)
+# User running the service - match the owner of /opt/anemon and pm2 process (e.g. root)
+User=root
+# Working directory - application deployment directory
 WorkingDirectory=/opt/anemon
+# Ensure Moscow time zone environment
+Environment=TZ=Europe/Moscow
 # Environment file containing DATABASE_URL, NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, etc.
 EnvironmentFile=/etc/gardening-site.env
-# ExecStart: node path to the script that runs scheduled order reminders
-ExecStart=/usr/bin/node /opt/anemon/scripts/run-order-reminders.js
+# ExecStart: use env node for flexibility across nvm / system Node installations
+ExecStart=/usr/bin/env node /opt/anemon/scripts/run-order-reminders.js
 Restart=on-failure
 RestartSec=60
 

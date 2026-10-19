@@ -7,9 +7,10 @@
 Description=Timer to run scheduled order reminders every 30 minutes
 
 [Timer]
-# Runs every 30 minutes to trigger 10:00 call reminders and 19:00 card reminders
+# OnCalendar=*:0,30 runs every 30 minutes (at 00 and 30 min of every hour).
+# This covers call reminders (10:00–11:59 MSK) and card fill reminders (19:00–20:59 MSK).
 OnCalendar=*:0,30
-# Also ensure a run on boot if missed
+# Ensure a run on boot if missed
 Persistent=true
 
 [Install]

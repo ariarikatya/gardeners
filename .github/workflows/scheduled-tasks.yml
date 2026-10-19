@@ -24,6 +24,9 @@ jobs:
           npx prisma generate
 
       - name: Run scheduled tasks
+        # NOTE: VAPID secrets (NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY) are intentionally
+        # NOT passed here. This GitHub Actions workflow performs fine checks ONLY and must NOT generate
+        # Web Push notifications (order reminders run on the server systemd timer).
         env:
           TZ: Europe/Moscow
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
