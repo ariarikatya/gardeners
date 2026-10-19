@@ -3,11 +3,15 @@
 
 const prisma = require('../lib/prisma');
 const { runFineChecks } = require('../lib/fines');
+const { runOrderReminders } = require('../lib/reminders');
 
 async function run() {
   try {
-    const result = await runFineChecks(prisma);
-    console.log('Scheduled tasks finished.', result);
+    const finesResult = await runFineChecks(prisma);
+    console.log('Scheduled fine checks finished.', finesResult);
+
+    const remindersResult = await runOrderReminders(prisma);
+    console.log('Scheduled order reminders finished.', remindersResult);
   } catch (e) {
     console.error('Scheduled task failed', e);
     process.exitCode = 2;

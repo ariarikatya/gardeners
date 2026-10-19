@@ -1,16 +1,19 @@
 Deployment notes — scheduled tasks and VK notifications
 
-1) Scheduled tasks (automatic fines)
+1) Scheduled tasks (automatic fines & push reminders)
 
 - Script: scripts/run-scheduled-tasks.js
   - Run via node: node scripts/run-scheduled-tasks.js
   - Requires environment variable DATABASE_URL to connect to database.
-  - Runs once a day at 23:55 MSK (20:55 UTC).
+  - Automatically executes:
+    - Call reminders at 10:00 MSK (push notification to gardeners for tomorrow's uncalled orders)
+    - Card fill reminders at 19:00 MSK (push notification to gardeners for today's completed orders)
+    - Automatic fine checks at 23:55 MSK
 
 - Example crontab entries (on the server, edit with `crontab -e`):
 
-# Run fines check at 23:55 MSK every day
-55 23 * * * cd /path/to/repo && TZ=Europe/Moscow /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
+# Run scheduled tasks every 30 minutes (handles 10:00 reminders, 19:00 reminders, and 23:55 fines; internal hour checks and idempotency prevent duplicate pushes)
+*/30 * * * * cd /path/to/repo && TZ=Europe/Moscow /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
 
 - Ensure the user running cron has access to the repository and env file (or system env variables). For deployments on platforms like Vercel, use their Scheduler (see below).
 
@@ -39,7 +42,7 @@ Then create `/etc/systemd/system/gardeners-scheduled.timer`:
 Description=Run gardeners scheduled tasks daily at 23:55 MSK
 
 [Timer]
-OnCalendar=*-*-* 23:55:00
+OnCalendar=*:0,30
 Persistent=true
 
 [Install]
