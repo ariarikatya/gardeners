@@ -1,4 +1,8 @@
-// Script to run scheduled tasks (fines) from the command line environment.
+// Combined script to run all scheduled tasks (fines & order reminders).
+// Kept for backward compatibility.
+// For isolated execution:
+//   - Order reminders: node scripts/run-order-reminders.js
+//   - Fine checks:     node scripts/run-fine-checks.js
 // Usage: node scripts/run-scheduled-tasks.js
 
 const prisma = require('../lib/prisma');
