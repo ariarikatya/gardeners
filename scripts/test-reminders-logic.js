@@ -224,8 +224,8 @@ async function runTests() {
   assert.strictEqual(res4.skippedReason, 'time_threshold_not_reached');
   console.log('✅ Test 4 passed!\n');
 
-  // Test 5: Delivery failure handling (deliveredCount === 0)
-  console.log('Test 5: Delivery failure (deliveredCount = 0) logs order_reminder_failed and allows retry at later hour');
+  // Test 5: Max 1 attempt per order per day (even if failed)
+  console.log('Test 5: Failed attempt (deliveredCount = 0) logs order_reminder_failed and blocks further attempts on the SAME day');
   prisma.orders = [];
   prisma.clientPushLogs = [];
   sentPushes.length = 0;
@@ -253,18 +253,11 @@ async function runTests() {
   assert.strictEqual(prisma.clientPushLogs.length, 1);
   assert.strictEqual(prisma.clientPushLogs[0].event, 'order_reminder_failed');
 
-  // Re-run in same hour 10:30 MSK -> skipped in same window
-  const res5_2 = await runOrderReminders(prisma, { now: reRunDate25, sendToUser: mockFailingSendToUser });
-  assert.strictEqual(res5_2.sentCount, 0);
-  assert.strictEqual(prisma.clientPushLogs.length, 1); // Not duplicated in same hour
-
-  // Run at 11:00 MSK with ignoreTimeThreshold (user now subscribed, success!)
+  // Re-run in later hour 11:00 MSK on the SAME day -> BLOCKED (max 1 attempt per day)
   const laterDate25 = mskToUtcDate(2026, 9, 25, 11, 0, 0);
-  const res5_3 = await runOrderReminders(prisma, { now: laterDate25, ignoreTimeThreshold: true, sendToUser: mockSendToUser });
-  assert.strictEqual(res5_3.sentCount, 1);
-  assert.strictEqual(sentPushes.length, 1);
-  const sentLog = prisma.clientPushLogs.find((l) => l.event === 'order_reminder_sent');
-  assert.notStrictEqual(sentLog, undefined);
+  const res5_2 = await runOrderReminders(prisma, { now: laterDate25, sendToUser: mockSendToUser });
+  assert.strictEqual(res5_2.sentCount, 0);
+  assert.strictEqual(sentPushes.length, 0); // Blocked for the rest of 25.09
   console.log('✅ Test 5 passed!\n');
 
   // Test 6: Pre-window test run at 08:00 MSK with isTest=true does NOT block 10:00 MSK production run
@@ -347,6 +340,35 @@ async function runTests() {
   assert.strictEqual(sentPushes.length, 1);
   assert.strictEqual(sentPushes[0].payload.tag, 'card-reminder-ord_card_tail_window');
   console.log('✅ Test 8 passed!\n');
+
+  // Test 9: Retry on the NEXT calendar day (26.09) for eligible order succeeds
+  console.log('Test 9: Order eligible on the NEXT calendar day (26.09) receives a new reminder attempt');
+  sentPushes.length = 0;
+  // Order is for 27.09 (tomorrow relative to 26.09)
+  const tomDate27 = mskToUtcDate(2026, 9, 27, 0, 0, 0);
+  prisma.orders.push({
+    id: 'ord_next_day_retry',
+    gardenerId: 'gard_1',
+    date: tomDate27,
+    clientName: 'Григорий',
+    clientPhone: '+79998887766',
+    address: 'ул. Парковая, 8',
+    status: 'Новый заказ',
+    callStatus: null,
+    clientCalledAt: null,
+  });
+
+  // Run failed on 25.09
+  const date25_run = mskToUtcDate(2026, 9, 25, 10, 0, 0);
+  await runOrderReminders(prisma, { now: date25_run, sendToUser: mockFailingSendToUser });
+
+  // Next calendar day 26.09 at 10:00 MSK (user now subscribed!)
+  const date26_run = mskToUtcDate(2026, 9, 26, 10, 0, 0);
+  const res9 = await runOrderReminders(prisma, { now: date26_run, sendToUser: mockSendToUser });
+  assert.strictEqual(res9.sentCount, 1);
+  assert.strictEqual(sentPushes.length, 1);
+  assert.strictEqual(sentPushes[0].payload.tag, 'call-reminder-ord_next_day_retry');
+  console.log('✅ Test 9 passed!\n');
 
   console.log('🎉 All order reminder tests passed successfully!');
 }

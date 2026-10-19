@@ -6,9 +6,14 @@ Deployment notes — scheduled tasks and VK notifications
   - Run via node: node scripts/run-scheduled-tasks.js
   - Requires environment variable DATABASE_URL to connect to database.
   - Automatically executes:
-    - Call reminders at 10:00 MSK (push notification to gardeners for tomorrow's uncalled orders)
-    - Card fill reminders at 19:00 MSK (push notification to gardeners for today's completed orders)
+    - Call reminders at 10:00–11:59 MSK (push notification to gardeners for tomorrow's uncalled orders)
+    - Card fill reminders at 19:00–20:59 MSK (push notification to gardeners for today's completed orders)
     - Automatic fine checks at 23:55 MSK
+
+- Страховочные окна запуска (Tail Windows):
+  - Основное окно звонков — 10:00 МСК. Хвост окна (10:00–11:59 МСК) позволяет автоматически доставить пропущенное напоминание при задержке или сбое крона.
+  - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) страховывает вечерние задержки.
+  - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день.
 
 - Example crontab entries (on the server, edit with `crontab -e`):
 
@@ -117,7 +122,11 @@ Security and notes:
 4. **Самопроверка канала уведомлений авторизованного пользователя**:
    Выполнить POST-запрос с токеном авторизации садовника/админа:
    ```bash
+   # Стандартный тестовый пуш:
    curl -X POST https://your-domain.com/api/push/test -b "token=YOUR_JWT_TOKEN"
+
+   # Тестовый прогон напоминаний 'call' или 'card' без сжигания продуктовой идемпотентности:
+   curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d '{"type":"call"}' -b "token=YOUR_JWT_TOKEN"
    ```
    Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
 
