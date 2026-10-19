@@ -15,6 +15,46 @@ Deployment notes — scheduled tasks and VK notifications
   - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) подстраховывает вечерние задержки.
   - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день (идемпотентность обеспечена через `ClientPushLog`).
 
+## Первый деплой на чистый сервер
+
+Пошаговые действия для настройки первого развертывания системы и планировщика reminders:
+
+1. **Создать env-файл `/etc/gardening-site.env`**:
+   Скопировать рабочий `.env` с ключами или создать файл вручную с правами `600`:
+   ```bash
+   sudo cp -n /opt/anemon/.env /etc/gardening-site.env
+   sudo chmod 600 /etc/gardening-site.env
+   ```
+   Убедитесь, что в файле присутствуют:
+   ```env
+   DATABASE_URL="postgresql://user:password@localhost:5432/gardening?schema=public"
+   TZ=Europe/Moscow
+   NEXT_PUBLIC_VAPID_PUBLIC_KEY="YOUR_VAPID_PUBLIC_KEY"
+   VAPID_PRIVATE_KEY="YOUR_VAPID_PRIVATE_KEY"
+   VAPID_SUBJECT="mailto:admin@example.com"
+   ```
+
+2. **Скопировать systemd-юниты и включить таймер**:
+   ```bash
+   sudo cp deploy/systemd/run-scheduled.service /etc/systemd/system/
+   sudo cp deploy/systemd/run-scheduled.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl reset-failed run-scheduled.service
+   sudo systemctl enable --now run-scheduled.timer
+   ```
+
+3. **Выполнить проверочные команды**:
+   ```bash
+   # Проверка статуса таймера и времени следующего запуска:
+   systemctl list-timers | grep run-scheduled
+
+   # Проверка статуса службы:
+   systemctl status run-scheduled.service
+
+   # Просмотр системных логов планировщика:
+   journalctl -u run-scheduled.service -n 50 --no-pager
+   ```
+
 ## Установка серверного планировщика (systemd timer для напоминаний)
 
 Пошаговая инструкция по настройке `systemd` на сервере (`/opt/anemon`):
@@ -37,6 +77,7 @@ Deployment notes — scheduled tasks and VK notifications
 3. **Перезагрузить конфигурацию systemd и включить таймер**:
    ```bash
    sudo systemctl daemon-reload
+   sudo systemctl reset-failed run-scheduled.service
    sudo systemctl enable --now run-scheduled.timer
    ```
 
