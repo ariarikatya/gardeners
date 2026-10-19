@@ -95,6 +95,32 @@ Security and notes:
 - Переменные окружения:
   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` должны быть заданы в `.env`.
 
+## Проверка настройки в проде (Web Push и задачи по расписанию)
+
+1. **Проверка активного cron/timer на сервере**:
+   ```bash
+   crontab -l
+   # или для systemd:
+   systemctl list-timers | grep scheduled
+   ```
+
+2. **Проверка ключей VAPID в переменных окружения**:
+   - Убедитесь, что в переменных окружения (`.env` или настройки сервера/Vercel) заданы `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY`.
+
+3. **Проверка активных подписок садовников в базе данных**:
+   ```sql
+   SELECT count(*)
+   FROM "PushSubscription"
+   WHERE "userId" IN (SELECT id FROM "User" WHERE role = 'GARDENER');
+   ```
+
+4. **Самопроверка канала уведомлений авторизованного пользователя**:
+   Выполнить POST-запрос с токеном авторизации садовника/админа:
+   ```bash
+   curl -X POST https://your-domain.com/api/push/test -b "token=YOUR_JWT_TOKEN"
+   ```
+   Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
+
 ## Диагностика Web Push
 
 1. **Проверка переменных окружения VAPID**:

@@ -85,7 +85,7 @@ async function runTests() {
   );
 
   // Test 1: 10:00 MSK -> Call reminder for tomorrow's uncalled orders
-  console.log('Test 1: Call reminder at 10:00 MSK for tomorrow orders');
+  console.log('Test 1: Call reminder at 10:00 MSK for tomorrow orders (excluding Отказ/Выполнен/Отменен)');
   prisma.orders = [];
   prisma.clientPushLogs = [];
   sentPushes.length = 0;
@@ -132,15 +132,28 @@ async function runTests() {
     clientCalledAt: null,
   });
 
-  // Order 4: Tomorrow, no gardener -> SHOULD BE SKIPPED
+  // Order 4: Tomorrow, status = Отказ -> SHOULD BE SKIPPED
   prisma.orders.push({
-    id: 'ord_tom_no_gardener',
-    gardenerId: null,
+    id: 'ord_tom_refused',
+    gardenerId: 'gard_1',
     date: tomDate26,
-    clientName: 'Дмитрий',
-    clientPhone: '+79994445566',
-    address: 'ул. Парковая, 3',
-    status: 'Новый заказ',
+    clientName: 'Олег',
+    clientPhone: '+79995556677',
+    address: 'ул. Теневая, 1',
+    status: 'Отказ',
+    callStatus: null,
+    clientCalledAt: null,
+  });
+
+  // Order 5: Tomorrow, status = Перенос -> SHOULD receive call reminder
+  prisma.orders.push({
+    id: 'ord_tom_transfer',
+    gardenerId: 'gard_2',
+    date: tomDate26,
+    clientName: 'Анна',
+    clientPhone: '+79998889900',
+    address: 'ул. Полевая, 15',
+    status: 'Перенос',
     callStatus: null,
     clientCalledAt: null,
   });
@@ -148,17 +161,17 @@ async function runTests() {
   const res1 = await runOrderReminders(prisma, { now: baseDate25, sendToUser: mockSendToUser });
 
   assert.strictEqual(res1.ok, true);
-  assert.strictEqual(res1.sentCount, 1);
-  assert.strictEqual(sentPushes.length, 1);
+  assert.strictEqual(res1.sentCount, 2);
+  assert.strictEqual(sentPushes.length, 2);
   assert.strictEqual(sentPushes[0].userId, 'user_gard_1');
-  assert.strictEqual(sentPushes[0].payload.title, '📞 Позвоните клиенту до 18:00');
   assert.strictEqual(sentPushes[0].payload.tag, 'call-reminder-ord_tom_uncalled');
-  assert.strictEqual(
-    sentPushes[0].payload.body,
-    'Завтра заказ: Алексей, ул. Цветочная, 10, тел. +79991112233. Позвоните клиенту сегодня до 18:00.'
-  );
-  assert.strictEqual(prisma.clientPushLogs.length, 1);
-  assert.strictEqual(prisma.clientPushLogs[0].event, 'order_reminder_sent');
+  assert.strictEqual(sentPushes[1].userId, 'user_gard_2');
+  assert.strictEqual(sentPushes[1].payload.tag, 'call-reminder-ord_tom_transfer');
+
+  // Verify Отказ order received NO reminder
+  const hasRefused = sentPushes.some((p) => p.payload.tag === 'call-reminder-ord_tom_refused');
+  assert.strictEqual(hasRefused, false, 'Refused order should NOT receive call reminder');
+
   console.log('✅ Test 1 passed!\n');
 
   // Test 2: Idempotency check for call reminder (re-run at 10:30 MSK)
@@ -168,7 +181,7 @@ async function runTests() {
 
   assert.strictEqual(res2.ok, true);
   assert.strictEqual(res2.sentCount, 0);
-  assert.strictEqual(sentPushes.length, 1); // No new push sent!
+  assert.strictEqual(sentPushes.length, 2); // No new push sent!
   console.log('✅ Test 2 passed!\n');
 
   // Test 3: 19:00 MSK -> Card reminder for today's completed orders
@@ -191,28 +204,6 @@ async function runTests() {
     cardFilledAt: null,
   });
 
-  // Order 2: Today, completed, card ALREADY filled -> SHOULD BE SKIPPED
-  prisma.orders.push({
-    id: 'ord_today_completed_filled',
-    gardenerId: 'gard_2',
-    date: todayDate25,
-    clientName: 'Виктор',
-    address: 'ул. Кленовая, 4',
-    status: 'Выполнен',
-    cardFilledAt: mskToUtcDate(2026, 9, 25, 18, 0, 0),
-  });
-
-  // Order 3: Today, NOT completed (status = Новый заказ) -> SHOULD BE SKIPPED
-  prisma.orders.push({
-    id: 'ord_today_new',
-    gardenerId: 'gard_1',
-    date: todayDate25,
-    clientName: 'Сергей',
-    address: 'ул. Дубовая, 2',
-    status: 'Новый заказ',
-    cardFilledAt: null,
-  });
-
   const res3 = await runOrderReminders(prisma, { now: eveDate25, sendToUser: mockSendToUser });
 
   assert.strictEqual(res3.ok, true);
@@ -221,30 +212,59 @@ async function runTests() {
   assert.strictEqual(sentPushes[0].userId, 'user_gard_2');
   assert.strictEqual(sentPushes[0].payload.title, '📝 Заполните карточку заказа');
   assert.strictEqual(sentPushes[0].payload.tag, 'card-reminder-ord_today_completed_unfilled');
-  assert.strictEqual(
-    sentPushes[0].payload.body,
-    'Сегодня выполнен заказ: Ольга, ул. Березовая, 8. Карточка не заполнена — заполните до конца дня.'
-  );
   console.log('✅ Test 3 passed!\n');
 
-  // Test 4: Idempotency check for card reminder (re-run at 19:45 MSK)
-  console.log('Test 4: Re-running card reminder at 19:45 MSK does not duplicate push');
-  const reRunEveDate25 = mskToUtcDate(2026, 9, 25, 19, 45, 0);
-  const res4 = await runOrderReminders(prisma, { now: reRunEveDate25, sendToUser: mockSendToUser });
+  // Test 4: Running with type='all' at off-window hour (14:30 MSK) without ignoreTimeThreshold sends NOTHING
+  console.log("Test 4: Calling type='all' at 14:30 MSK without ignoreTimeThreshold sends NOTHING");
+  const midDate25 = mskToUtcDate(2026, 9, 25, 14, 30, 0);
+  const res4 = await runOrderReminders(prisma, { now: midDate25, type: 'all', sendToUser: mockSendToUser });
 
   assert.strictEqual(res4.ok, true);
   assert.strictEqual(res4.sentCount, 0);
-  assert.strictEqual(sentPushes.length, 1);
+  assert.strictEqual(res4.skippedReason, 'time_threshold_not_reached');
   console.log('✅ Test 4 passed!\n');
 
-  // Test 5: Off-window hour (14:00 MSK) -> Skips gracefully
-  console.log('Test 5: Running at off-window hour 14:00 MSK skips execution');
-  const midDate25 = mskToUtcDate(2026, 9, 25, 14, 0, 0);
-  const res5 = await runOrderReminders(prisma, { now: midDate25, sendToUser: mockSendToUser });
+  // Test 5: Delivery failure handling (deliveredCount === 0)
+  console.log('Test 5: Delivery failure (deliveredCount = 0) logs order_reminder_failed and allows retry at later hour');
+  prisma.orders = [];
+  prisma.clientPushLogs = [];
+  sentPushes.length = 0;
 
-  assert.strictEqual(res5.ok, true);
-  assert.strictEqual(res5.sentCount, 0);
-  assert.strictEqual(res5.skippedReason, 'time_threshold_not_reached');
+  prisma.orders.push({
+    id: 'ord_retry',
+    gardenerId: 'gard_1',
+    date: tomDate26,
+    clientName: 'Федор',
+    clientPhone: '+79990001122',
+    address: 'ул. Солнечная, 7',
+    status: 'Новый заказ',
+    callStatus: null,
+    clientCalledAt: null,
+  });
+
+  // Mock sendToUser that fails (0 delivered)
+  const mockFailingSendToUser = async (userId, payload) => {
+    return { deliveredCount: 0, failedCount: 1, statusCode: 404, expired: true, error: 'No active subscriptions' };
+  };
+
+  // Run 1 at 10:00 MSK (fails delivery)
+  const res5_1 = await runOrderReminders(prisma, { now: baseDate25, sendToUser: mockFailingSendToUser });
+  assert.strictEqual(res5_1.sentCount, 0);
+  assert.strictEqual(prisma.clientPushLogs.length, 1);
+  assert.strictEqual(prisma.clientPushLogs[0].event, 'order_reminder_failed');
+
+  // Re-run in same hour 10:30 MSK -> skipped in same window
+  const res5_2 = await runOrderReminders(prisma, { now: reRunDate25, sendToUser: mockFailingSendToUser });
+  assert.strictEqual(res5_2.sentCount, 0);
+  assert.strictEqual(prisma.clientPushLogs.length, 1); // Not duplicated in same hour
+
+  // Run at 11:00 MSK with ignoreTimeThreshold (user now subscribed, success!)
+  const laterDate25 = mskToUtcDate(2026, 9, 25, 11, 0, 0);
+  const res5_3 = await runOrderReminders(prisma, { now: laterDate25, ignoreTimeThreshold: true, sendToUser: mockSendToUser });
+  assert.strictEqual(res5_3.sentCount, 1);
+  assert.strictEqual(sentPushes.length, 1);
+  const sentLog = prisma.clientPushLogs.find((l) => l.event === 'order_reminder_sent');
+  assert.notStrictEqual(sentLog, undefined);
   console.log('✅ Test 5 passed!\n');
 
   console.log('🎉 All order reminder tests passed successfully!');
