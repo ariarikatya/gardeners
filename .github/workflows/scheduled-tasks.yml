@@ -2,9 +2,10 @@ name: Scheduled tasks - run fines/checks
 
 on:
   schedule:
-    # Main run daily at 23:55 Moscow time (MSK = UTC+3). Workflow times are in UTC.
-    # 23:55 MSK = 20:55 UTC
-    - cron: '55 20 * * *' # 20:55 UTC -> 23:55 MSK
+    # Workflow times are in UTC (MSK = UTC+3).
+    - cron: '0 7 * * *'   # 07:00 UTC -> 10:00 MSK (call reminders)
+    - cron: '0 16 * * *'  # 16:00 UTC -> 19:00 MSK (card reminders)
+    - cron: '55 20 * * *' # 20:55 UTC -> 23:55 MSK (fines check)
   workflow_dispatch: {}
 
 jobs:

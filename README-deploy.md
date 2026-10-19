@@ -1,16 +1,24 @@
 Deployment notes — scheduled tasks and VK notifications
 
-1) Scheduled tasks (automatic fines)
+1) Scheduled tasks (automatic fines & push reminders)
 
 - Script: scripts/run-scheduled-tasks.js
   - Run via node: node scripts/run-scheduled-tasks.js
   - Requires environment variable DATABASE_URL to connect to database.
-  - Runs once a day at 23:55 MSK (20:55 UTC).
+  - Automatically executes:
+    - Call reminders at 10:00–11:59 MSK (push notification to gardeners for tomorrow's uncalled orders)
+    - Card fill reminders at 19:00–20:59 MSK (push notification to gardeners for today's completed orders)
+    - Automatic fine checks at 23:55 MSK
+
+- Страховочные окна запуска (Tail Windows):
+  - Основное окно звонков — 10:00 МСК. Хвост окна (10:00–11:59 МСК) позволяет автоматически доставить пропущенное напоминание при задержке или сбое крона.
+  - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) страховывает вечерние задержки.
+  - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день.
 
 - Example crontab entries (on the server, edit with `crontab -e`):
 
-# Run fines check at 23:55 MSK every day
-55 23 * * * cd /path/to/repo && TZ=Europe/Moscow /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
+# Run scheduled tasks every 30 minutes (handles 10:00 reminders, 19:00 reminders, and 23:55 fines; internal hour checks and idempotency prevent duplicate pushes)
+*/30 * * * * cd /path/to/repo && TZ=Europe/Moscow /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
 
 - Ensure the user running cron has access to the repository and env file (or system env variables). For deployments on platforms like Vercel, use their Scheduler (see below).
 
@@ -39,7 +47,7 @@ Then create `/etc/systemd/system/gardeners-scheduled.timer`:
 Description=Run gardeners scheduled tasks daily at 23:55 MSK
 
 [Timer]
-OnCalendar=*-*-* 23:55:00
+OnCalendar=*:0,30
 Persistent=true
 
 [Install]
@@ -91,6 +99,36 @@ Security and notes:
 
 - Переменные окружения:
   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` должны быть заданы в `.env`.
+
+## Проверка настройки в проде (Web Push и задачи по расписанию)
+
+1. **Проверка активного cron/timer на сервере**:
+   ```bash
+   crontab -l
+   # или для systemd:
+   systemctl list-timers | grep scheduled
+   ```
+
+2. **Проверка ключей VAPID в переменных окружения**:
+   - Убедитесь, что в переменных окружения (`.env` или настройки сервера/Vercel) заданы `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY`.
+
+3. **Проверка активных подписок садовников в базе данных**:
+   ```sql
+   SELECT count(*)
+   FROM "PushSubscription"
+   WHERE "userId" IN (SELECT id FROM "User" WHERE role = 'GARDENER');
+   ```
+
+4. **Самопроверка канала уведомлений авторизованного пользователя**:
+   Выполнить POST-запрос с токеном авторизации садовника/админа:
+   ```bash
+   # Стандартный тестовый пуш:
+   curl -X POST https://your-domain.com/api/push/test -b "token=YOUR_JWT_TOKEN"
+
+   # Тестовый прогон напоминаний 'call' или 'card' без сжигания продуктовой идемпотентности:
+   curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d '{"type":"call"}' -b "token=YOUR_JWT_TOKEN"
+   ```
+   Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
 
 ## Диагностика Web Push
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { runFineChecks } from '@/lib/fines';
+import { runOrderReminders } from '@/lib/reminders';
 
 async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
@@ -25,8 +26,9 @@ export async function POST(req) {
   }
 
   try {
-    const result = await runFineChecks(prisma);
-    return NextResponse.json(result);
+    const finesResult = await runFineChecks(prisma);
+    const remindersResult = await runOrderReminders(prisma);
+    return NextResponse.json({ fines: finesResult, reminders: remindersResult });
   } catch (e) {
     console.error('Scheduled task failed', e);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
