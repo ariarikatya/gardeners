@@ -224,22 +224,20 @@ async function runTests() {
   assert.strictEqual(res4.skippedReason, 'time_threshold_not_reached');
   console.log('✅ Test 4 passed!\n');
 
-  // Test 5: Max 1 attempt per order per day (even if failed)
-  console.log('Test 5: Failed attempt (deliveredCount = 0) logs order_reminder_failed and blocks further attempts on the SAME day');
+  // Test 5: Retry on failure in the next 30-min slot (19:00 failed -> 19:30 sent -> 20:00 blocked)
+  console.log('Test 5: Failed attempt at 19:00 logs order_reminder_failed, 19:30 retry succeeds with order_reminder_sent, 20:00 does not duplicate');
   prisma.orders = [];
   prisma.clientPushLogs = [];
   sentPushes.length = 0;
 
   prisma.orders.push({
-    id: 'ord_retry',
+    id: 'ord_retry_same_day',
     gardenerId: 'gard_1',
-    date: tomDate26,
+    date: todayDate25,
     clientName: 'Федор',
-    clientPhone: '+79990001122',
     address: 'ул. Солнечная, 7',
-    status: 'Новый заказ',
-    callStatus: null,
-    clientCalledAt: null,
+    status: 'Выполнен',
+    cardFilledAt: null,
   });
 
   // Mock sendToUser that fails (0 delivered)
@@ -247,17 +245,31 @@ async function runTests() {
     return { deliveredCount: 0, failedCount: 1, statusCode: 404, expired: true, error: 'No active subscriptions' };
   };
 
-  // Run 1 at 10:00 MSK (fails delivery)
-  const res5_1 = await runOrderReminders(prisma, { now: baseDate25, sendToUser: mockFailingSendToUser });
+  // 1. Run at 19:00 MSK (fails delivery)
+  const eve1900 = mskToUtcDate(2026, 9, 25, 19, 0, 0);
+  const res5_1 = await runOrderReminders(prisma, { now: eve1900, sendToUser: mockFailingSendToUser });
   assert.strictEqual(res5_1.sentCount, 0);
   assert.strictEqual(prisma.clientPushLogs.length, 1);
   assert.strictEqual(prisma.clientPushLogs[0].event, 'order_reminder_failed');
 
-  // Re-run in later hour 11:00 MSK on the SAME day -> BLOCKED (max 1 attempt per day)
-  const laterDate25 = mskToUtcDate(2026, 9, 25, 11, 0, 0);
-  const res5_2 = await runOrderReminders(prisma, { now: laterDate25, sendToUser: mockSendToUser });
+  // 2. Re-run at 19:15 MSK (same 30-min slot) -> BLOCKED within same slot
+  const eve1915 = mskToUtcDate(2026, 9, 25, 19, 15, 0);
+  const res5_2 = await runOrderReminders(prisma, { now: eve1915, sendToUser: mockSendToUser });
   assert.strictEqual(res5_2.sentCount, 0);
-  assert.strictEqual(sentPushes.length, 0); // Blocked for the rest of 25.09
+
+  // 3. Re-run at 19:30 MSK (next 30-min slot, delivery now working) -> SUCCEEDS and logs order_reminder_sent
+  const eve1930 = mskToUtcDate(2026, 9, 25, 19, 30, 0);
+  const res5_3 = await runOrderReminders(prisma, { now: eve1930, sendToUser: mockSendToUser });
+  assert.strictEqual(res5_3.sentCount, 1);
+  assert.strictEqual(sentPushes.length, 1);
+  assert.strictEqual(prisma.clientPushLogs.length, 2);
+  assert.strictEqual(prisma.clientPushLogs[1].event, 'order_reminder_sent');
+
+  // 4. Re-run at 20:00 MSK (later slot, same day) -> BLOCKED by order_reminder_sent (no duplication)
+  const eve2000 = mskToUtcDate(2026, 9, 25, 20, 0, 0);
+  const res5_4 = await runOrderReminders(prisma, { now: eve2000, sendToUser: mockSendToUser });
+  assert.strictEqual(res5_4.sentCount, 0);
+  assert.strictEqual(sentPushes.length, 1); // Still only 1 push sent
   console.log('✅ Test 5 passed!\n');
 
   // Test 6: Pre-window test run at 08:00 MSK with isTest=true does NOT block 10:00 MSK production run
