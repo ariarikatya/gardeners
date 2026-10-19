@@ -4,10 +4,10 @@
 # sudo systemctl enable --now run-scheduled.timer
 
 [Unit]
-Description=Timer to run scheduled tasks every 30 minutes
+Description=Timer to run scheduled order reminders every 30 minutes
 
 [Timer]
-# Runs every 30 minutes to trigger 10:00 call reminders, 19:00 card reminders, and 23:55 fines
+# Runs every 30 minutes to trigger 10:00 call reminders and 19:00 card reminders
 OnCalendar=*:0,30
 # Also ensure a run on boot if missed
 Persistent=true

@@ -11,6 +11,7 @@
     "postinstall": "prisma generate",
     "test:fines-logic": "node scripts/test-fines-logic.js",
     "test:reminders-logic": "node scripts/test-reminders-logic.js",
+    "test:scheduled-scripts": "node scripts/test-scheduled-scripts.js",
     "test:amo-dedupe": "node scripts/test-amo-contact-dedupe.js",
     "test:money-split": "node scripts/test-money-split.js",
     "test:stop-day-edit": "node scripts/test-stop-day-edit.js",

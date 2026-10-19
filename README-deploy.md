@@ -1,26 +1,60 @@
 Deployment notes — scheduled tasks and VK notifications
 
-1) Scheduled tasks (automatic fines & push reminders)
+1) Scheduled tasks (push reminders on server, fines in GitHub Actions)
 
-- Script: scripts/run-scheduled-tasks.js
-  - Run via node: node scripts/run-scheduled-tasks.js
-  - Requires environment variable DATABASE_URL to connect to database.
-  - Automatically executes:
+- Scripts:
+  - `scripts/run-order-reminders.js`: executes push reminders (`runOrderReminders`)
     - Call reminders at 10:00–11:59 MSK (push notification to gardeners for tomorrow's uncalled orders)
     - Card fill reminders at 19:00–20:59 MSK (push notification to gardeners for today's completed orders)
-    - Automatic fine checks at 23:55 MSK
+  - `scripts/run-fine-checks.js`: executes fine checks (`runFineChecks`)
+    - Automatic fine checks at 23:55 MSK (runs via GitHub Actions workflow `.github/workflows/scheduled-tasks.yml`)
+  - `scripts/run-scheduled-tasks.js`: combined wrapper script kept for backward compatibility
 
 - Страховочные окна запуска (Tail Windows):
   - Основное окно звонков — 10:00 МСК. Хвост окна (10:00–11:59 МСК) позволяет автоматически доставить пропущенное напоминание при задержке или сбое крона.
-  - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) страховывает вечерние задержки.
-  - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день.
+  - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) подстраховывает вечерние задержки.
+  - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день (идемпотентность обеспечена через `ClientPushLog`).
 
-- Example crontab entries (on the server, edit with `crontab -e`):
+## Установка серверного планировщика (systemd timer для напоминаний)
 
-# Run scheduled tasks every 30 minutes (handles 10:00 reminders, 19:00 reminders, and 23:55 fines; internal hour checks and idempotency prevent duplicate pushes)
-*/30 * * * * cd /path/to/repo && TZ=Europe/Moscow /usr/bin/node ./scripts/run-scheduled-tasks.js >> /var/log/gardeners/scheduled.log 2>&1
+Пошаговая инструкция по настройке `systemd` на сервере (например, `/opt/anemon`):
 
-- Ensure the user running cron has access to the repository and env file (or system env variables). For deployments on platforms like Vercel, use their Scheduler (see below).
+1. **Скопировать unit-файлы в системную директорию**:
+   ```bash
+   sudo cp deploy/systemd/run-scheduled.service /etc/systemd/system/
+   sudo cp deploy/systemd/run-scheduled.timer /etc/systemd/system/
+   ```
+
+2. **Создать env-файл `/etc/gardening-site.env`** с конфигурацией БД и VAPID-ключами:
+   ```env
+   DATABASE_URL="postgresql://user:password@localhost:5432/gardening?schema=public"
+   TZ=Europe/Moscow
+   NEXT_PUBLIC_VAPID_PUBLIC_KEY="YOUR_VAPID_PUBLIC_KEY"
+   VAPID_PRIVATE_KEY="YOUR_VAPID_PRIVATE_KEY"
+   VAPID_SUBJECT="mailto:admin@example.com"
+   ```
+
+3. **Перезагрузить конфигурацию systemd и включить таймер**:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now run-scheduled.timer
+   ```
+
+4. **Проверить статус таймера и просмотреть журналы**:
+   ```bash
+   systemctl list-timers | grep run-scheduled
+   systemctl status run-scheduled.service
+   ```
+
+5. **Ручной тестовый запуск скрипта напоминаний**:
+   ```bash
+   cd /opt/anemon
+   node scripts/run-order-reminders.js
+   ```
+   Если VAPID-ключи не заданы в env-файле, сервис выведет явную ошибку в системный лог:
+   ```bash
+   journalctl -u run-scheduled.service -n 50 --no-pager
+   ```
 
 2) Vercel scheduler
 
@@ -28,37 +62,7 @@ Deployment notes — scheduled tasks and VK notifications
   POST https://your-site.com/api/admin/scheduled
   The endpoint requires ADMIN auth (cookie-based) or `x-cron-secret` header matching `CRON_SECRET`.
 
-3) systemd timer (example)
-
-Create a systemd service `/etc/systemd/system/gardeners-scheduled.service`:
-
-[Unit]
-Description=Gardeners scheduled tasks
-
-[Service]
-Type=oneshot
-WorkingDirectory=/path/to/repo
-ExecStart=/usr/bin/node /path/to/repo/scripts/run-scheduled-tasks.js
-Environment=DATABASE_URL=postgres://user:pass@host:5432/db TZ=Europe/Moscow
-
-Then create `/etc/systemd/system/gardeners-scheduled.timer`:
-
-[Unit]
-Description=Run gardeners scheduled tasks daily at 23:55 MSK
-
-[Timer]
-OnCalendar=*:0,30
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-
-Enable and start:
-
-sudo systemctl enable gardeners-scheduled.timer
-sudo systemctl start gardeners-scheduled.timer
-
-4) VK notifications (leader approves expense)
+3) VK notifications (leader approves expense)
 
 - Environment variable required: VK_GROUP_TOKEN — community token with messages permission.
 - Gardener model now has `vkId` field which should store VK peer id (user id or peer id) to send a message to.
@@ -72,13 +76,7 @@ Security and notes:
 - Make sure community has permission to message users (users must start conversation with community or have allowed messages from community).
 - For reliable delivery consider using VK callback API or storing failed notifications and retrying.
 
-5) Next steps
-- If you want, I can:
-  - Add an admin UI to bulk set vkId for gardeners (e.g., by phone lookup/mapping),
-  - Implement retry/queue for failed VK sends,
-  - Add email or SMS fallback notifications.
-
-6) Уведомления (Web Push)
+4) Уведомления (Web Push)
 
 - Как включить пуш-уведомления:
   - В панели диспетчера (`/admin`): в шапке нажать кнопку «Включить уведомления». Браузер запросит разрешение на отправку push-уведомлений.
@@ -98,19 +96,17 @@ Security and notes:
   - Service Worker и Push API требуют HTTPS соединения (за исключением `localhost` при локальной разработке).
 
 - Переменные окружения:
-  - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` должны быть заданы в `.env`.
+  - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` должны быть заданы в `.env` или `/etc/gardening-site.env`.
 
 ## Проверка настройки в проде (Web Push и задачи по расписанию)
 
 1. **Проверка активного cron/timer на сервере**:
    ```bash
-   crontab -l
-   # или для systemd:
-   systemctl list-timers | grep scheduled
+   systemctl list-timers | grep run-scheduled
    ```
 
 2. **Проверка ключей VAPID в переменных окружения**:
-   - Убедитесь, что в переменных окружения (`.env` или настройки сервера/Vercel) заданы `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY`.
+   - Убедитесь, что в переменных окружения (`/etc/gardening-site.env` или `.env`) заданы `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY`.
 
 3. **Проверка активных подписок садовников в базе данных**:
    ```sql
@@ -133,45 +129,23 @@ Security and notes:
 ## Диагностика Web Push
 
 1. **Проверка переменных окружения VAPID**:
-   - В Vercel (или другой платформе деплоя) проверьте `Vercel Project Settings → Environment Variables`:
+   - На сервере или в Vercel проверьте переменные окружения:
      - `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
      - `VAPID_PRIVATE_KEY`
      - `VAPID_SUBJECT` (например `mailto:admin@example.com`)
-   - **ОБЯЗАТЕЛЬНО сделайте Redeploy после добавления переменных окружения!** Значения переменных окружения запекаются/читаются при запуске бессерверной функции, и без повторного деплоя ключи не подтянутся.
 
-2. **Проверка привязки и отправка тестового уведомления**:
-   - Залогиньтесь под администратором (`/admin`) или садовником (`/gardener`).
-   - Нажмите кнопку «Включить уведомления».
-   - После успешного сохранения подписки система автоматически отправит тестовый пуш с выводом алерта о статусе.
+2. **Просмотр логов таймера на сервере**:
+   ```bash
+   journalctl -u run-scheduled.service -n 50 --no-pager
+   ```
 
-3. **Диагностический эндпоинт `/api/push/diagnose`**:
-   - Откройте в браузере `https://your-domain.com/api/push/diagnose` для разбора статуса:
-     - `privateKeySet: false` → ключи не загружены, выполните Redeploy проекта.
-     - `user: "НЕ ПРИВЯЗАНА"` → подписка создана без привязки к `userId`, перезайдите в аккаунт и переподпишитесь.
-     - `statusCode: 410` или `404` → браузерная подписка устарела/аннулирована сервером браузера, переподпишитесь заново.
-     - `testSend OK`, но пуш не появился на экране macOS → проверьте режим «Не беспокоить» (Focus mode) в macOS или `Системные настройки → Уведомления → Google Chrome` (разрешены ли уведомления).
-
-4. **Просмотр логов функций**:
-   - В консоли Vercel: `Deployments → текущий деплой → Logs` или в CLI командой `vercel logs`.
-   - В логах ищите префикс `[WebPush]` для анализа количества найденных подписок и ошибок отправки.
-
-7) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
+5) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
 
 - Требования к правам и токенам amoCRM API:
   - Для полной работы API v4 интеграции токен должен иметь права на чтение и запись контактов (`contacts`), сделок (`leads`), примечаний и связь сущностей (`leads ↔ contacts`).
   - При отсутствии токена или прав система автоматически пишет предупреждение в лог и безопасно отправляет заявку через резервную веб-форму (`forwardToAmo` / `forwardToAmoUnsorted`). Заявки клиентов никогда не теряются.
-  - **Внимание**: Ошибка 401 `Некорректный клиент` (`invalid_client`) при обновлении токена означает, что в переменных окружения (в таблице `SystemSetting` или `.env`) указаны неверные `AMO_CLIENT_ID`, `AMO_CLIENT_SECRET` или `AMO_SUBDOMAIN`. В этом случае система работает через веб-форму, и дедупликация по контактам средствами API v4 не применяется.
 
-- Привязка и дедупликация контактов:
-  - Новые сделки создаются с поиском существующего контакта по нормализованному номеру телефона через фильтр `GET /api/v4/contacts?query[phone]=...` (с проверкой системных телефонов `_embedded.phones` и кастомных полей).
-  - Если контакт найден в amoCRM, сделка связывается с ним напрямую без создания нового контакта и без перезаписи его полей.
-  - При создании нового контакта телефон сохраняется в кастомное поле (например, «Раб. тел.»). Переменная `AMO_WORK_PHONE_FIELD_ID` задаёт ID этого поля. Если переменная не задана, система автоматически пытается найти подходящее поле через `GET /api/v4/contacts/custom_fields` (тип `multitext`/`telephone` или имя с «тел»). ID также можно узнать вручную через запрос `GET /api/v4/contacts/custom_fields`.
-  - **Старые дубли контактов**: ранее созданные дубликаты контактов склеиваются вручную в интерфейсе amoCRM через функцию «Склеить контакты». Новые заявки автоматически связываются с уже объединённым контактом.
-
-8) Вход на устройстве (Remember Device)
+6) Вход на устройстве (Remember Device)
 
 - После успешной первичной авторизации номер телефона сохраняется в `localStorage` под ключом `auth_phone`.
 - При повторном посещении страницы входа (`/login`) система автоматически предлагает войти в 1 тап: «Войти как <номер>?» с кнопками [Войти] (обращение к `/api/auth/auto-login`) и [Другой номер].
-- При нажатии на [Войти] кука `token` обновляется с увеличенным временем жизни (365 дней).
-- При выходе (`POST /api/auth/logout`) сбрасывается только токен авторизации (`token`), а сохранённый номер устройства в `localStorage` сохраняется, позволяя быстро зайти вновь.
-- **Внимание**: Мобильные браузеры (Android Chrome / Safari) и некоторые агрессивные настройки очистки данных сайта могут удалять `localStorage`. Если включена опция «Удалять данные сайтов при закрытии браузера» в настройках Android/Chrome, сохранённый номер может сбрасываться.
