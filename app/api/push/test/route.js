@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { sendToUser } from '@/lib/webPush';
+import { runOrderReminders } from '@/lib/reminders';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,24 @@ export async function POST(req) {
         error: 'У вашего аккаунта нет сохранённых подписок (userId не привязан)',
         subscriptions: 0,
       }, { status: 404 });
+    }
+
+    let reqBody = {};
+    try {
+      reqBody = await req.json();
+    } catch (e) {}
+
+    if (reqBody?.type === 'call' || reqBody?.type === 'card') {
+      const reminderResult = await runOrderReminders(prisma, {
+        type: reqBody.type,
+        ignoreTimeThreshold: true,
+        isTest: true,
+      });
+      return NextResponse.json({
+        ok: true,
+        reminderResult,
+        subscriptions: count,
+      });
     }
 
     const result = await sendToUser(userId, {

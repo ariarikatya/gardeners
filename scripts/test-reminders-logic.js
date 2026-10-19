@@ -267,6 +267,87 @@ async function runTests() {
   assert.notStrictEqual(sentLog, undefined);
   console.log('✅ Test 5 passed!\n');
 
+  // Test 6: Pre-window test run at 08:00 MSK with isTest=true does NOT block 10:00 MSK production run
+  console.log('Test 6: Pre-window run at 08:00 MSK with isTest=true does NOT block 10:00 MSK production reminder');
+  prisma.orders = [];
+  prisma.clientPushLogs = [];
+  sentPushes.length = 0;
+
+  const earlyDate25 = mskToUtcDate(2026, 9, 25, 8, 0, 0); // 08:00 MSK
+  prisma.orders.push({
+    id: 'ord_early_test',
+    gardenerId: 'gard_1',
+    date: tomDate26,
+    clientName: 'Михаил',
+    clientPhone: '+79991234567',
+    address: 'ул. Тихая, 3',
+    status: 'Новый заказ',
+    callStatus: null,
+    clientCalledAt: null,
+  });
+
+  // Early test run
+  const res6_test = await runOrderReminders(prisma, { now: earlyDate25, ignoreTimeThreshold: true, isTest: true, sendToUser: mockSendToUser });
+  assert.strictEqual(res6_test.sentCount, 1);
+  assert.strictEqual(prisma.clientPushLogs.length, 1);
+  assert.strictEqual(prisma.clientPushLogs[0].event, 'order_reminder_test');
+
+  // Real 10:00 MSK production run
+  const res6_prod = await runOrderReminders(prisma, { now: baseDate25, sendToUser: mockSendToUser });
+  assert.strictEqual(res6_prod.sentCount, 1);
+  assert.strictEqual(sentPushes.length, 2);
+  assert.strictEqual(prisma.clientPushLogs.length, 2);
+  assert.strictEqual(prisma.clientPushLogs[1].event, 'order_reminder_sent');
+  console.log('✅ Test 6 passed!\n');
+
+  // Test 7: Missed 10:00 run, first run at 11:00 MSK (within 10:00–11:59 window tail) successfully sends reminder
+  console.log('Test 7: Missed 10:00 run, first run at 11:00 MSK (in 10:00-11:59 tail window) sends reminder');
+  prisma.orders = [];
+  prisma.clientPushLogs = [];
+  sentPushes.length = 0;
+
+  prisma.orders.push({
+    id: 'ord_tail_window',
+    gardenerId: 'gard_2',
+    date: tomDate26,
+    clientName: 'Василий',
+    clientPhone: '+79997654321',
+    address: 'ул. Дачная, 12',
+    status: 'Новый заказ',
+    callStatus: null,
+    clientCalledAt: null,
+  });
+
+  const tailDate25 = mskToUtcDate(2026, 9, 25, 11, 0, 0); // 11:00 MSK
+  const res7 = await runOrderReminders(prisma, { now: tailDate25, sendToUser: mockSendToUser });
+  assert.strictEqual(res7.sentCount, 1);
+  assert.strictEqual(sentPushes.length, 1);
+  assert.strictEqual(sentPushes[0].payload.tag, 'call-reminder-ord_tail_window');
+  console.log('✅ Test 7 passed!\n');
+
+  // Test 8: Missed 19:00 card run, first run at 20:30 MSK (within 19:00–20:59 tail window) sends card reminder
+  console.log('Test 8: Missed 19:00 run, first run at 20:30 MSK (in 19:00-20:59 tail window) sends card reminder');
+  prisma.orders = [];
+  prisma.clientPushLogs = [];
+  sentPushes.length = 0;
+
+  prisma.orders.push({
+    id: 'ord_card_tail_window',
+    gardenerId: 'gard_1',
+    date: todayDate25,
+    clientName: 'Татьяна',
+    address: 'ул. Яблоневая, 9',
+    status: 'Выполнен',
+    cardFilledAt: null,
+  });
+
+  const cardTailDate25 = mskToUtcDate(2026, 9, 25, 20, 30, 0); // 20:30 MSK
+  const res8 = await runOrderReminders(prisma, { now: cardTailDate25, sendToUser: mockSendToUser });
+  assert.strictEqual(res8.sentCount, 1);
+  assert.strictEqual(sentPushes.length, 1);
+  assert.strictEqual(sentPushes[0].payload.tag, 'card-reminder-ord_card_tail_window');
+  console.log('✅ Test 8 passed!\n');
+
   console.log('🎉 All order reminder tests passed successfully!');
 }
 
