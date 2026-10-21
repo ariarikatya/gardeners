@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
-import { getQueueStatus, drainQueue } from '@/lib/yandexDisk';
+import { getQueueStatus } from '@/lib/yandexDisk';
 
 async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;
@@ -22,9 +22,6 @@ export async function GET(req) {
 export async function POST(req) {
   const auth = await checkGardener(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
-  // Trigger background drain asynchronously without blocking response
-  drainQueue(10000).catch(err => console.error('[external-yadisk] POST trigger drain error:', err));
 
   const status = getQueueStatus();
   return NextResponse.json(status);

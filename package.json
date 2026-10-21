@@ -26,6 +26,7 @@
     "test:uploads": "node scripts/test-uploads.js",
     "test:uploads-mixed": "node scripts/test-uploads-mixed-ui.js",
     "test:upload-image": "node scripts/upload-image.test.js",
+    "test:yandex": "node scripts/test-yandex-queue.js && node scripts/test-yandex-upload-isolation.js",
     "test:yandex-queue": "node scripts/test-yandex-queue.js",
     "test:yandex-upload-isolation": "node scripts/test-yandex-upload-isolation.js",
     "test:jwt": "node scripts/test-jwt-sliding.js",

@@ -7,7 +7,8 @@ import {
   getQueueStatus,
   withTimeout,
   _setClientFactoryForTests,
-  _clearQueueForTests
+  _clearQueueForTests,
+  _triggerWatchdogForTests
 } from '../lib/yandexDisk.js';
 
 async function runTests() {
@@ -153,6 +154,47 @@ async function runTests() {
   assert.strictEqual(failedItem.size, 0, 'fileBuffer should be null (size 0) after MAX_ATTEMPTS');
   _setClientFactoryForTests(null);
   console.log('✅ fileBuffer memory clearing test passed!');
+
+  // 9. Test watchdog generation reset & no duplicate uploads after watchdog
+  console.log('Testing watchdog generation reset and no duplicate uploads after watchdog...');
+  _clearQueueForTests();
+
+  const trackedPutCalls = [];
+  const trackingClient = {
+    async createDirectory() { return true; },
+    async putFileContents(fullPath) {
+      trackedPutCalls.push(fullPath);
+      return true;
+    }
+  };
+
+  scheduleYandexUpload({
+    folderPath: '/WatchdogTest',
+    fileName: 'photo_A.jpg',
+    fileBuffer: Buffer.from('data A'),
+  });
+  scheduleYandexUpload({
+    folderPath: '/WatchdogTest',
+    fileName: 'photo_B.jpg',
+    fileBuffer: Buffer.from('data B'),
+  });
+
+  // Simulate watchdog firing while queue is pending/uploading
+  _triggerWatchdogForTests();
+
+  await drainQueue(5000, { client: trackingClient });
+
+  assert.strictEqual(
+    trackedPutCalls.length,
+    2,
+    `Expected exactly 2 putFileContents calls after watchdog reset, got ${trackedPutCalls.length}`
+  );
+  assert.strictEqual(
+    new Set(trackedPutCalls).size,
+    2,
+    'Each item should be uploaded exactly once without duplicate uploads for the same fullPath'
+  );
+  console.log('✅ Watchdog generation reset and duplicate protection test passed!');
 
   console.log('🎉 ALL YANDEX.DISK QUEUE UNIT & SAFETY TESTS PASSED SUCCESSFULLY!');
   process.exit(0);
