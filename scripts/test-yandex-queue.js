@@ -196,6 +196,51 @@ async function runTests() {
   );
   console.log('✅ Watchdog generation reset and duplicate protection test passed!');
 
+  // 10. Test real watchdog timer firing with hanging client
+  console.log('Testing real watchdog timer firing with hanging client...');
+  _clearQueueForTests();
+
+  const realHangingClient = {
+    async createDirectory() { return new Promise(() => {}); }, // hangs forever in MKCOL
+    async putFileContents() { return true; }
+  };
+
+  scheduleYandexUpload({
+    folderPath: '/RealWatchdogTest',
+    fileName: 'hanging_photo.jpg',
+    fileBuffer: Buffer.from('hanging data'),
+  });
+
+  // Call drainQueue with short budgetMs=100 (watchdogMs = 200ms in test environment)
+  drainQueue(100, { client: realHangingClient });
+
+  // Wait 250ms for watchdog timer to fire
+  await new Promise(r => setTimeout(r, 250));
+
+  status = getQueueStatus();
+  const hangingItem = status.items.find(i => i.fullPath === '/RealWatchdogTest/hanging_photo.jpg');
+  assert(hangingItem !== undefined, 'Hanging item should exist in queue status');
+  assert.strictEqual(hangingItem.status, 'pending', 'Watchdog should reset item status to pending');
+
+  // Verify that isDraining was reset by watchdog so subsequent drain runs without "already running"
+  let subsequentRan = false;
+  const quickClient = {
+    async createDirectory() { return true; },
+    async putFileContents() { subsequentRan = true; return true; }
+  };
+
+  // Ensure uploadLeaseUntil is clear on test item
+  scheduleYandexUpload({
+    folderPath: '/RealWatchdogTest',
+    fileName: 'hanging_photo_2.jpg',
+    fileBuffer: Buffer.from('hanging data 2'),
+  });
+
+  await drainQueue(1000, { client: quickClient });
+  assert.strictEqual(subsequentRan, true, 'Subsequent drainQueue should run cleanly without isDraining block');
+
+  console.log('✅ Real watchdog timer firing test passed!');
+
   console.log('🎉 ALL YANDEX.DISK QUEUE UNIT & SAFETY TESTS PASSED SUCCESSFULLY!');
   process.exit(0);
 }
