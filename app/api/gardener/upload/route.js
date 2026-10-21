@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
 import prisma from '@/lib/prisma';
-import { scheduleYandexUpload, drainQueue } from '@/lib/yandexDisk';
+import { scheduleYandexUpload } from '@/lib/yandexDisk';
 import { saveUploadedImage } from '@/lib/uploads';
 
 async function checkGardener(req) {
@@ -53,18 +53,19 @@ export async function POST(req) {
       return await saveUploadedImage(fileBuffer);
     }));
 
-    // 3. Дублирование на Яндекс.Диск в фоновом режиме через очередь (исходный буфер)
-    const type = incomingForm.get('type') || 'order';
-    const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
-    const timestamp = Date.now();
+    // 3. Дублирование на Яндекс.Диск в фоновом режиме через очередь (с изолированной обработкой ошибок)
+    try {
+      const type = incomingForm.get('type') || 'order';
+      const which = incomingForm.get('which') || (type === 'receipt' ? 'receipt' : 'photo');
+      const timestamp = Date.now();
 
-    for (const item of fileItems) {
-      const fileName = `${which}_${timestamp}_${item.index + 1}.jpg`;
-      scheduleYandexUpload({ folderPath, fileName, fileBuffer: item.fileBuffer });
+      for (const item of fileItems) {
+        const fileName = `${which}_${timestamp}_${item.index + 1}.jpg`;
+        scheduleYandexUpload({ folderPath, fileName, fileBuffer: item.fileBuffer });
+      }
+    } catch (yadiskErr) {
+      console.error('[external-yadisk] schedule failed (ignored):', yadiskErr);
     }
-
-    const drainTask = drainQueue(40000);
-    drainTask.catch(e => console.error('[external-yadisk] drainQueue error:', e));
 
     return NextResponse.json({
       url: urls[0],

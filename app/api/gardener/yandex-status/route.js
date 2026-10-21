@@ -23,7 +23,9 @@ export async function POST(req) {
   const auth = await checkGardener(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  await drainQueue(40000);
+  // Trigger background drain asynchronously without blocking response
+  drainQueue(10000).catch(err => console.error('[external-yadisk] POST trigger drain error:', err));
+
   const status = getQueueStatus();
   return NextResponse.json(status);
 }
