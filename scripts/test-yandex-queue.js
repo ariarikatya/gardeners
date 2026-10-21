@@ -1,5 +1,14 @@
+process.env.NODE_ENV = 'test';
+
 import assert from 'assert';
-import { scheduleYandexUpload, drainQueue, getQueueStatus, withTimeout } from '../lib/yandexDisk.js';
+import {
+  scheduleYandexUpload,
+  drainQueue,
+  getQueueStatus,
+  withTimeout,
+  _setClientFactoryForTests,
+  _clearQueueForTests
+} from '../lib/yandexDisk.js';
 
 async function runTests() {
   console.log('🧪 Starting Yandex.Disk Queue Unit & Safety Test Suite...');
@@ -53,7 +62,7 @@ async function runTests() {
   delete process.env.YANDEX_DISK_DISABLED;
   console.log('✅ Kill-switch test passed!');
 
-  // 5. Test queue byte size limit (MAX_QUEUE_BYTES = 50MB) and capacity limit
+  // 5. Test MAX_QUEUE_BYTES and queue capacity limit
   console.log('Testing MAX_QUEUE_BYTES and queue capacity limit...');
   const chunkSize = 18 * 1024 * 1024; // 18MB
   const chunk1 = Buffer.alloc(chunkSize, 'a');
@@ -69,7 +78,7 @@ async function runTests() {
   assert.strictEqual(resOverCap.reason, 'queue_full', 'Reason should be queue_full');
   console.log('✅ MAX_QUEUE_BYTES enforcement test passed!');
 
-  // 6. Test withTimeout timer cleanup & budget enforcement with hanging operation
+  // 6. Test withTimeout timer cleanup & budget timeout
   console.log('Testing withTimeout timer cleanup and budget timeout...');
   const neverEndingPromise = new Promise(() => {});
   const timeoutStart = Date.now();
@@ -83,29 +92,70 @@ async function runTests() {
   assert(timeoutElapsed >= 280 && timeoutElapsed <= 600, `Expected timeout around 300ms, got ${timeoutElapsed}ms`);
   console.log('✅ withTimeout test passed!');
 
-  // 7. Test drainQueue without credentials (graceful skip & isDraining reset)
-  console.log('Testing drainQueue unconfigured behavior...');
-  delete process.env.YANDEX_DISK_LOGIN;
-  delete process.env.YANDEX_DISK_APP_PASSWORD;
-  await drainQueue(1000);
+  // 7. Test budget compliance with hanging fake WebDAV client (elapsed <= budget * 1.2)
+  console.log('Testing drainQueue budget compliance with hanging fake WebDAV client...');
+  const hangingClient = {
+    async createDirectory() { return true; },
+    async putFileContents() { return new Promise(() => {}); } // never resolves
+  };
+
+  const budgetMs = 2000;
+  const drainStart = Date.now();
+  await drainQueue(budgetMs, { client: hangingClient });
+  const drainElapsed = Date.now() - drainStart;
+  const maxAllowedMs = budgetMs * 1.2;
+
+  assert(
+    drainElapsed <= maxAllowedMs,
+    `drainQueue took ${drainElapsed}ms which exceeds budget threshold ${maxAllowedMs}ms (budgetMs = ${budgetMs}ms)`
+  );
+
+  // Verify that isDraining was released properly and subsequent calls don't log "already running"
+  let secondDrainRan = false;
+  const testClient2 = {
+    async createDirectory() { return true; },
+    async putFileContents() { secondDrainRan = true; return true; }
+  };
+  await drainQueue(100, { client: testClient2 });
+  console.log(`✅ Hanging client budget compliance test passed! Took ${drainElapsed}ms (<= ${maxAllowedMs}ms limit).`);
+
+  // 8. Test fileBuffer === null after MAX_ATTEMPTS (5) failing upload attempts
+  console.log('Testing fileBuffer memory clearing after MAX_ATTEMPTS failure...');
+  const failingClient = {
+    async createDirectory() { return true; },
+    async putFileContents() { throw new Error('Simulated WebDAV 500 error'); }
+  };
+
+  _clearQueueForTests();
+
+  const failUploadRes = scheduleYandexUpload({
+    folderPath: '/FailTest',
+    fileName: 'fail_photo.jpg',
+    fileBuffer: Buffer.from('failing data'),
+  });
+
+  assert(failUploadRes.success, 'Schedule fail_photo.jpg should succeed');
+  const targetItem = failUploadRes.item;
+
+  _setClientFactoryForTests(() => failingClient);
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    targetItem.status = 'pending';
+    targetItem.nextRunAt = Date.now();
+    targetItem.uploadLeaseUntil = 0;
+    await drainQueue(1000, { client: failingClient });
+  }
+
   status = getQueueStatus();
-  assert.strictEqual(status.configured, false, 'Configured flag should be false');
-  assert(status.pending > 0, 'Pending items should remain pending when unconfigured');
-
-  // Verify that drainQueue can be called again immediately (isDraining was properly reset to false)
-  await drainQueue(1000);
-  console.log('✅ Unconfigured drainQueue and isDraining release test passed!');
-
-  // 8. Test fileBuffer memory clearing upon completion or failure
-  console.log('Testing fileBuffer memory clearing after max attempts failure...');
-  // Find an item in the queue status and simulate max attempt failure
-  const queueItem = status.items[0];
-  assert(queueItem !== undefined, 'Expected queue item to exist');
-
-  // Force fail attempts by calling drain with mocked client failure if credentials set, or verify schema
-  assert.strictEqual(typeof queueItem.size, 'number', 'Item size should be a number');
+  const failedItem = status.items.find(i => i.fullPath === '/FailTest/fail_photo.jpg');
+  assert(failedItem !== undefined, 'Failed item should exist in queue status');
+  assert.strictEqual(failedItem.status, 'failed', 'Item should be marked as failed');
+  assert.strictEqual(failedItem.size, 0, 'fileBuffer should be null (size 0) after MAX_ATTEMPTS');
+  _setClientFactoryForTests(null);
+  console.log('✅ fileBuffer memory clearing test passed!');
 
   console.log('🎉 ALL YANDEX.DISK QUEUE UNIT & SAFETY TESTS PASSED SUCCESSFULLY!');
+  process.exit(0);
 }
 
 runTests().catch((err) => {

@@ -1,3 +1,5 @@
+process.env.NODE_ENV = 'test';
+
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
@@ -106,6 +108,7 @@ async function runUploadIsolationTest() {
     assert.deepStrictEqual(body.urls, ['/api/files/2026/10/mock_uuid.jpg'], 'Array of image URLs should be returned');
 
     console.log('✅ Yandex.Disk Upload Isolation Test Passed! Upload succeeded with 200 despite Yandex.Disk exception.');
+    process.exit(0);
   } finally {
     if (fs.existsSync(testUploadsDir)) {
       fs.rmSync(testUploadsDir, { recursive: true, force: true });
