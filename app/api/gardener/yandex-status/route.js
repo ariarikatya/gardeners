@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
-import { getQueueStatus, drainQueue } from '@/lib/yandexDisk';
+import { getQueueStatus } from '@/lib/yandexDisk';
 
 async function checkGardener(req) {
   const token = req.cookies.get('token')?.value;
@@ -23,7 +23,6 @@ export async function POST(req) {
   const auth = await checkGardener(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  await drainQueue(40000);
   const status = getQueueStatus();
   return NextResponse.json(status);
 }
