@@ -1,5 +1,5 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261019-e2e728c';
-const APP_SHELL = ['/gardener', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261022-359a60a';
+const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -183,6 +183,10 @@ self.addEventListener('fetch', (event) => {
                     cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
                       headers: { 'Content-Type': 'application/json' }
                     }));
+                  } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
+                    cache.put('/admin', resClone);
+                  } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
+                    cache.put('/leader', resClone);
                   } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
                     cache.put('/login', resClone);
                   }
@@ -210,6 +214,20 @@ self.addEventListener('fetch', (event) => {
 
         if (isOfflineSessionActive && cachedGardener && age < MAX_AGE_24H && (url.pathname === '/gardener' || url.pathname.startsWith('/gardener'))) {
           return cachedGardener;
+        }
+
+        if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
+          const cachedAdmin = await caches.match('/admin');
+          if (cachedAdmin && cachedAdmin.ok && cachedAdmin.status === 200) {
+            return cachedAdmin;
+          }
+        }
+
+        if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
+          const cachedLeader = await caches.match('/leader');
+          if (cachedLeader && cachedLeader.ok && cachedLeader.status === 200) {
+            return cachedLeader;
+          }
         }
 
         const exactCached = await caches.match(request);

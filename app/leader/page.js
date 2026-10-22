@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
+import { saveCache, getCache } from '@/lib/offlineStore';
+import { enqueueAction, getQueue, syncQueue } from '@/lib/offlineQueue';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -85,6 +87,11 @@ export default function LeaderDashboard() {
   const [leaderScale, setLeaderScale] = useState(1);
   const [leaderTab, setLeaderTab] = useState('finance');
 
+  // Оффлайн состояние и очередь
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [isSyncingQueue, setIsSyncingQueue] = useState(false);
+
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
     const approvedExpenses = Number(data.totals?.approvedExpenses || 0);
@@ -104,6 +111,72 @@ export default function LeaderDashboard() {
     };
   }, [data]);
 
+  const refreshQueueCount = async () => {
+    try {
+      const q = await getQueue();
+      setPendingQueueCount(q.length);
+      return q;
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const handleSyncQueue = async () => {
+    if (isSyncingQueue || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    setIsSyncingQueue(true);
+    try {
+      const { syncedCount, hasErrors } = await syncQueue();
+      await refreshQueueCount();
+      if (syncedCount > 0 && !hasErrors) {
+        await fetchData(startDate, endDate);
+      }
+    } catch (e) {
+      console.error('Failed to sync queue:', e);
+    } finally {
+      setIsSyncingQueue(false);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    refreshQueueCount();
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      handleSyncQueue();
+    };
+
+    const handleOfflineStatus = () => {
+      setIsOffline(true);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOfflineStatus);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        handleSyncQueue();
+      }
+    }, 30000);
+
+    const handleBeforeUnload = (e) => {
+      if (pendingQueueCount > 0) {
+        e.preventDefault();
+        e.returnValue = 'Есть неотправленные изменения!';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOfflineStatus);
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [pendingQueueCount]);
+
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
     setLoading(true);
     try {
@@ -119,10 +192,21 @@ export default function LeaderDashboard() {
       }
       const json = await res.json();
       setData(json);
+      saveCache(`leader_data_${nextStart}_${nextEnd}`, json);
+      saveCache('leader_data_latest', json);
+      setIsOffline(false);
     } catch (error) {
-      alert(error.message);
+      console.warn('Network error in leader fetchData, trying cache:', error.message);
+      setIsOffline(true);
+      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
+      if (cached) {
+        setData(cached);
+      } else {
+        alert(error.message);
+      }
     } finally {
       setLoading(false);
+      await refreshQueueCount();
     }
   };
 
@@ -187,14 +271,26 @@ export default function LeaderDashboard() {
         return;
       }
 
+      const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
       for (const op of opsToCreate) {
-        const res = await apiFetch('/api/leader/operations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gardenerId: gardener.id, type: op.type, amount: op.amount, description: op.description })
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Ошибка создания операции');
+        const payload = { gardenerId: gardener.id, type: op.type, amount: op.amount, description: op.description };
+        if (isOfflineMode) {
+          await enqueueAction({
+            actionType: 'LEADER_OPERATION_POST',
+            url: '/api/leader/operations',
+            method: 'POST',
+            payload
+          });
+        } else {
+          const res = await apiFetch('/api/leader/operations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Ошибка создания операции');
+        }
       }
 
       setData((prev) => ({
@@ -209,8 +305,13 @@ export default function LeaderDashboard() {
           writeoffNote: '',
         } : g),
       }));
-      await fetchData();
-      alert('Операции добавлены');
+
+      if (isOfflineMode) {
+        await refreshQueueCount();
+      } else {
+        await fetchData();
+        alert('Операции добавлены');
+      }
     } catch (error) {
       alert(error.message);
     } finally {
@@ -355,6 +456,29 @@ export default function LeaderDashboard() {
           <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm whitespace-nowrap">Выйти</button>
         </div>
       </header>
+
+      {/* Баннер оффлайн-режима */}
+      {(isOffline || pendingQueueCount > 0) && (
+        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold flex flex-wrap items-center justify-between gap-2 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+            {pendingQueueCount > 0 && (
+              <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
+                В очереди изменений: {pendingQueueCount}
+              </span>
+            )}
+          </div>
+          {pendingQueueCount > 0 && (
+            <button
+              onClick={handleSyncQueue}
+              disabled={isSyncingQueue}
+              className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+            >
+              {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
+            </button>
+          )}
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-2 sm:px-3 py-3 space-y-3">
         <div className="flex gap-2 border-b border-slate-200 pb-2">

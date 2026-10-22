@@ -15,6 +15,32 @@ Deployment notes — scheduled tasks and VK notifications
   - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) подстраховывает вечерние задержки.
   - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день (идемпотентность обеспечена через `ClientPushLog`).
 
+## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
+
+Синхронизация заказов с Google Таблицами выполняется через эндпоинт `POST /api/admin/sync-sheets-cron`.
+
+### 1) Настройка в Vercel (Vercel Cron Jobs)
+В `vercel.json` автоматически настроен cron на каждый час (`0 * * * *`):
+```json
+{
+  "crons": [
+    {
+      "path": "/api/admin/sync-sheets-cron",
+      "cron": "0 * * * *"
+    }
+  ]
+}
+```
+Для защиты эндпоинта задайте переменную окружения `CRON_SECRET=ваш_секретный_ключ`. Vercel автоматически передаёт `x-cron-secret` при вызове cron-задач.
+
+### 2) Настройка на VPS через crontab или systemd
+На VPS добавьте запись в crontab (`crontab -e`):
+```bash
+0 * * * * curl -X POST http://localhost:3000/api/admin/sync-sheets-cron -H "x-cron-secret: YOUR_CRON_SECRET"
+```
+
+Дополнительно (страховка на клиенте): при открытии страницы `/admin` браузер диспетчера проверяет время последней синхронизации в `localStorage` (`last_sheets_sync_ts`). Если прошло > 60 минут, выполняется фоновая синхронизация без дублирования одновременных вызовов.
+
 ## Первый деплой на чистый сервер
 
 Пошаговые действия для настройки первого развертывания системы и планировщика reminders:
@@ -32,6 +58,7 @@ Deployment notes — scheduled tasks and VK notifications
    NEXT_PUBLIC_VAPID_PUBLIC_KEY="YOUR_VAPID_PUBLIC_KEY"
    VAPID_PRIVATE_KEY="YOUR_VAPID_PRIVATE_KEY"
    VAPID_SUBJECT="mailto:admin@example.com"
+   CRON_SECRET="YOUR_CRON_SECRET"
    ```
 
 2. **Скопировать systemd-юниты и включить таймер**:
@@ -211,7 +238,7 @@ Security and notes:
    curl -X POST https://your-domain.com/api/push/test -b "token=YOUR_JWT_TOKEN"
 
    # Тестовый прогон напоминаний 'call' или 'card' без сжигания продуктовой идемпотентности:
-   curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d '{"type":"call"}' -b "token=YOUR_JWT_TOKEN"
+   curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d "{"type":"call"}" -b "token=YOUR_JWT_TOKEN"
    ```
    Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
 

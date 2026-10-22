@@ -3,5 +3,11 @@
     "app/api/**/route.js": {
       "maxDuration": 300
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/admin/sync-sheets-cron",
+      "cron": "0 * * * *"
+    }
+  ]
 }

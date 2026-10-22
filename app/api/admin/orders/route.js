@@ -7,6 +7,7 @@ import { sendVkMessage, getSiteUrl, notifyAuction } from '@/lib/vkApi';
 import { sendToRoles, sendToUser, sendToUsers, sendToAll } from '@/lib/webPush';
 import { calculateOrderSplit } from '@/lib/money';
 import { toDateKey } from '@/lib/dates';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 async function getStopBlock(gardenerId, dateLike) {
   if (!gardenerId || !dateLike) return null;
@@ -147,6 +148,12 @@ export async function GET(req) {
 export async function POST(req) {
   const auth = await checkAdmin(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   const body = await req.json();
   const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash, leadId, webLeadId } = body;
@@ -597,7 +604,9 @@ export async function POST(req) {
       }
     }
 
-    return NextResponse.json({ order });
+    const resBody = { order };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось создать заказ' }, { status: 400 });
   }
@@ -606,6 +615,12 @@ export async function POST(req) {
 export async function PUT(req) {
   const auth = await checkAdmin(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   const body = await req.json();
   console.log('========== НАЧАЛО ОБРАБОТКИ ЗАКАЗА ==========');
@@ -1088,7 +1103,9 @@ export async function PUT(req) {
       }
     })();
 
-    return NextResponse.json({ order });
+    const resBody = { order };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     console.log('========== КОНЕЦ ОБРАБОТКИ ЗАКАЗА (ОШИБКА) ==========');
     return NextResponse.json({ error: 'Не удалось обновить заказ' }, { status: 400 });
@@ -1100,6 +1117,13 @@ export async function DELETE(req) {
 
   const auth = await checkAdmin(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const payload = auth.payload;
 
   try {
@@ -1160,7 +1184,9 @@ export async function DELETE(req) {
 
     console.log(`✅ [DELETE] Заказ ${id} удален из базы`);
 
-    return NextResponse.json({ success: true });
+    const resBody = { success: true };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (error) {
     console.error('❌ [DELETE] Ошибка удаления заказа:', error);
     return NextResponse.json({ error: 'Failed to delete order' }, { status: 500 });
