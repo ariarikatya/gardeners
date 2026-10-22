@@ -6,7 +6,7 @@ import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache } from '@/lib/offlineStore';
-import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts } from '@/lib/offlineQueue';
+import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -568,6 +568,8 @@ export default function AdminDashboard() {
       }
     };
     triggerAutoSync();
+    const intervalId = setInterval(triggerAutoSync, 10 * 60 * 1000);
+    return () => clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -1901,24 +1903,60 @@ export default function AdminDashboard() {
       </div>
 
       {/* Баннер оффлайн-режима */}
-      {(isOffline || pendingQueueCount > 0) && (
-        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold flex flex-wrap items-center justify-between gap-2 shadow-sm">
-          <div className="flex items-center gap-2">
-            <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+      {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
+        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+              {pendingQueueCount > 0 && (
+                <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
+                  В очереди изменений: {pendingQueueCount}
+                </span>
+              )}
+            </div>
             {pendingQueueCount > 0 && (
-              <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
-                В очереди изменений: {pendingQueueCount}
-              </span>
+              <button
+                onClick={handleSyncQueue}
+                disabled={isSyncingQueue}
+                className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
+              </button>
             )}
           </div>
-          {pendingQueueCount > 0 && (
-            <button
-              onClick={handleSyncQueue}
-              disabled={isSyncingQueue}
-              className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
-            >
-              {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
-            </button>
+
+          {/* Блок конфликтов */}
+          {conflictItems.length > 0 && (
+            <div className="bg-rose-900/90 border border-rose-300/40 rounded-xl p-3 text-white space-y-2">
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-rose-100">⚠️ {conflictItems.length} изменений не приняты сервером (конфликт)</span>
+                <button
+                  onClick={handleRetryConflicts}
+                  className="bg-white text-rose-900 hover:bg-rose-100 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  🔄 Повторить конфликтные
+                </button>
+              </div>
+              <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                {conflictItems.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 bg-rose-950/60 p-2 rounded-lg text-[11px]">
+                    <div className="truncate flex-1">
+                      <span className="font-bold text-rose-200">{item.actionType}</span>: {JSON.stringify(item.payload).slice(0, 70)}
+                      {item.errorMsg && <span className="text-rose-300 ml-2 italic">({item.errorMsg})</span>}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await removeFromQueue(item.id);
+                        await refreshQueueCount();
+                      }}
+                      className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] whitespace-nowrap"
+                    >
+                      Отменить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -2583,12 +2621,39 @@ export default function AdminDashboard() {
                               Редактировать
                             </button>
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 const vk = prompt('Введите vkId (peer id или user id) для садовника ' + g.name + ':', g.vkId || '');
                                 if (vk !== null) {
-                                  fetch('/api/admin/gardeners', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services||[]).map(s=>s.id), vkId: vk.trim() || null }) }).then(res => {
-                                    if (res.ok) fetchData(); else res.json().then(d=>alert(d.error||'Ошибка'));
-                                  });
+                                  const payload = {
+                                    id: g.id,
+                                    name: g.name,
+                                    phone: g.phone,
+                                    serviceIds: (g.services || []).map(s => s.id),
+                                    vkId: vk.trim() || null
+                                  };
+                                  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                                    setGardeners(prev => prev.map(item => item.id === g.id ? { ...item, vkId: payload.vkId } : item));
+                                    await enqueueAction({
+                                      actionType: 'ADMIN_GARDENER_VK_PUT',
+                                      url: '/api/admin/gardeners',
+                                      method: 'PUT',
+                                      payload,
+                                      scope: 'admin'
+                                    });
+                                    await refreshQueueCount();
+                                  } else {
+                                    const res = await apiFetch('/api/admin/gardeners', {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(payload)
+                                    });
+                                    if (res.ok) {
+                                      fetchData();
+                                    } else {
+                                      const d = await res.json();
+                                      alert(d.error || 'Ошибка');
+                                    }
+                                  }
                                 }
                               }}
                               className="text-sky-600 hover:bg-sky-50 px-3 py-1.5 rounded-lg text-sm transition-all"

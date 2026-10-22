@@ -6,7 +6,7 @@ import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { saveCache, getCache } from '@/lib/offlineStore';
-import { enqueueAction, getQueue, syncQueue } from '@/lib/offlineQueue';
+import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -90,6 +90,7 @@ export default function LeaderDashboard() {
   // Оффлайн состояние и очередь
   const [isOffline, setIsOffline] = useState(false);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [conflictItems, setConflictItems] = useState([]);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
 
   const summary = useMemo(() => {
@@ -113,12 +114,12 @@ export default function LeaderDashboard() {
 
   const refreshQueueCount = async () => {
     try {
-      const { getQueueStats } = require('@/lib/offlineQueue');
       const stats = await getQueueStats('leader');
       setPendingQueueCount(stats.pending + stats.syncing);
-      return stats.items;
+      setConflictItems(stats.conflictItems);
+      return stats;
     } catch (e) {
-      return [];
+      return { total: 0, pending: 0, conflict: 0, conflictItems: [] };
     }
   };
 
@@ -135,6 +136,11 @@ export default function LeaderDashboard() {
         }),
       }).catch(() => {});
     } catch (e) {}
+  };
+
+  const handleRetryConflicts = async () => {
+    await retryConflicts('leader');
+    await handleSyncQueue();
   };
 
   const handleSyncQueue = async () => {
@@ -504,24 +510,60 @@ export default function LeaderDashboard() {
       </header>
 
       {/* Баннер оффлайн-режима */}
-      {(isOffline || pendingQueueCount > 0) && (
-        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold flex flex-wrap items-center justify-between gap-2 shadow-sm">
-          <div className="flex items-center gap-2">
-            <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+      {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
+        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+              {pendingQueueCount > 0 && (
+                <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
+                  В очереди изменений: {pendingQueueCount}
+                </span>
+              )}
+            </div>
             {pendingQueueCount > 0 && (
-              <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
-                В очереди изменений: {pendingQueueCount}
-              </span>
+              <button
+                onClick={handleSyncQueue}
+                disabled={isSyncingQueue}
+                className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
+              </button>
             )}
           </div>
-          {pendingQueueCount > 0 && (
-            <button
-              onClick={handleSyncQueue}
-              disabled={isSyncingQueue}
-              className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
-            >
-              {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
-            </button>
+
+          {/* Блок конфликтов */}
+          {conflictItems.length > 0 && (
+            <div className="bg-rose-900/90 border border-rose-300/40 rounded-xl p-3 text-white space-y-2">
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-rose-100">⚠️ {conflictItems.length} изменений не приняты сервером (конфликт)</span>
+                <button
+                  onClick={handleRetryConflicts}
+                  className="bg-white text-rose-900 hover:bg-rose-100 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  🔄 Повторить конфликтные
+                </button>
+              </div>
+              <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                {conflictItems.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 bg-rose-950/60 p-2 rounded-lg text-[11px]">
+                    <div className="truncate flex-1">
+                      <span className="font-bold text-rose-200">{item.actionType}</span>: {JSON.stringify(item.payload).slice(0, 70)}
+                      {item.errorMsg && <span className="text-rose-300 ml-2 italic">({item.errorMsg})</span>}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await removeFromQueue(item.id);
+                        await refreshQueueCount();
+                      }}
+                      className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] whitespace-nowrap"
+                    >
+                      Отменить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
