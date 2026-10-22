@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { round2, calculateOrderSplit } from '@/lib/money';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 async function checkLeader(req) {
   const token = req.cookies.get('token')?.value;
@@ -218,6 +219,12 @@ export async function PUT(req) {
   const auth = await checkLeader(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { id, bonusPercent, finePercent, writeoffPercent } = await req.json();
   if (!id) return NextResponse.json({ error: 'Не указан садовник' }, { status: 400 });
 
@@ -248,5 +255,7 @@ export async function PUT(req) {
     console.error('Failed to recalculate orders on gardener percent update:', e);
   }
 
-  return NextResponse.json({ gardener });
+  const resBody = { gardener };
+  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }

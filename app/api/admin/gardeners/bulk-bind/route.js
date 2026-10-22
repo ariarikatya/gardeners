@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 // Accepts POST with JSON:
 // { entries: [ { id?: '<gardenerId>', phone?: '7999...', vkId: '12345' }, ... ] }
 // or { text: "79991234567,12345\n79999876543,54321" }
 export async function POST(req) {
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
 
@@ -48,5 +55,7 @@ export async function POST(req) {
     }
   }
 
-  return NextResponse.json({ results });
+  const resBody = { results };
+  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }

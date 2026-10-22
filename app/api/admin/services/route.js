@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkAdmin(req) {
@@ -20,10 +21,18 @@ export async function GET(req) {
 export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { name } = await req.json();
   try {
     const service = await prisma.service.create({ data: { name: name.trim() } });
-    return NextResponse.json({ service });
+    const resBody = { service };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Такая услуга уже есть в списке' }, { status: 400 });
   }
@@ -32,7 +41,15 @@ export async function POST(req) {
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { id } = await req.json();
   await prisma.service.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  const resBody = { success: true };
+  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }

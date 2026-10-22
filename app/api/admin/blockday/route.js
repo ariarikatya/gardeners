@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { toDateKey } from '@/lib/dates';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkAdmin(req) {
@@ -35,6 +36,12 @@ export async function GET(req) {
 
 export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   try {
     const { date, gardenerId } = await req.json();
@@ -73,7 +80,9 @@ export async function POST(req) {
       isBlocked = true;
     }
 
-    return NextResponse.json({ success: true, isBlocked });
+    const resBody = { success: true, isBlocked };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (error) {
     console.error('Error toggling block day:', error);
     return NextResponse.json({ error: 'Ошибка при изменении блокировки дня' }, { status: 500 });

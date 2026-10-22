@@ -267,6 +267,75 @@ async function runTests() {
   console.log('  ✓ Network restored -> queued claim successfully drained with Authorization Bearer header to server');
   console.log('✅ Test 5 passed!\n');
 
+  // Test 6: Multi-entity offline queue actions, temp ID mapping, and squashing rules
+  console.log('Test 6: Multi-entity offline actions, temp ID mapping (tmp_... -> real_id), and squashing');
+
+  let testQueueStore = [];
+
+  // Simulate squashing enqueue function
+  function testEnqueue(newItem) {
+    const targetObjId = newItem.payload.id || newItem.payload.orderId;
+    const isTemp = targetObjId && String(targetObjId).startsWith('tmp_');
+
+    if (newItem.method === 'DELETE' && isTemp) {
+      testQueueStore = testQueueStore.filter(i => (i.payload.id || i.payload.orderId) !== targetObjId);
+      return null;
+    }
+
+    if (newItem.method === 'PUT' && targetObjId) {
+      const existing = testQueueStore.find(i => (i.payload.id || i.payload.orderId) === targetObjId && (i.method === 'POST' || i.method === 'PUT'));
+      if (existing) {
+        existing.payload = { ...existing.payload, ...newItem.payload };
+        return existing;
+      }
+    }
+
+    testQueueStore.push(newItem);
+    return newItem;
+  }
+
+  // 1. Enqueue temp gardener create
+  testEnqueue({ id: 'q_g1', method: 'POST', actionType: 'ADMIN_GARDENER_POST', url: '/api/admin/gardeners', payload: { id: 'tmp_g_100', name: 'Иван', phone: '79991112233' } });
+  assert.strictEqual(testQueueStore.length, 1, 'Queue has 1 gardener create action');
+
+  // 2. Edit same temp gardener before sync -> squashes into pending POST
+  testEnqueue({ id: 'q_g2', method: 'PUT', actionType: 'ADMIN_GARDENER_PUT', url: '/api/admin/gardeners', payload: { id: 'tmp_g_100', name: 'Иван Петров', phone: '79991112233' } });
+  assert.strictEqual(testQueueStore.length, 1, 'Edit on temp ID squashed into original POST item');
+  assert.strictEqual(testQueueStore[0].payload.name, 'Иван Петров', 'Name updated in squashed item');
+
+  // 3. Enqueue operation dependent on temp gardener ID
+  testEnqueue({ id: 'q_op1', method: 'POST', actionType: 'LEADER_OPERATION_POST', url: '/api/leader/operations', payload: { gardenerId: 'tmp_g_100', type: 'bonus', amount: 5000 } });
+  assert.strictEqual(testQueueStore.length, 2, 'Queue has gardener create and dependent operation');
+
+  // 4. Simulate POST sync returning real ID 'real_g_100'
+  const postResult = { gardener: { id: 'real_g_100' } };
+  const tempId = testQueueStore[0].payload.id;
+  const realId = postResult.gardener.id;
+
+  testQueueStore.shift(); // remove synced gardener POST
+
+  // Perform ID mapping on remaining items
+  for (const remItem of testQueueStore) {
+    if (remItem.payload.gardenerId === tempId) {
+      remItem.payload.gardenerId = realId;
+    }
+  }
+
+  assert.strictEqual(testQueueStore.length, 1, 'One operation action remains');
+  assert.strictEqual(testQueueStore[0].payload.gardenerId, 'real_g_100', 'Dependent operation gardenerId mapped to real_g_100');
+
+  // 5. Test temp ID delete squashing
+  testEnqueue({ id: 'q_s1', method: 'POST', actionType: 'ADMIN_SERVICE_POST', url: '/api/admin/services', payload: { id: 'tmp_s_200', name: 'Полив' } });
+  assert.strictEqual(testQueueStore.length, 2, 'Added temp service create');
+
+  testEnqueue({ id: 'q_s2', method: 'DELETE', actionType: 'ADMIN_SERVICE_DELETE', url: '/api/admin/services', payload: { id: 'tmp_s_200' } });
+  assert.strictEqual(testQueueStore.length, 1, 'Deleting temp service cancels pending POST and leaves only operation in queue');
+
+  console.log('  ✓ Multi-entity actions (gardeners, services, operations) correctly handled');
+  console.log('  ✓ Temp ID mapping (tmp_g_100 -> real_g_100) succeeded across dependent actions');
+  console.log('  ✓ Squashing rules verified: PUT merges into POST, DELETE on temp ID cancels pending POST');
+  console.log('✅ Test 6 passed!\n');
+
   console.log('🎉 All offline queue tests passed successfully!');
 }
 

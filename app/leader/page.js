@@ -121,17 +121,38 @@ export default function LeaderDashboard() {
     }
   };
 
+  const logClientError = (message, err, pathname = '/leader') => {
+    try {
+      fetch('/api/client-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message + (err?.message ? `: ${err.message}` : ''),
+          stack: err?.stack || '',
+          pathname: pathname || (typeof window !== 'undefined' ? window.location.pathname : ''),
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
   const handleSyncQueue = async () => {
     if (isSyncingQueue || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
     setIsSyncingQueue(true);
     try {
-      const { syncedCount, hasErrors } = await syncQueue();
+      const { syncedCount, hasErrors } = await syncQueue(
+        null,
+        (failedItem, errorMsg) => {
+          logClientError(`[QueueSyncError Leader] Action ${failedItem.actionType} failed`, { message: errorMsg }, '/leader');
+        }
+      );
       await refreshQueueCount();
       if (syncedCount > 0 && !hasErrors) {
         await fetchData(startDate, endDate);
       }
     } catch (e) {
       console.error('Failed to sync queue:', e);
+      logClientError('[QueueSyncFatalError Leader] Sync queue exception', e, '/leader');
     } finally {
       setIsSyncingQueue(false);
     }
@@ -347,11 +368,24 @@ export default function LeaderDashboard() {
 
   const deleteOperation = async (id, confirmMsg = 'Удалить операцию?') => {
     if (!confirm(confirmMsg)) return;
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setOpsList(prev => prev.filter(op => op.id !== id));
+      await enqueueAction({
+        actionType: 'LEADER_OPERATION_DELETE',
+        url: `/api/leader/operations?id=${encodeURIComponent(id)}`,
+        method: 'DELETE',
+        payload: { id }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const res = await apiFetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка удаления');
-      // обновим список
       if (opsModalGardener) await openOpsModal(opsModalGardener);
       await fetchData();
     } catch (err) {
@@ -386,10 +420,22 @@ export default function LeaderDashboard() {
     // Optimistically update orders list (checkbox state)
     setOrdersList((prev) => prev.map((o) => o.id === orderId ? { ...o, paid: nextValue.length > 0, paidTo: nextSerialized } : o));
 
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'LEADER_ORDER_PAID_PUT',
+        url: '/api/leader/order-paid',
+        method: 'PUT',
+        payload: { id: orderId, paidTo: nextSerialized }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     // Prepare a snapshot to allow revert on error
     const prevDataSnapshot = data;
 
-    // Optimistically update dashboard totals and gardener row to avoid full refetch/flicker
     if (previousOrder && previousOrder.status === 'Выполнен') {
       const orderAmount = Number(previousOrder.priceFact || previousOrder.priceContract || 0);
       const prevTargets = normalizePaidTargets(previousOrder.paidTo);
@@ -404,12 +450,9 @@ export default function LeaderDashboard() {
           const oldPayout = Number(g.payout || 0);
           let newPayout = oldPayout;
 
-          // If gardener payment was removed -> payout increases by orderAmount
           if (prevTargets.includes('GARDENER') && !nextTargets.includes('GARDENER')) newPayout += orderAmount;
-          // If gardener payment was added -> payout decreases by orderAmount
           if (!prevTargets.includes('GARDENER') && nextTargets.includes('GARDENER')) newPayout -= orderAmount;
 
-          // Company target affects payout similarly
           if (prevTargets.includes('COMPANY') && !nextTargets.includes('COMPANY')) newPayout += orderAmount;
           if (!prevTargets.includes('COMPANY') && nextTargets.includes('COMPANY')) newPayout -= orderAmount;
 
@@ -431,9 +474,7 @@ export default function LeaderDashboard() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
-      // success - keep optimistic state. No full refetch to avoid flicker.
     } catch (err) {
-      // revert optimistic updates
       if (previousOrder) {
         setOrdersList((prev) => prev.map((o) => o.id === orderId ? previousOrder : o));
         setData(prevDataSnapshot);
@@ -726,16 +767,29 @@ export default function LeaderDashboard() {
                           />
                           <button 
                             onClick={async () => {
+                              const payload = {
+                                id: g.id,
+                                bonusPercent: g.bonusPercent,
+                                finePercent: g.finePercent,
+                                writeoffPercent: g.writeoffPercent
+                              };
+                              const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+                              if (isOfflineMode) {
+                                await enqueueAction({
+                                  actionType: 'LEADER_GARDENER_PUT',
+                                  url: '/api/leader',
+                                  method: 'PUT',
+                                  payload
+                                });
+                                await refreshQueueCount();
+                                alert('Процент сохранён оффлайн');
+                                return;
+                              }
                               try {
                                 const res = await fetch('/api/leader', { 
                                   method: 'PUT', 
                                   headers: { 'Content-Type': 'application/json' }, 
-                                  body: JSON.stringify({ 
-                                    id: g.id, 
-                                    bonusPercent: g.bonusPercent, 
-                                    finePercent: g.finePercent, 
-                                    writeoffPercent: g.writeoffPercent 
-                                  }) 
+                                  body: JSON.stringify(payload)
                                 });
                                 if (!res.ok) throw new Error((await res.json()).error || 'Ошибка');
                                 await fetchData();
@@ -828,6 +882,20 @@ export default function LeaderDashboard() {
                                 const descEl = document.getElementById(`fine-desc-${op.id}`);
                                 const amount = amountEl ? Number(amountEl.value) : op.amount;
                                 const description = descEl ? descEl.value : (op.description || '');
+                                const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+                                if (isOfflineMode) {
+                                  setOpsList(prev => prev.map(o => o.id === op.id ? { ...o, amount, description } : o));
+                                  await enqueueAction({
+                                    actionType: 'LEADER_OPERATION_PUT',
+                                    url: '/api/leader/operations',
+                                    method: 'PUT',
+                                    payload: { id: op.id, amount, description }
+                                  });
+                                  await refreshQueueCount();
+                                  return;
+                                }
+
                                 try {
                                   const res = await fetch('/api/leader/operations', {
                                     method: 'PUT',
@@ -866,15 +934,27 @@ export default function LeaderDashboard() {
                               onClick={async () => {
                                 const el = document.getElementById(`approved-${op.id}`);
                                 const val = el ? Number(el.value || 0) : Number(op.amount || 0);
+                                const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+                                if (isOfflineMode) {
+                                  setOpsList(prev => prev.map(o => o.id === op.id ? { ...o, approved: true, approvedAmount: val } : o));
+                                  await enqueueAction({
+                                    actionType: 'LEADER_OPERATION_PUT',
+                                    url: '/api/leader/operations',
+                                    method: 'PUT',
+                                    payload: { id: op.id, approved: true, approvedAmount: val }
+                                  });
+                                  await refreshQueueCount();
+                                  return;
+                                }
+
                                 try {
                                   const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: true, approvedAmount: val }) });
                                   const json = await res.json();
                                   if (!res.ok) throw new Error(json.error || 'Ошибка');
-                                  // обновим список
                                   if (opsModalGardener) await openOpsModal(opsModalGardener);
                                   await fetchData();
-                                  // если бот вк настроен, можно показать уведомление в UI
-                                  if (json.operation && json.operation.approved) alert('Трата утверждена и садовник должен получить уведомление во ВКонтакте (если указан vkId)');
+                                  if (json.operation && json.operation.approved) alert('Трата утверждена');
                                 } catch (err) { alert(err.message || 'Ошибка'); }
                               }}
                               className="bg-emerald-600 text-white px-3 py-1 rounded text-sm"
@@ -882,7 +962,20 @@ export default function LeaderDashboard() {
 
                             <button
                               onClick={async () => {
-                                // снять утверждение
+                                const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+                                if (isOfflineMode) {
+                                  setOpsList(prev => prev.map(o => o.id === op.id ? { ...o, approved: false, approvedAmount: null } : o));
+                                  await enqueueAction({
+                                    actionType: 'LEADER_OPERATION_PUT',
+                                    url: '/api/leader/operations',
+                                    method: 'PUT',
+                                    payload: { id: op.id, approved: false, approvedAmount: null }
+                                  });
+                                  await refreshQueueCount();
+                                  return;
+                                }
+
                                 try {
                                   const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: false, approvedAmount: null }) });
                                   const json = await res.json();
@@ -1050,6 +1143,25 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
   const handleAddItem = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_cat_' + Date.now();
+      const newItem = { id: tmpId, name: name.trim(), description: desc.trim(), image: image || null };
+      setItems(prev => [...prev, newItem]);
+      await enqueueAction({
+        actionType: 'CATALOG_POST',
+        url: '/api/catalog',
+        method: 'POST',
+        payload: { type: catalogType, id: tmpId, name: name.trim(), description: desc.trim(), image: image || null }
+      });
+      setName('');
+      setDesc('');
+      setImage('');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/catalog', {
@@ -1072,6 +1184,20 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
 
   const handleDeleteItem = async (id) => {
     if (!confirm('Удалить из справочника?')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setItems(prev => prev.filter(i => i.id !== id));
+      await enqueueAction({
+        actionType: 'CATALOG_DELETE',
+        url: '/api/catalog',
+        method: 'DELETE',
+        payload: { type: catalogType, id }
+      });
+      return;
+    }
+
     const res = await fetch('/api/catalog', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1087,6 +1213,20 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
     }
     if (selectedGardenerIds.length === 0) {
       alert('Выберите хотя бы одного сотрудника!');
+      return;
+    }
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'CATALOG_ASSIGN_POST',
+        url: '/api/catalog/assign',
+        method: 'POST',
+        payload: { type: catalogType, itemIds: selectedItemIds, gardenerIds: selectedGardenerIds, action }
+      });
+      alert('Массовое назначение добавлено в очередь');
+      setSelectedItemIds([]);
       return;
     }
 

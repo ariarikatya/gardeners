@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkAdmin(req) {
@@ -31,6 +32,12 @@ export async function GET(req) {
 export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { date, gardenerId } = await req.json();
   const dayDate = new Date(date);
 
@@ -46,7 +53,9 @@ export async function POST(req) {
     const dayOff = await prisma.dayOff.create({
       data: { date: dayDate, gardenerId },
     });
-    return NextResponse.json({ dayOff });
+    const resBody = { dayOff };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Этот день уже отмечен как выходной' }, { status: 400 });
   }
@@ -55,10 +64,18 @@ export async function POST(req) {
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { id } = await req.json();
   try {
     await prisma.dayOff.delete({ where: { id } });
-    return NextResponse.json({ success: true });
+    const resBody = { success: true };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось убрать отметку' }, { status: 400 });
   }

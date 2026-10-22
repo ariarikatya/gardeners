@@ -408,17 +408,38 @@ export default function AdminDashboard() {
     }
   };
 
+  const logClientError = (message, err, pathname = '/admin') => {
+    try {
+      fetch('/api/client-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message + (err?.message ? `: ${err.message}` : ''),
+          stack: err?.stack || '',
+          pathname: pathname || (typeof window !== 'undefined' ? window.location.pathname : ''),
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
   const handleSyncQueue = async () => {
     if (isSyncingQueue || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
     setIsSyncingQueue(true);
     try {
-      const { syncedCount, hasErrors } = await syncQueue();
+      const { syncedCount, hasErrors } = await syncQueue(
+        null,
+        (failedItem, errorMsg) => {
+          logClientError(`[QueueSyncError Admin] Action ${failedItem.actionType} failed`, { message: errorMsg }, '/admin');
+        }
+      );
       await refreshQueueCount();
       if (syncedCount > 0 && !hasErrors) {
         await fetchData();
       }
     } catch (e) {
       console.error('Failed to sync queue:', e);
+      logClientError('[QueueSyncFatalError Admin] Sync queue exception', e, '/admin');
     } finally {
       setIsSyncingQueue(false);
     }
@@ -751,7 +772,7 @@ export default function AdminDashboard() {
 
     let matchedServiceId = lead.serviceId || '';
     if (!matchedServiceId && lead.serviceName && services.length > 0) {
-      const found = services.find(s => s.title.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
+      const found = services.find(s => (s.name || s.title || '').toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
       if (found) {
         matchedServiceId = found.id;
       }
@@ -773,29 +794,47 @@ export default function AdminDashboard() {
       fromLead: true
     };
 
-    const res = await fetch('/api/admin/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    if (res.ok) {
-      const data = await res.json();
-      await fetch('/api/admin/webleads', {
-        method: 'PUT',
+    if (isOfflineMode) {
+      const tmpId = 'tmp_auc_' + Date.now();
+      const newOrder = { ...payload, id: tmpId };
+      setAuctionOrders(prev => [newOrder, ...prev]);
+      setWebLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId } : l));
+
+      await enqueueAction({ actionType: 'ADMIN_ORDER_POST', url: '/api/admin/orders', method: 'POST', payload: { ...payload, id: tmpId } });
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id: lead.id, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId } });
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/orders', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: lead.id,
-          status: 'Обработана',
-          assignedTo: 'Аукцион',
-          createdOrderId: data.order ? data.order.id : undefined
-        })
+        body: JSON.stringify(payload)
       });
-      fetchData();
-      alert('Заявка успешно выставлена на аукцион!');
-    } else {
-      const data = await res.json();
-      alert(data.error || 'Не удалось отправить заявку на аукцион');
+
+      if (res.ok) {
+        const data = await res.json();
+        await fetch('/api/admin/webleads', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: lead.id,
+            status: 'Обработана',
+            assignedTo: 'Аукцион',
+            createdOrderId: data.order ? data.order.id : undefined
+          })
+        });
+        fetchData();
+        alert('Заявка успешно выставлена на аукцион!');
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Не удалось отправить заявку на аукцион');
+      }
+    } catch (err) {
+      alert('Ошибка при отправке заявки на аукцион');
     }
   };
 
@@ -857,6 +896,15 @@ export default function AdminDashboard() {
   };
 
   const handleMarkLeadProcessed = async (id) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setWebLeads(prev => prev.map(l => l.id === id ? { ...l, status: 'Обработана' } : l));
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id, status: 'Обработана' } });
+      await refreshQueueCount();
+      return;
+    }
+
     await fetch('/api/admin/webleads', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -867,6 +915,16 @@ export default function AdminDashboard() {
 
   const handleDeleteLead = async (id) => {
     if (!confirm('Удалить эту заявку?')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setWebLeads(prev => prev.filter(l => l.id !== id));
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_DELETE', url: '/api/admin/webleads', method: 'DELETE', payload: { id } });
+      await refreshQueueCount();
+      return;
+    }
+
     await fetch('/api/admin/webleads', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1078,17 +1136,43 @@ export default function AdminDashboard() {
 
   const handleAddGardener = async (e) => {
     e.preventDefault();
-    const res = await fetch('/api/admin/gardeners', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newGardener)
-    });
-    if (res.ok) {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_g_' + Date.now();
+      const newGardenerObj = {
+        id: tmpId,
+        name: newGardener.name,
+        phone: newGardener.phone,
+        services: services.filter(s => newGardener.serviceIds.includes(s.id))
+      };
+      setGardeners(prev => [...prev, newGardenerObj]);
+      await enqueueAction({
+        actionType: 'ADMIN_GARDENER_POST',
+        url: '/api/admin/gardeners',
+        method: 'POST',
+        payload: { ...newGardener, id: tmpId }
+      });
       setNewGardener({ name: '', phone: '', serviceIds: [] });
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/gardeners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newGardener)
+      });
+      if (res.ok) {
+        setNewGardener({ name: '', phone: '', serviceIds: [] });
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при добавлении садовника');
     }
   };
 
@@ -1134,22 +1218,60 @@ export default function AdminDashboard() {
 
   const handleUpdateGardener = async (e) => {
     e.preventDefault();
-    const res = await fetch('/api/admin/gardeners', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editingGardener)
-    });
-    if (res.ok) {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setGardeners(prev => prev.map(g => g.id === editingGardener.id ? {
+        ...g,
+        ...editingGardener,
+        services: services.filter(s => editingGardener.serviceIds.includes(s.id))
+      } : g));
+      await enqueueAction({
+        actionType: 'ADMIN_GARDENER_PUT',
+        url: '/api/admin/gardeners',
+        method: 'PUT',
+        payload: editingGardener
+      });
       setEditingGardener(null);
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/gardeners', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingGardener)
+      });
+      if (res.ok) {
+        setEditingGardener(null);
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при обновлении садовника');
     }
   };
 
   const handleDeleteGardener = async (id) => {
     if (!confirm('Удалить этого садовника и его личный кабинет?')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setGardeners(prev => prev.filter(g => g.id !== id));
+      await enqueueAction({
+        actionType: 'ADMIN_GARDENER_DELETE',
+        url: '/api/admin/gardeners',
+        method: 'DELETE',
+        payload: { id }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/gardeners', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1159,6 +1281,20 @@ export default function AdminDashboard() {
   };
 
   const handleRestoreRefusalOrder = async (orderId) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'Новый заказ', refusalReason: null } : o));
+      await enqueueAction({
+        actionType: 'ADMIN_ORDER_PUT',
+        url: '/api/admin/orders',
+        method: 'PUT',
+        payload: { id: orderId, status: 'Новый заказ', refusalReason: null }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const res = await fetch('/api/admin/orders', {
         method: 'PUT',
@@ -1184,6 +1320,34 @@ export default function AdminDashboard() {
       refusalReason: reason.trim() || 'Без указания причины'
     };
     setFormData(updatedForm);
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      if (selectedOrder) {
+        setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, ...updatedForm } : o));
+        await enqueueAction({
+          actionType: 'ADMIN_ORDER_PUT',
+          url: '/api/admin/orders',
+          method: 'PUT',
+          payload: { id: selectedOrder.id, ...updatedForm }
+        });
+      } else {
+        const tmpId = 'tmp_' + Date.now();
+        const newOrder = { ...updatedForm, id: tmpId };
+        setOrders(prev => [newOrder, ...prev]);
+        await enqueueAction({
+          actionType: 'ADMIN_ORDER_POST',
+          url: '/api/admin/orders',
+          method: 'POST',
+          payload: { ...updatedForm, id: tmpId }
+        });
+      }
+      setShowOrderModal(false);
+      await refreshQueueCount();
+      return;
+    }
+
     if (selectedOrder) {
       const res = await fetch('/api/admin/orders', {
         method: 'PUT',
@@ -1252,6 +1416,23 @@ export default function AdminDashboard() {
   const handleVkBulkBind = async () => {
     if (!vkBulkText || !vkBulkText.trim()) return alert('Вставьте список phone,vkId в поле');
     setVkBulkResult(null);
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'ADMIN_VK_BULK_POST',
+        url: '/api/admin/gardeners/bulk-bind',
+        method: 'POST',
+        payload: { text: vkBulkText }
+      });
+      setShowVkBulkModal(false);
+      setVkBulkText('');
+      await refreshQueueCount();
+      alert('Привязка VK добавлена в очередь и выполнится при появлении сети');
+      return;
+    }
+
     try {
       const res = await fetch('/api/admin/gardeners/bulk-bind', {
         method: 'POST',
@@ -1273,22 +1454,59 @@ export default function AdminDashboard() {
   const handleAddService = async (e) => {
     e.preventDefault();
     if (!newServiceName.trim()) return;
-    const res = await fetch('/api/admin/services', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newServiceName.trim() })
-    });
-    if (res.ok) {
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_svc_' + Date.now();
+      const newSvc = { id: tmpId, name: newServiceName.trim() };
+      setServices(prev => [...prev, newSvc]);
+      await enqueueAction({
+        actionType: 'ADMIN_SERVICE_POST',
+        url: '/api/admin/services',
+        method: 'POST',
+        payload: { id: tmpId, name: newServiceName.trim() }
+      });
       setNewServiceName('');
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newServiceName.trim() })
+      });
+      if (res.ok) {
+        setNewServiceName('');
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при добавлении услуги');
     }
   };
 
   const handleDeleteService = async (id) => {
     if (!confirm('Удалить эту услугу из списка? У заказов с этой услугой она просто станет пустой.')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setServices(prev => prev.filter(s => s.id !== id));
+      await enqueueAction({
+        actionType: 'ADMIN_SERVICE_DELETE',
+        url: '/api/admin/services',
+        method: 'DELETE',
+        payload: { id }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/services', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1298,6 +1516,21 @@ export default function AdminDashboard() {
   };
 
   const handleMarkDayOff = async (dateStr, gardenerId) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_dayoff_' + Date.now();
+      setDayOffs(prev => [...prev, { id: tmpId, date: dateStr, gardenerId }]);
+      await enqueueAction({
+        actionType: 'ADMIN_DAYOFF_POST',
+        url: '/api/admin/dayoff',
+        method: 'POST',
+        payload: { id: tmpId, date: dateStr, gardenerId }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/dayoff', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1312,6 +1545,20 @@ export default function AdminDashboard() {
   };
 
   const handleRemoveDayOff = async (id) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setDayOffs(prev => prev.filter(d => d.id !== id));
+      await enqueueAction({
+        actionType: 'ADMIN_DAYOFF_DELETE',
+        url: '/api/admin/dayoff',
+        method: 'DELETE',
+        payload: { id }
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/dayoff', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },

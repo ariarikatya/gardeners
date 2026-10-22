@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkLeader(req) {
@@ -46,17 +47,33 @@ export async function GET(req) {
 
 export async function POST(req) {
   if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json();
   const { gardenerId, type, amount, description, orderId } = body;
   if (!gardenerId || !type || typeof amount === 'undefined') return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
   const data = { gardenerId, type: String(type), amount: Number(amount), description: description || '' };
   if (orderId) data.orderId = orderId;
   const op = await prisma.operation.create({ data });
-  return NextResponse.json({ operation: op });
+  const resBody = { operation: op };
+  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }
 
 export async function PUT(req) {
   if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json();
   const { id, approved, approvedAmount, amount, description } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
@@ -98,7 +115,9 @@ export async function PUT(req) {
       console.error('Failed to notify gardener via VK:', vkErr.message);
     }
 
-    return NextResponse.json({ operation: op });
+    const resBody = { operation: op };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось обновить операцию' }, { status: 400 });
   }
@@ -106,9 +125,18 @@ export async function PUT(req) {
 
 export async function DELETE(req) {
   if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   await prisma.operation.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+  const resBody = { ok: true };
+  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }

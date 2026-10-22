@@ -17,27 +17,14 @@ Deployment notes — scheduled tasks and VK notifications
 
 ## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
 
-Синхронизация заказов с Google Таблицами выполняется через эндпоинт `POST /api/admin/sync-sheets-cron`.
+Синхронизация заказов с Google Таблицами выполняется через защищённый эндпоинт `POST /api/admin/sync-sheets-cron`.
 
-### 1) Настройка в Vercel (Vercel Cron Jobs)
-В `vercel.json` автоматически настроен cron на каждый час (`0 * * * *`):
-```json
-{
-  "crons": [
-    {
-      "path": "/api/admin/sync-sheets-cron",
-      "cron": "0 * * * *"
-    }
-  ]
-}
-```
-Для защиты эндпоинта задайте переменную окружения `CRON_SECRET=ваш_секретный_ключ`. Vercel автоматически передаёт `x-cron-secret` при вызове cron-задач.
-
-### 2) Настройка на VPS через crontab или systemd
-На VPS добавьте запись в crontab (`crontab -e`):
+### Настройка на VPS через crontab
+Для бесплатной авто-синхронизации добавьте запись в системный crontab на VPS (`crontab -e`):
 ```bash
-0 * * * * curl -X POST http://localhost:3000/api/admin/sync-sheets-cron -H "x-cron-secret: YOUR_CRON_SECRET"
+0 * * * * curl -s -X POST -H "x-cron-secret: $CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
 ```
+Значение `CRON_SECRET` задаётся в окружении PM2 / `.env`.
 
 Дополнительно (страховка на клиенте): при открытии страницы `/admin` браузер диспетчера проверяет время последней синхронизации в `localStorage` (`last_sheets_sync_ts`). Если прошло > 60 минут, выполняется фоновая синхронизация без дублирования одновременных вызовов.
 
@@ -172,13 +159,7 @@ Deployment notes — scheduled tasks and VK notifications
    ```
    Это отправит тестовое напоминание `order_reminder_test`, подтверждающее работоспособность Web Push канала.
 
-2) Vercel scheduler
-
-- If deploying to Vercel, use 'Vercel Scheduled Functions' or an external service to call the HTTP endpoint:
-  POST https://your-site.com/api/admin/scheduled
-  The endpoint requires ADMIN auth (cookie-based) or `x-cron-secret` header matching `CRON_SECRET`.
-
-3) VK notifications (leader approves expense)
+2) VK notifications (leader approves expense)
 
 - Environment variable required: VK_GROUP_TOKEN — community token with messages permission.
 - Gardener model now has `vkId` field which should store VK peer id (user id or peer id) to send a message to.
@@ -192,7 +173,7 @@ Security and notes:
 - Make sure community has permission to message users (users must start conversation with community or have allowed messages from community).
 - For reliable delivery consider using VK callback API or storing failed notifications and retrying.
 
-4) Уведомления (Web Push)
+3) Уведомления (Web Push)
 
 - Как включить пуш-уведомления:
   - В панели диспетчера (`/admin`): в шапке нажать кнопку «Включить уведомления». Браузер запросит разрешение на отправку push-уведомлений.
@@ -238,17 +219,17 @@ Security and notes:
    curl -X POST https://your-domain.com/api/push/test -b "token=YOUR_JWT_TOKEN"
 
    # Тестовый прогон напоминаний 'call' или 'card' без сжигания продуктовой идемпотентности:
-   curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d "{"type":"call"}" -b "token=YOUR_JWT_TOKEN"
+   curl -X POST https://your-domain.com/api/push/test -H "Content-Type: application/json" -d '{"type":"call"}' -b "token=YOUR_JWT_TOKEN"
    ```
    Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
 
-5) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
+4) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
 
 - Требования к правам и токенам amoCRM API:
   - Для полной работы API v4 интеграции токен должен иметь права на чтение и запись контактов (`contacts`), сделок (`leads`), примечаний и связь сущностей (`leads ↔ contacts`).
   - При отсутствии токена или прав система автоматически пишет предупреждение в лог и безопасно отправляет заявку через резервную веб-форму (`forwardToAmo` / `forwardToAmoUnsorted`). Заявки клиентов никогда не теряются.
 
-6) Вход на устройстве (Remember Device)
+5) Вход на устройстве (Remember Device)
 
 - После успешной первичной авторизации номер телефона сохраняется в `localStorage` под ключом `auth_phone`.
 - При повторном посещении страницы входа (`/login`) система автоматически предлагает войти в 1 тап: «Войти как <номер>?» с кнопками [Войти] (обращение к `/api/auth/auto-login`) и [Другой номер].

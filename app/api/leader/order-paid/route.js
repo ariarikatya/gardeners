@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkLeader(req) {
@@ -12,6 +13,12 @@ async function checkLeader(req) {
 
 export async function PUT(req) {
   if (!(await checkLeader(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   const { id, paidTo } = await req.json();
   if (!id) return NextResponse.json({ error: 'Не указан заказ' }, { status: 400 });
@@ -37,7 +44,9 @@ export async function PUT(req) {
     }
 
     const order = await prisma.order.update({ where: { id }, data: updateData });
-    return NextResponse.json({ order });
+    const resBody = { order };
+    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: 'Не удалось обновить заказ' }, { status: 400 });
