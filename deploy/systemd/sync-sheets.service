@@ -1,0 +1,18 @@
+# Systemd service for Google Sheets hourly sync
+[Unit]
+Description=Hourly Google Sheets sync for Gardening site
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/anemon
+Environment=TZ=Europe/Moscow
+EnvironmentFile=/etc/gardening-site.env
+ExecStart=/usr/bin/env node /opt/anemon/scripts/sync-sheets.js
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

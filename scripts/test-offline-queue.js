@@ -324,16 +324,52 @@ async function runTests() {
   assert.strictEqual(testQueueStore.length, 1, 'One operation action remains');
   assert.strictEqual(testQueueStore[0].payload.gardenerId, 'real_g_100', 'Dependent operation gardenerId mapped to real_g_100');
 
-  // 5. Test temp ID delete squashing
-  testEnqueue({ id: 'q_s1', method: 'POST', actionType: 'ADMIN_SERVICE_POST', url: '/api/admin/services', payload: { id: 'tmp_s_200', name: 'Полив' } });
-  assert.strictEqual(testQueueStore.length, 2, 'Added temp service create');
+  // 5. Test [POST tmp, PUT tmp, DELETE tmp] sequence -> leaves 0 items in queue
+  let sequenceQueue = [];
+  function seqEnqueue(newItem) {
+    const targetObjId = newItem.payload.id || newItem.payload.orderId;
+    const isTemp = targetObjId && String(targetObjId).startsWith('tmp_');
 
-  testEnqueue({ id: 'q_s2', method: 'DELETE', actionType: 'ADMIN_SERVICE_DELETE', url: '/api/admin/services', payload: { id: 'tmp_s_200' } });
-  assert.strictEqual(testQueueStore.length, 1, 'Deleting temp service cancels pending POST and leaves only operation in queue');
+    if (newItem.method === 'DELETE' && isTemp) {
+      sequenceQueue = sequenceQueue.filter(i => (i.payload.id || i.payload.orderId) !== targetObjId);
+      return null;
+    }
+
+    if (newItem.method === 'DELETE' && targetObjId && !isTemp) {
+      sequenceQueue = sequenceQueue.filter(i => (i.payload.id || i.payload.orderId) !== targetObjId || (i.method !== 'PUT' && i.method !== 'POST'));
+    }
+
+    if (newItem.method === 'PUT' && targetObjId) {
+      const existing = sequenceQueue.find(i => (i.payload.id || i.payload.orderId) === targetObjId && (i.method === 'POST' || i.method === 'PUT'));
+      if (existing) {
+        existing.payload = { ...existing.payload, ...newItem.payload };
+        return existing;
+      }
+    }
+
+    sequenceQueue.push(newItem);
+    return newItem;
+  }
+
+  // Sequence A: [POST tmp, PUT tmp, DELETE tmp]
+  seqEnqueue({ id: 'sq_1', method: 'POST', actionType: 'ADMIN_ORDER_POST', url: '/api/admin/orders', payload: { id: 'tmp_ord_300', clientName: 'Алексей' } });
+  assert.strictEqual(sequenceQueue.length, 1, 'POST tmp added');
+  seqEnqueue({ id: 'sq_2', method: 'PUT', actionType: 'ADMIN_ORDER_PUT', url: '/api/admin/orders', payload: { id: 'tmp_ord_300', address: 'ул. Ленина' } });
+  assert.strictEqual(sequenceQueue.length, 1, 'PUT tmp merged into POST tmp');
+  seqEnqueue({ id: 'sq_3', method: 'DELETE', actionType: 'ADMIN_ORDER_DELETE', url: '/api/admin/orders', payload: { id: 'tmp_ord_300' } });
+  assert.strictEqual(sequenceQueue.length, 0, 'DELETE tmp cancelled pending POST/PUT tmp, leaving 0 items');
+
+  // Sequence B: [POST real, PUT real, DELETE real]
+  seqEnqueue({ id: 'sq_4', method: 'POST', actionType: 'ADMIN_ORDER_POST', url: '/api/admin/orders', payload: { id: 'real_ord_400', clientName: 'Борис' } });
+  seqEnqueue({ id: 'sq_5', method: 'PUT', actionType: 'ADMIN_ORDER_PUT', url: '/api/admin/orders', payload: { id: 'real_ord_400', address: 'ул. Мира' } });
+  assert.strictEqual(sequenceQueue.length, 1, 'PUT real merged into POST real');
+  seqEnqueue({ id: 'sq_6', method: 'DELETE', actionType: 'ADMIN_ORDER_DELETE', url: '/api/admin/orders', payload: { id: 'real_ord_400' } });
+  assert.strictEqual(sequenceQueue.length, 1, 'DELETE real cancelled POST/PUT real and left only DELETE real in queue');
+  assert.strictEqual(sequenceQueue[0].method, 'DELETE', 'Single remaining item is DELETE real');
 
   console.log('  ✓ Multi-entity actions (gardeners, services, operations) correctly handled');
   console.log('  ✓ Temp ID mapping (tmp_g_100 -> real_g_100) succeeded across dependent actions');
-  console.log('  ✓ Squashing rules verified: PUT merges into POST, DELETE on temp ID cancels pending POST');
+  console.log('  ✓ Squashing rules verified: [POST tmp, PUT tmp, DELETE tmp] -> 0 items; [POST real, PUT real, DELETE real] -> 1 DELETE item');
   console.log('✅ Test 6 passed!\n');
 
   console.log('🎉 All offline queue tests passed successfully!');

@@ -1,0 +1,10 @@
+# Systemd timer to run sync-sheets.service hourly
+[Unit]
+Description=Run Google Sheets sync hourly
+
+[Timer]
+OnCalendar=*-*-* *:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

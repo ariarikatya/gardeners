@@ -1,0 +1,16 @@
+name: Hourly Google Sheets Sync
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Every hour
+  workflow_dispatch: {}
+
+jobs:
+  sync-sheets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Google Sheets Sync
+        run: |
+          curl -s -X POST \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.SITE_URL }}/api/admin/sync-sheets-cron"

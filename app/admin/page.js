@@ -6,7 +6,7 @@ import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache } from '@/lib/offlineStore';
-import { enqueueAction, getQueue, syncQueue } from '@/lib/offlineQueue';
+import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts } from '@/lib/offlineQueue';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -240,6 +240,8 @@ export default function AdminDashboard() {
   // Оффлайн состояние и очередь
   const [isOffline, setIsOffline] = useState(false);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [conflictItems, setConflictItems] = useState([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
   const syncInFlightRef = useRef(false);
 
@@ -400,11 +402,12 @@ export default function AdminDashboard() {
 
   const refreshQueueCount = async () => {
     try {
-      const q = await getQueue();
-      setPendingQueueCount(q.length);
-      return q;
+      const stats = await getQueueStats('admin');
+      setPendingQueueCount(stats.pending + stats.syncing);
+      setConflictItems(stats.conflictItems);
+      return stats;
     } catch (e) {
-      return [];
+      return { total: 0, pending: 0, conflict: 0, conflictItems: [] };
     }
   };
 
@@ -431,7 +434,8 @@ export default function AdminDashboard() {
         null,
         (failedItem, errorMsg) => {
           logClientError(`[QueueSyncError Admin] Action ${failedItem.actionType} failed`, { message: errorMsg }, '/admin');
-        }
+        },
+        'admin'
       );
       await refreshQueueCount();
       if (syncedCount > 0 && !hasErrors) {
@@ -443,6 +447,11 @@ export default function AdminDashboard() {
     } finally {
       setIsSyncingQueue(false);
     }
+  };
+
+  const handleRetryConflicts = async () => {
+    await retryConflicts('admin');
+    await handleSyncQueue();
   };
 
   useEffect(() => {
