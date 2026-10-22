@@ -43,6 +43,10 @@ export async function PUT(req) {
 
   const body = await req.json();
   const { id, status, assignedTo, createdOrderId, preferredGardenerId, preferredGardenerName, preferredInventory } = body;
+
+  if (id && String(id).startsWith('tmp_')) {
+    return NextResponse.json({ error: 'Cannot update temporary offline object directly, resolve real ID first' }, { status: 400 });
+  }
   const data = {};
   if (status !== undefined) data.status = status;
   if (assignedTo !== undefined) data.assignedTo = assignedTo;

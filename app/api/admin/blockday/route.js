@@ -44,7 +44,9 @@ export async function POST(req) {
   }
 
   try {
-    const { date, gardenerId } = await req.json();
+    const body = await req.json();
+    if (body.id && String(body.id).startsWith('tmp_')) delete body.id;
+    const { date, gardenerId } = body;
     if (!date || !gardenerId) {
       return NextResponse.json({ error: 'Дата и ID садовника обязательны' }, { status: 400 });
     }

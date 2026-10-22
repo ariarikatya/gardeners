@@ -31,7 +31,9 @@ export async function POST(req) {
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
-  const { name, phone, serviceIds } = await req.json();
+  const body = await req.json();
+  if (body.id && String(body.id).startsWith('tmp_')) delete body.id;
+  const { name, phone, serviceIds } = body;
   const cleanPhone = phone.replace(/\D/g, '');
 
   try {
@@ -70,6 +72,10 @@ export async function PUT(req) {
 
   const body = await req.json();
   const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo, jobTitle, timeSlots, isRegular, annualContract, partnerId, writeoffPercent, bonusPercent, finePercent } = body;
+
+  if (id && String(id).startsWith('tmp_')) {
+    return NextResponse.json({ error: 'Cannot update temporary offline object directly, resolve real ID first' }, { status: 400 });
+  }
 
   try {
     const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });

@@ -17,14 +17,44 @@ Deployment notes — scheduled tasks and VK notifications
 
 ## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
 
-Синхронизация заказов с Google Таблицами выполняется через защищённый эндпоинт `POST /api/admin/sync-sheets-cron`.
+Автоматическое обновление Google Таблиц выполняется каждые 60 минут.
 
-### Настройка на VPS через crontab
-Для бесплатной авто-синхронизации добавьте запись в системный crontab на VPS (`crontab -e`):
+### Основной способ: GitHub Actions Workflow
+В репозитории настроен автоматический GitHub Actions workflow (`.github/workflows/sheets-sync.yml`), который каждый час вызывает `POST /api/admin/sync-sheets-cron`.
+
+**Необходимые Secrets в репозитории GitHub (Settings → Secrets and variables → Actions):**
+- `SITE_URL`: Базовый URL приложения (например `https://anemonagro.ru`)
+- `CRON_SECRET`: Секретный токен авторизации (должен совпадать с `CRON_SECRET` в `.env` на сервере)
+
+---
+
+### Альтернатива на VPS: Системный crontab (curl)
+Добавьте запись в системный crontab на VPS (`crontab -e`):
 ```bash
-0 * * * * curl -s -X POST -H "x-cron-secret: $CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
+0 * * * * curl -s -X POST -H "x-cron-secret: YOUR_CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
 ```
-Значение `CRON_SECRET` задаётся в окружении PM2 / `.env`.
+
+---
+
+### Альтернатива на VPS: Systemd Timer (`scripts/sync-sheets.js`)
+Для запуска прямой синхронизации через автономный скрипт на сервере под управлением `systemd`:
+
+1. Скопируйте файлы юнитов:
+   ```bash
+   sudo cp deploy/systemd/sync-sheets.service /etc/systemd/system/
+   sudo cp deploy/systemd/sync-sheets.timer /etc/systemd/system/
+   ```
+2. Убедитесь, что `/etc/gardening-site.env` содержит `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_KEY` и `GOOGLE_SHEET_ID`.
+3. Включите и запустите таймер:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now sync-sheets.timer
+   ```
+4. Проверьте статус запуска:
+   ```bash
+   systemctl list-timers | grep sync-sheets
+   journalctl -u sync-sheets.service -n 20 --no-pager
+   ```
 
 Дополнительно (страховка на клиенте): при открытии страницы `/admin` браузер диспетчера проверяет время последней синхронизации в `localStorage` (`last_sheets_sync_ts`). Если прошло > 60 минут, выполняется фоновая синхронизация без дублирования одновременных вызовов.
 

@@ -34,15 +34,35 @@ module.exports = {
 
 ---
 
-## Почасовая синхронизация Google Таблиц на VPS (crontab)
+## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
 
-Для бесплатной автоматической почасовой синхронизации настройте запись в системный crontab на VPS (`crontab -e`):
+Синхронизация Google Таблиц выполняется каждые 60 минут.
 
-```bash
-0 * * * * curl -s -X POST -H "x-cron-secret: $CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
-```
+### Основной вариант: GitHub Actions Workflow
+Workflow `.github/workflows/sheets-sync.yml` автоматически каждый час выполняет запрос к `POST /api/admin/sync-sheets-cron`.
 
-Значение `CRON_SECRET` берется из окружения PM2 / `.env`. На клиенте при открытии страницы `/admin` также действует авто-синхронизация, если с последней прошло >60 минут.
+**Параметры в GitHub Actions Secrets:**
+- `SITE_URL`: `https://anemonagro.ru`
+- `CRON_SECRET`: секретный токен, совпадающий с `CRON_SECRET` в `.env`.
+
+---
+
+### Варианты для VPS:
+
+1. **Системный crontab (curl):**
+   ```bash
+   0 * * * * curl -s -X POST -H "x-cron-secret: YOUR_CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
+   ```
+
+2. **Systemd Timer (`node scripts/sync-sheets.js`):**
+   ```bash
+   sudo cp deploy/systemd/sync-sheets.service /etc/systemd/system/
+   sudo cp deploy/systemd/sync-sheets.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now sync-sheets.timer
+   ```
+
+На клиенте при открытии страницы `/admin` также действует авто-синхронизация, если с последней прошло >60 минут.
 
 ---
 

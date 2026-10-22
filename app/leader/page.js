@@ -113,9 +113,10 @@ export default function LeaderDashboard() {
 
   const refreshQueueCount = async () => {
     try {
-      const q = await getQueue();
-      setPendingQueueCount(q.length);
-      return q;
+      const { getQueueStats } = require('@/lib/offlineQueue');
+      const stats = await getQueueStats('leader');
+      setPendingQueueCount(stats.pending + stats.syncing);
+      return stats.items;
     } catch (e) {
       return [];
     }
@@ -144,7 +145,8 @@ export default function LeaderDashboard() {
         null,
         (failedItem, errorMsg) => {
           logClientError(`[QueueSyncError Leader] Action ${failedItem.actionType} failed`, { message: errorMsg }, '/leader');
-        }
+        },
+        'leader'
       );
       await refreshQueueCount();
       if (syncedCount > 0 && !hasErrors) {
@@ -301,7 +303,8 @@ export default function LeaderDashboard() {
             actionType: 'LEADER_OPERATION_POST',
             url: '/api/leader/operations',
             method: 'POST',
-            payload
+            payload,
+            scope: 'leader'
           });
         } else {
           const res = await apiFetch('/api/leader/operations', {
@@ -376,7 +379,8 @@ export default function LeaderDashboard() {
         actionType: 'LEADER_OPERATION_DELETE',
         url: `/api/leader/operations?id=${encodeURIComponent(id)}`,
         method: 'DELETE',
-        payload: { id }
+        payload: { id },
+        scope: 'leader'
       });
       await refreshQueueCount();
       return;
@@ -427,7 +431,8 @@ export default function LeaderDashboard() {
         actionType: 'LEADER_ORDER_PAID_PUT',
         url: '/api/leader/order-paid',
         method: 'PUT',
-        payload: { id: orderId, paidTo: nextSerialized }
+        payload: { id: orderId, paidTo: nextSerialized },
+        scope: 'leader'
       });
       await refreshQueueCount();
       return;
@@ -779,7 +784,8 @@ export default function LeaderDashboard() {
                                   actionType: 'LEADER_GARDENER_PUT',
                                   url: '/api/leader',
                                   method: 'PUT',
-                                  payload
+                                  payload,
+                                  scope: 'leader'
                                 });
                                 await refreshQueueCount();
                                 alert('Процент сохранён оффлайн');
@@ -890,7 +896,8 @@ export default function LeaderDashboard() {
                                     actionType: 'LEADER_OPERATION_PUT',
                                     url: '/api/leader/operations',
                                     method: 'PUT',
-                                    payload: { id: op.id, amount, description }
+                                    payload: { id: op.id, amount, description },
+                                    scope: 'leader'
                                   });
                                   await refreshQueueCount();
                                   return;
@@ -942,7 +949,8 @@ export default function LeaderDashboard() {
                                     actionType: 'LEADER_OPERATION_PUT',
                                     url: '/api/leader/operations',
                                     method: 'PUT',
-                                    payload: { id: op.id, approved: true, approvedAmount: val }
+                                    payload: { id: op.id, approved: true, approvedAmount: val },
+                                    scope: 'leader'
                                   });
                                   await refreshQueueCount();
                                   return;
@@ -970,7 +978,8 @@ export default function LeaderDashboard() {
                                     actionType: 'LEADER_OPERATION_PUT',
                                     url: '/api/leader/operations',
                                     method: 'PUT',
-                                    payload: { id: op.id, approved: false, approvedAmount: null }
+                                    payload: { id: op.id, approved: false, approvedAmount: null },
+                                    scope: 'leader'
                                   });
                                   await refreshQueueCount();
                                   return;
@@ -1154,7 +1163,8 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
         actionType: 'CATALOG_POST',
         url: '/api/catalog',
         method: 'POST',
-        payload: { type: catalogType, id: tmpId, name: name.trim(), description: desc.trim(), image: image || null }
+        payload: { type: catalogType, id: tmpId, name: name.trim(), description: desc.trim(), image: image || null },
+        scope: 'leader'
       });
       setName('');
       setDesc('');
@@ -1193,7 +1203,8 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
         actionType: 'CATALOG_DELETE',
         url: '/api/catalog',
         method: 'DELETE',
-        payload: { type: catalogType, id }
+        payload: { type: catalogType, id },
+        scope: 'leader'
       });
       return;
     }
@@ -1223,7 +1234,8 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
         actionType: 'CATALOG_ASSIGN_POST',
         url: '/api/catalog/assign',
         method: 'POST',
-        payload: { type: catalogType, itemIds: selectedItemIds, gardenerIds: selectedGardenerIds, action }
+        payload: { type: catalogType, itemIds: selectedItemIds, gardenerIds: selectedGardenerIds, action },
+        scope: 'leader'
       });
       alert('Массовое назначение добавлено в очередь');
       setSelectedItemIds([]);

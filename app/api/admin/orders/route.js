@@ -156,6 +156,9 @@ export async function POST(req) {
   }
 
   const body = await req.json();
+  if (body.id && String(body.id).startsWith('tmp_')) {
+    delete body.id;
+  }
   const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash, leadId, webLeadId } = body;
 
   const orderDate = new Date(date);
@@ -628,6 +631,10 @@ export async function PUT(req) {
   console.log('2. Тело запроса:', JSON.stringify(body, null, 2));
 
   const { id, ...updateData } = body;
+
+  if (id && String(id).startsWith('tmp_')) {
+    return NextResponse.json({ error: 'Cannot update temporary offline object directly, resolve real ID first' }, { status: 400 });
+  }
 
   console.log('3. Ищу заказ в базе...');
   const existing = await prisma.order.findUnique({ where: { id }, include: { service: true } });
@@ -1143,6 +1150,10 @@ export async function DELETE(req) {
 
     if (!id) {
       return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
+    }
+
+    if (String(id).startsWith('tmp_')) {
+      return NextResponse.json({ error: 'Cannot delete temporary offline object on server directly' }, { status: 400 });
     }
 
     const order = await prisma.order.findUnique({

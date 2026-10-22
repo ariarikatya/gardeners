@@ -38,7 +38,9 @@ export async function POST(req) {
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
-  const { date, gardenerId } = await req.json();
+  const body = await req.json();
+  if (body.id && String(body.id).startsWith('tmp_')) delete body.id;
+  const { date, gardenerId } = body;
   const dayDate = new Date(date);
 
   // Нельзя отметить выходной, если на этот день уже есть заказ у садовника

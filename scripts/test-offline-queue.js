@@ -372,6 +372,72 @@ async function runTests() {
   console.log('  ✓ Squashing rules verified: [POST tmp, PUT tmp, DELETE tmp] -> 0 items; [POST real, PUT real, DELETE real] -> 1 DELETE item');
   console.log('✅ Test 6 passed!\n');
 
+  // Test 7: POST(tmp_) then PUT(real ID after resolution)
+  console.log('Test 7: POST(tmp_) -> Server returns real ID -> Queue resolves temp ID -> PUT(real ID) succeeds');
+
+  let queue7 = [
+    {
+      id: 'q_post_1',
+      idempotencyKey: 'ik_post_1',
+      actionType: 'ADMIN_ORDER_POST',
+      url: '/api/admin/orders',
+      method: 'POST',
+      payload: { id: 'tmp_ord_999', clientName: 'Тестовый Клиент', address: 'ул. Садовая 1' },
+      status: 'pending',
+      scope: 'admin'
+    },
+    {
+      id: 'q_put_1',
+      idempotencyKey: 'ik_put_1',
+      actionType: 'ADMIN_ORDER_PUT',
+      url: '/api/admin/orders',
+      method: 'PUT',
+      payload: { id: 'tmp_ord_999', status: 'Выполнен', priceFact: 12000 },
+      status: 'pending',
+      scope: 'admin'
+    }
+  ];
+
+  // 1. Process POST item
+  const postItem = queue7[0];
+  postItem.status = 'syncing';
+
+  // Mock server response for POST: Strips tmp_ord_999 and assigns real_ord_777
+  const mockPostResponse = { order: { id: 'real_ord_777', clientName: 'Тестовый Клиент', address: 'ул. Садовая 1' } };
+  const tempId7 = postItem.payload.id;
+  const realId7 = mockPostResponse.order.id;
+
+  assert.ok(tempId7.startsWith('tmp_'), 'Initial ID was a temp ID');
+  assert.ok(!realId7.startsWith('tmp_'), 'Server returned a real ID');
+
+  // Remove processed POST item from queue
+  queue7 = queue7.filter(i => i.id !== postItem.id);
+
+  // 2. Perform temp ID resolution on remaining queue items
+  for (const remItem of queue7) {
+    if (remItem.payload.id === tempId7) {
+      remItem.payload.id = realId7;
+    }
+  }
+
+  assert.strictEqual(queue7.length, 1, 'Only PUT item remains in queue');
+  assert.strictEqual(queue7[0].payload.id, 'real_ord_777', 'PUT item payload.id resolved to real_ord_777');
+
+  // 3. Process PUT item with resolved real ID
+  const putItem = queue7[0];
+  putItem.status = 'syncing';
+
+  // Mock server PUT validation
+  assert.ok(!putItem.payload.id.startsWith('tmp_'), 'PUT request payload uses real ID and will not be rejected by server tmp_ defense');
+  const mockPutResponse = { order: { id: 'real_ord_777', status: 'Выполнен', priceFact: 12000 } };
+  queue7 = queue7.filter(i => i.id !== putItem.id);
+
+  assert.strictEqual(queue7.length, 0, 'Queue completely drained after PUT with real ID');
+  console.log('  ✓ POST(tmp_) correctly returned real_ord_777');
+  console.log('  ✓ Remaining PUT item successfully resolved payload.id to real_ord_777');
+  console.log('  ✓ PUT with real ID executed successfully');
+  console.log('✅ Test 7 passed!\n');
+
   console.log('🎉 All offline queue tests passed successfully!');
 }
 

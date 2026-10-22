@@ -811,8 +811,8 @@ export default function AdminDashboard() {
       setAuctionOrders(prev => [newOrder, ...prev]);
       setWebLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId } : l));
 
-      await enqueueAction({ actionType: 'ADMIN_ORDER_POST', url: '/api/admin/orders', method: 'POST', payload: { ...payload, id: tmpId } });
-      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id: lead.id, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId } });
+      await enqueueAction({ actionType: 'ADMIN_ORDER_POST', url: '/api/admin/orders', method: 'POST', payload: { ...payload, id: tmpId }, scope: 'admin' });
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id: lead.id, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId }, scope: 'admin' });
       await refreshQueueCount();
       return;
     }
@@ -909,7 +909,7 @@ export default function AdminDashboard() {
 
     if (isOfflineMode) {
       setWebLeads(prev => prev.map(l => l.id === id ? { ...l, status: 'Обработана' } : l));
-      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id, status: 'Обработана' } });
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id, status: 'Обработана' }, scope: 'admin' });
       await refreshQueueCount();
       return;
     }
@@ -929,7 +929,7 @@ export default function AdminDashboard() {
 
     if (isOfflineMode) {
       setWebLeads(prev => prev.filter(l => l.id !== id));
-      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_DELETE', url: '/api/admin/webleads', method: 'DELETE', payload: { id } });
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_DELETE', url: '/api/admin/webleads', method: 'DELETE', payload: { id }, scope: 'admin' });
       await refreshQueueCount();
       return;
     }
@@ -1020,7 +1020,8 @@ export default function AdminDashboard() {
           actionType: 'ADMIN_ORDER_POST',
           url: endpoint,
           method: 'POST',
-          payload: { ...formDataCustom, id: tmpId, fromLead: !!convertingLeadId }
+          payload: { ...formDataCustom, id: tmpId, fromLead: !!convertingLeadId },
+          scope: 'admin'
         });
       } else {
         const updatedOrder = {
@@ -1042,7 +1043,8 @@ export default function AdminDashboard() {
           actionType: 'ADMIN_ORDER_PUT',
           url: endpoint,
           method: 'PUT',
-          payload: { id: selectedOrder.id, ...formDataCustom }
+          payload: { id: selectedOrder.id, ...formDataCustom },
+          scope: 'admin'
         });
       }
 
@@ -1058,7 +1060,8 @@ export default function AdminDashboard() {
           actionType: 'ADMIN_WEBLEAD_PUT',
           url: '/api/admin/webleads',
           method: 'PUT',
-          payload: leadUpdate
+          payload: leadUpdate,
+          scope: 'admin'
         });
         setConvertingLeadId(null);
       }
@@ -1121,7 +1124,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_ORDER_DELETE',
         url: `/api/admin/orders?id=${selectedOrder.id}`,
         method: 'DELETE',
-        payload: { id: selectedOrder.id }
+        payload: { id: selectedOrder.id },
+        scope: 'admin'
       });
       setShowOrderModal(false);
       await refreshQueueCount();
@@ -1160,7 +1164,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_GARDENER_POST',
         url: '/api/admin/gardeners',
         method: 'POST',
-        payload: { ...newGardener, id: tmpId }
+        payload: { ...newGardener, id: tmpId },
+        scope: 'admin'
       });
       setNewGardener({ name: '', phone: '', serviceIds: [] });
       await refreshQueueCount();
@@ -1239,7 +1244,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_GARDENER_PUT',
         url: '/api/admin/gardeners',
         method: 'PUT',
-        payload: editingGardener
+        payload: editingGardener,
+        scope: 'admin'
       });
       setEditingGardener(null);
       await refreshQueueCount();
@@ -1275,7 +1281,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_GARDENER_DELETE',
         url: '/api/admin/gardeners',
         method: 'DELETE',
-        payload: { id }
+        payload: { id },
+        scope: 'admin'
       });
       await refreshQueueCount();
       return;
@@ -1298,7 +1305,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_ORDER_PUT',
         url: '/api/admin/orders',
         method: 'PUT',
-        payload: { id: orderId, status: 'Новый заказ', refusalReason: null }
+        payload: { id: orderId, status: 'Новый заказ', refusalReason: null },
+        scope: 'admin'
       });
       await refreshQueueCount();
       return;
@@ -1339,7 +1347,8 @@ export default function AdminDashboard() {
           actionType: 'ADMIN_ORDER_PUT',
           url: '/api/admin/orders',
           method: 'PUT',
-          payload: { id: selectedOrder.id, ...updatedForm }
+          payload: { id: selectedOrder.id, ...updatedForm },
+          scope: 'admin'
         });
       } else {
         const tmpId = 'tmp_' + Date.now();
@@ -1349,7 +1358,8 @@ export default function AdminDashboard() {
           actionType: 'ADMIN_ORDER_POST',
           url: '/api/admin/orders',
           method: 'POST',
-          payload: { ...updatedForm, id: tmpId }
+          payload: { ...updatedForm, id: tmpId },
+          scope: 'admin'
         });
       }
       setShowOrderModal(false);
@@ -1398,7 +1408,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_BLOCKDAY_POST',
         url: '/api/admin/blockday',
         method: 'POST',
-        payload: { date: dateStr, gardenerId }
+        payload: { date: dateStr, gardenerId },
+        scope: 'admin'
       });
       await refreshQueueCount();
       return;
@@ -1433,7 +1444,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_VK_BULK_POST',
         url: '/api/admin/gardeners/bulk-bind',
         method: 'POST',
-        payload: { text: vkBulkText }
+        payload: { text: vkBulkText },
+        scope: 'admin'
       });
       setShowVkBulkModal(false);
       setVkBulkText('');
@@ -1474,7 +1486,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_SERVICE_POST',
         url: '/api/admin/services',
         method: 'POST',
-        payload: { id: tmpId, name: newServiceName.trim() }
+        payload: { id: tmpId, name: newServiceName.trim() },
+        scope: 'admin'
       });
       setNewServiceName('');
       await refreshQueueCount();
@@ -1510,7 +1523,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_SERVICE_DELETE',
         url: '/api/admin/services',
         method: 'DELETE',
-        payload: { id }
+        payload: { id },
+        scope: 'admin'
       });
       await refreshQueueCount();
       return;
@@ -1534,7 +1548,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_DAYOFF_POST',
         url: '/api/admin/dayoff',
         method: 'POST',
-        payload: { id: tmpId, date: dateStr, gardenerId }
+        payload: { id: tmpId, date: dateStr, gardenerId },
+        scope: 'admin'
       });
       await refreshQueueCount();
       return;
@@ -1562,7 +1577,8 @@ export default function AdminDashboard() {
         actionType: 'ADMIN_DAYOFF_DELETE',
         url: '/api/admin/dayoff',
         method: 'DELETE',
-        payload: { id }
+        payload: { id },
+        scope: 'admin'
       });
       await refreshQueueCount();
       return;

@@ -27,7 +27,9 @@ export async function POST(req) {
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
-  const { name } = await req.json();
+  const body = await req.json();
+  if (body.id && String(body.id).startsWith('tmp_')) delete body.id;
+  const { name } = body;
   try {
     const service = await prisma.service.create({ data: { name: name.trim() } });
     const resBody = { service };

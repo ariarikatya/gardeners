@@ -55,6 +55,7 @@ export async function POST(req) {
   }
 
   const body = await req.json();
+  if (body.id && String(body.id).startsWith('tmp_')) delete body.id;
   const { gardenerId, type, amount, description, orderId } = body;
   if (!gardenerId || !type || typeof amount === 'undefined') return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
   const data = { gardenerId, type: String(type), amount: Number(amount), description: description || '' };
@@ -77,6 +78,10 @@ export async function PUT(req) {
   const body = await req.json();
   const { id, approved, approvedAmount, amount, description } = body;
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  if (String(id).startsWith('tmp_')) {
+    return NextResponse.json({ error: 'Cannot update temporary offline object directly, resolve real ID first' }, { status: 400 });
+  }
 
   const existing = await prisma.operation.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: 'Операция не найдена' }, { status: 404 });
