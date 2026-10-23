@@ -13,6 +13,7 @@ export default function LoginPage() {
 
   const notifySwOfflineSession = async (active) => {
     if (typeof window !== 'undefined') {
+      const role = localStorage.getItem('auth_role') || 'GARDENER';
       if (active) {
         localStorage.setItem('offline_session', '1');
         localStorage.setItem('offline_session_ts', String(Date.now()));
@@ -22,24 +23,28 @@ export default function LoginPage() {
       }
 
       if ('serviceWorker' in navigator) {
+        const sendMessages = (targetSw) => {
+          if (!targetSw) return;
+          targetSw.postMessage({
+            type: 'OFFLINE_SESSION',
+            active: Boolean(active),
+            role,
+            ts: Date.now(),
+          });
+          if (active) {
+            targetSw.postMessage({
+              type: 'OFFLINE_ROLE',
+              role,
+            });
+          }
+        };
+
         try {
           const reg = await navigator.serviceWorker.ready;
           const targetSw = reg.active || navigator.serviceWorker.controller;
-          if (targetSw) {
-            targetSw.postMessage({
-              type: 'OFFLINE_SESSION',
-              active: Boolean(active),
-              ts: Date.now(),
-            });
-          }
+          sendMessages(targetSw);
         } catch (e) {
-          if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({
-              type: 'OFFLINE_SESSION',
-              active: Boolean(active),
-              ts: Date.now(),
-            });
-          }
+          sendMessages(navigator.serviceWorker.controller);
         }
       }
     }
@@ -47,12 +52,15 @@ export default function LoginPage() {
 
   const redirectByRole = (role, isOffline = false) => {
     notifySwOfflineSession(isOffline);
-    if (role === 'ADMIN') {
-      router.push('/admin');
-    } else if (role === 'LEADER') {
-      router.push('/leader');
+    const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
+    if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
+      if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
+        window.location.assign(rolePath);
+      } else {
+        router.push(rolePath);
+      }
     } else {
-      router.push('/gardener');
+      router.push(rolePath);
     }
   };
 

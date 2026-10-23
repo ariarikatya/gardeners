@@ -254,10 +254,7 @@ export default function LeaderDashboard() {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
 
         if ('serviceWorker' in navigator) {
           try {
@@ -295,7 +292,13 @@ export default function LeaderDashboard() {
     } catch (e) {}
 
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      if (res.ok && typeof window !== 'undefined') {
+        localStorage.removeItem('auth_role');
+        localStorage.removeItem('auth_phone');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
+      }
     } catch (e) {}
 
     if (typeof window !== 'undefined') {
