@@ -5,7 +5,7 @@
   "scripts": {
     "prebuild": "node scripts/gen-sw-version.js",
     "dev": "node scripts/gen-sw-version.js && next dev",
-    "build": "prisma generate && prisma db push --accept-data-loss && next build",
+    "build": "prisma generate && node -e \"if (!process.env.SKIP_DB_PUSH) require('child_process').execSync('prisma db push --accept-data-loss', { stdio: 'inherit' })\" && next build",
     "deploy": "npm run build && pm2 restart anemon --update-env",
     "start": "next start",
     "postinstall": "prisma generate",
@@ -32,7 +32,8 @@
     "test:jwt": "node scripts/test-jwt-sliding.js",
     "test:logout": "node scripts/test-logout.js",
     "test:login-flow": "node scripts/test-login-flow.js",
-    "test:offline-login": "node scripts/test-offline-saved-phone-login.js"
+    "test:offline-login": "node scripts/test-offline-saved-phone-login.js",
+    "test:sw-appshell": "node scripts/test-sw-appshell.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

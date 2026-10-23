@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-bad56f8';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-0d88963';
 const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -48,18 +48,32 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// === ACTIVATE: чистим все старые версии кэша ===
+let isOfflineSessionActive = false;
+const MAX_AGE_24H = 24 * 60 * 60 * 1000;
+
+// === ACTIVATE: чистим все старые версии кэша и протухшие сессии ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+      );
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const sessionRes = await cache.match('/offline-session');
+        if (sessionRes) {
+          const data = await sessionRes.json();
+          if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_24H)) {
+            await cache.delete('/offline-session');
+            isOfflineSessionActive = false;
+          }
+        }
+      } catch (e) {}
+    })()
   );
   self.clients.claim();
 });
-
-let isOfflineSessionActive = false;
-const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 
 async function isOfflineSession() {
   if (isOfflineSessionActive) return true;
@@ -67,6 +81,12 @@ async function isOfflineSession() {
     const cache = await caches.open(CACHE_NAME);
     const sessionRes = await cache.match('/offline-session');
     if (sessionRes) {
+      const data = await sessionRes.clone().json();
+      if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_24H)) {
+        await cache.delete('/offline-session');
+        isOfflineSessionActive = false;
+        return false;
+      }
       isOfflineSessionActive = true;
       return true;
     }
@@ -205,7 +225,9 @@ self.addEventListener('fetch', (event) => {
                   const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
                     headers: { 'Content-Type': 'application/json' }
                   });
-                  if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+                  if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                    cache.put('/login', resClone);
+                  } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                     cache.put('/gardener', resClone);
                     cache.put('/gardener-meta', metaRes);
                   } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
@@ -214,8 +236,6 @@ self.addEventListener('fetch', (event) => {
                   } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
                     cache.put('/leader', resClone);
                     cache.put('/leader-meta', metaRes);
-                  } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
-                    cache.put('/login', resClone);
                   }
                 } catch (e) {}
               }).catch(() => {});
@@ -227,6 +247,18 @@ self.addEventListener('fetch', (event) => {
         }
 
         // Кэш-фоллбэки ТОЛЬКО при сбое сети (оффлайн):
+        const isRootRequest = url.pathname === '/';
+        if (isRootRequest) {
+          const cachedLogin = await caches.match('/login');
+          if (cachedLogin && cachedLogin.ok && cachedLogin.status === 200) {
+            return cachedLogin;
+          }
+          return new Response(OFFLINE_HTML, {
+            status: 200,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
+        }
+
         const isLoginRequest = url.pathname === '/login' || url.pathname.startsWith('/login');
         if (isLoginRequest) {
           const cachedLogin = await caches.match('/login');
