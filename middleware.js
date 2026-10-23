@@ -8,6 +8,13 @@ function isRequestSecure(req) {
   return proto.includes('https');
 }
 
+/**
+ * NOTE ON OFFLINE PWA MODE:
+ * Middleware runs on the server for online requests only.
+ * When the app is offline, the PWA Service Worker (public/sw.js) intercepts navigation requests
+ * before they reach the network/server and returns cached HTML (/gardener, /admin, /leader, /login).
+ * Therefore, middleware.js does not interfere with offline page delivery.
+ */
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
   const authHeader = request.headers.get('authorization');

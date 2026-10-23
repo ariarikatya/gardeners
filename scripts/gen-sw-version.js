@@ -25,7 +25,7 @@ if (!gitSha) {
 const swCacheName = `anemon-agro-v${version}-${todayCode}-${gitSha}`;
 const clientVersion = `v${version}-${todayCode}-${gitSha}`;
 
-// 1. Generate lib/swVersion.generated.js
+// 1. Generate lib/swVersion.generated.js & lib/version.js
 const generatedJsContent = `// Auto-generated build version file. Do not edit manually.
 export const GENERATED_CLIENT_VERSION = '${clientVersion}';
 export const GENERATED_SW_CACHE_NAME = '${swCacheName}';
@@ -33,11 +33,19 @@ export const GENERATED_SW_CACHE_NAME = '${swCacheName}';
 
 fs.writeFileSync(path.join(__dirname, '..', 'lib', 'swVersion.generated.js'), generatedJsContent, 'utf8');
 
+const versionJsContent = `// Auto-generated build version file. Do not edit manually.
+export const CLIENT_VERSION = '${clientVersion}';
+export const SW_CACHE_NAME = '${swCacheName}';
+export const CACHE_NAME = '${swCacheName}';
+`;
+
+fs.writeFileSync(path.join(__dirname, '..', 'lib', 'version.js'), versionJsContent, 'utf8');
+
 // 2. Update CACHE_NAME in public/sw.js
 const swPath = path.join(__dirname, '..', 'public', 'sw.js');
 let swContent = fs.readFileSync(swPath, 'utf8');
 
-swContent = swContent.replace(/const CACHE_NAME = 'anemon-agro-v[^']+';/, `const CACHE_NAME = '${swCacheName}';`);
+swContent = swContent.replace(/const CACHE_NAME = '[^']+';/, `const CACHE_NAME = '${swCacheName}';`);
 
 fs.writeFileSync(swPath, swContent, 'utf8');
 
