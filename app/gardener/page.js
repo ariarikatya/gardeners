@@ -668,12 +668,27 @@ export default function GardenerDashboard() {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
 
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'OFFLINE_SESSION',
-            active: false,
-          });
+        if ('serviceWorker' in navigator) {
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            const targetSw = reg.active || navigator.serviceWorker.controller;
+            if (targetSw) {
+              targetSw.postMessage({
+                type: 'OFFLINE_SESSION',
+                active: false,
+              });
+            }
+          } catch (e) {
+            if (navigator.serviceWorker.controller) {
+              navigator.serviceWorker.controller.postMessage({
+                type: 'OFFLINE_SESSION',
+                active: false,
+              });
+            }
+          }
         }
 
         if ('PushManager' in window && 'serviceWorker' in navigator) {

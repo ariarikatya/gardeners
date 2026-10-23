@@ -1,4 +1,5 @@
 # Systemd service for Google Sheets hourly sync
+# Переменные GOOGLE_SERVICE_ACCOUNT_KEY и GOOGLE_SHEET_ID берутся из /etc/gardening-site.env
 # Copy this file to /etc/systemd/system/sync-sheets.service and adjust user/paths if needed.
 
 [Unit]

@@ -155,8 +155,19 @@ export default function LoginPage() {
       }
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
-      if (offlineSessionActive && isOffline) {
-        notifySwOfflineSession(true);
+      const offlineSessionTs = localStorage.getItem('offline_session_ts');
+      const MAX_OFFLINE_AGE_24H = 24 * 60 * 60 * 1000;
+
+      if (offlineSessionActive) {
+        const tsNum = Number(offlineSessionTs);
+        if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_24H)) {
+          if (isOffline) {
+            notifySwOfflineSession(true);
+          }
+        } else {
+          localStorage.removeItem('offline_session');
+          localStorage.removeItem('offline_session_ts');
+        }
       }
     } catch (e) {
       // localStorage error fallback

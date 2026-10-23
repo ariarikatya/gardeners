@@ -98,10 +98,6 @@ async function getPageCacheAge(pathname) {
   return Infinity;
 }
 
-async function getGardenerCacheAge() {
-  return await getPageCacheAge('/gardener');
-}
-
 // === MESSAGE: ручное обновление и флаг офлайн-сессии ===
 self.addEventListener('message', (event) => {
   if (event.data) {
