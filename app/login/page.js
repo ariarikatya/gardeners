@@ -11,13 +11,37 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const notifySwOfflineSession = (active) => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'OFFLINE_SESSION',
-        active: Boolean(active),
-        ts: Date.now(),
-      });
+  const notifySwOfflineSession = async (active) => {
+    if (typeof window !== 'undefined') {
+      if (active) {
+        localStorage.setItem('offline_session', '1');
+        localStorage.setItem('offline_session_ts', String(Date.now()));
+      } else {
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
+      }
+
+      if ('serviceWorker' in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            targetSw.postMessage({
+              type: 'OFFLINE_SESSION',
+              active: Boolean(active),
+              ts: Date.now(),
+            });
+          }
+        } catch (e) {
+          if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+              type: 'OFFLINE_SESSION',
+              active: Boolean(active),
+              ts: Date.now(),
+            });
+          }
+        }
+      }
     }
   };
 
@@ -46,7 +70,6 @@ export default function LoginPage() {
     const phoneToUse = targetPhone || savedPhone;
     if (!phoneToUse) return;
     setError('');
-    setLoading(true);
 
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('manual_logout');
@@ -56,6 +79,8 @@ export default function LoginPage() {
       handleOfflineLogin();
       return;
     }
+
+    setLoading(true);
 
     try {
       const res = await fetch('/api/auth/auto-login', {
@@ -80,14 +105,15 @@ export default function LoginPage() {
     } catch (err) {
       const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
-      if (isNetworkErr && (storedPhone || storedToken || phoneToUse)) {
+      if (isNetworkErr && (storedPhone || storedRole || storedToken || phoneToUse)) {
         handleOfflineLogin();
         return;
       }
 
-      if (storedToken) {
+      if (storedRole || storedPhone || storedToken) {
         setShowOfflineOption(true);
       }
       setError(err.message || 'Ошибка подключения');
@@ -107,18 +133,30 @@ export default function LoginPage() {
         if (typeof window !== 'undefined') {
           localStorage.removeItem('auth_token');
           localStorage.removeItem('auth_role');
+          localStorage.removeItem('offline_session');
+          localStorage.removeItem('offline_session_ts');
         }
       }
 
       const saved = localStorage.getItem('auth_phone');
       const token = localStorage.getItem('auth_token');
+      const role = localStorage.getItem('auth_role');
 
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
       }
-      if (token && typeof window !== 'undefined' && !navigator.onLine) {
-        setShowOfflineOption(true);
+
+      const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+      if (isOffline) {
+        if (saved || role || token) {
+          setShowOfflineOption(true);
+        }
+      }
+
+      const offlineSessionActive = localStorage.getItem('offline_session') === '1';
+      if (offlineSessionActive && isOffline) {
+        notifySwOfflineSession(true);
       }
     } catch (e) {
       // localStorage error fallback
@@ -128,7 +166,6 @@ export default function LoginPage() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
 
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('manual_logout');
@@ -139,11 +176,14 @@ export default function LoginPage() {
 
     if (isNetworkOffline) {
       const storedPhone = localStorage.getItem('auth_phone');
-      if (storedPhone && cleanPhone && storedPhone === cleanPhone) {
+      const storedRole = localStorage.getItem('auth_role');
+      if ((storedPhone && cleanPhone && storedPhone === cleanPhone) || storedRole) {
         handleOfflineLogin();
         return;
       }
     }
+
+    setLoading(true);
 
     try {
       const res = await fetch('/api/auth/login', {
@@ -164,9 +204,10 @@ export default function LoginPage() {
     } catch (err) {
       const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
-      if (isNetworkErr && (storedPhone || storedToken) && cleanPhone && storedPhone === cleanPhone) {
+      if (isNetworkErr && (storedPhone || storedRole || storedToken)) {
         handleOfflineLogin();
         return;
       }
