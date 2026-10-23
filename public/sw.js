@@ -181,6 +181,9 @@ self.addEventListener('message', (event) => {
 // === FETCH: умное кэширование ===
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (!request.url.startsWith('http://') && !request.url.startsWith('https://')) {
+    return;
+  }
   const url = new URL(request.url);
 
   // === ФАЙЛЫ / ИЗОБРАЖЕНИЯ GET /api/files/* : Network-First с гарантией сохранения MIME для iOS Safari ===

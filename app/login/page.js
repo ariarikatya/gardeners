@@ -52,12 +52,15 @@ export default function LoginPage() {
 
   const redirectByRole = (role, isOffline = false) => {
     notifySwOfflineSession(isOffline);
-    if (role === 'ADMIN') {
-      router.push('/admin');
-    } else if (role === 'LEADER') {
-      router.push('/leader');
+    const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
+    if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
+      if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
+        window.location.assign(rolePath);
+      } else {
+        router.push(rolePath);
+      }
     } else {
-      router.push('/gardener');
+      router.push(rolePath);
     }
   };
 

@@ -14,6 +14,7 @@ export default function BuildVersionWatcher() {
     let isMounted = true;
 
     const checkServerVersion = async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       try {
         const res = await fetch(`/api/version?t=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) return;
