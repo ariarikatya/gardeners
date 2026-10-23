@@ -17,44 +17,36 @@ Deployment notes — scheduled tasks and VK notifications
 
 ## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
 
-Автоматическое обновление Google Таблиц выполняется каждые 60 минут.
+Автоматическое обновление Google Таблиц выполняется каждые 60 минут с помощью серверного таймера `systemd` (`sync-sheets.timer` и `sync-sheets.service`).
 
-### Основной способ: GitHub Actions Workflow
-В репозитории настроен автоматический GitHub Actions workflow (`.github/workflows/sheets-sync.yml`), который каждый час вызывает `POST /api/admin/sync-sheets-cron`.
+### Настройка и запуск таймера на сервере
 
-**Необходимые Secrets в репозитории GitHub (Settings → Secrets and variables → Actions):**
-- `SITE_URL`: Базовый URL приложения (например `https://anemonagro.ru`)
-- `CRON_SECRET`: Секретный токен авторизации (должен совпадать с `CRON_SECRET` в `.env` на сервере)
-
----
-
-### Альтернатива на VPS: Системный crontab (curl)
-Добавьте запись в системный crontab на VPS (`crontab -e`):
-```bash
-0 * * * * curl -s -X POST -H "x-cron-secret: YOUR_CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
-```
-
----
-
-### Альтернатива на VPS: Systemd Timer (`scripts/sync-sheets.js`)
-Для запуска прямой синхронизации через автономный скрипт на сервере под управлением `systemd`:
-
-1. Скопируйте файлы юнитов:
+1. Скопируйте файлы юнитов в системную директорию:
    ```bash
-   sudo cp deploy/systemd/sync-sheets.service /etc/systemd/system/
-   sudo cp deploy/systemd/sync-sheets.timer /etc/systemd/system/
+   sudo cp deploy/systemd/sync-sheets.* /etc/systemd/system/
    ```
-2. Убедитесь, что `/etc/gardening-site.env` содержит `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_KEY` и `GOOGLE_SHEET_ID`.
-3. Включите и запустите таймер:
+
+2. Убедитесь, что `/etc/gardening-site.env` (или `.env`) содержит переменные `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_KEY` и `GOOGLE_SHEET_ID`.
+
+3. Перезагрузите конфигурацию systemd и запустите таймер:
    ```bash
    sudo systemctl daemon-reload
    sudo systemctl enable --now sync-sheets.timer
    ```
-4. Проверьте статус запуска:
+
+4. Выполните команду для проверки активных таймеров:
    ```bash
-   systemctl list-timers | grep sync-sheets
+   sudo systemctl list-timers
+   ```
+
+5. Для проверки логов выполнения службы:
+   ```bash
    journalctl -u sync-sheets.service -n 20 --no-pager
    ```
+
+> **ВАЖНО:** Администратор после деплоя обязан вручную включить таймер командами из README, иначе почасовой синхронизации не будет.
+
+Эндпоинт `app/api/admin/sync-sheets-cron/route.js` (защищён заголовком `x-cron-secret` или правами ADMIN/LEADER) принимает запросы только от администратора вручную (`curl` с `x-cron-secret`), GitHub Actions его больше не вызывает.
 
 Дополнительно (страховка на клиенте): при открытии страницы `/admin` браузер диспетчера проверяет время последней синхронизации в `localStorage` (`last_sheets_sync_ts`). Если прошло > 60 минут, выполняется фоновая синхронизация без дублирования одновременных вызовов.
 
@@ -76,27 +68,33 @@ Deployment notes — scheduled tasks and VK notifications
    VAPID_PRIVATE_KEY="YOUR_VAPID_PRIVATE_KEY"
    VAPID_SUBJECT="mailto:admin@example.com"
    CRON_SECRET="YOUR_CRON_SECRET"
+   GOOGLE_SERVICE_ACCOUNT_KEY="YOUR_JSON_KEY"
+   GOOGLE_SHEET_ID="YOUR_SHEET_ID"
    ```
 
 2. **Скопировать systemd-юниты и включить таймер**:
    ```bash
    sudo cp deploy/systemd/run-scheduled.service /etc/systemd/system/
    sudo cp deploy/systemd/run-scheduled.timer /etc/systemd/system/
+   sudo cp deploy/systemd/sync-sheets.* /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl reset-failed run-scheduled.service
    sudo systemctl enable --now run-scheduled.timer
+   sudo systemctl enable --now sync-sheets.timer
    ```
 
 3. **Выполнить проверочные команды**:
    ```bash
-   # Проверка статуса таймера и времени следующего запуска:
-   systemctl list-timers | grep run-scheduled
+   # Проверка статуса таймеров:
+   systemctl list-timers
 
    # Проверка статуса службы:
    systemctl status run-scheduled.service
+   systemctl status sync-sheets.service
 
    # Просмотр системных логов планировщика:
    journalctl -u run-scheduled.service -n 50 --no-pager
+   journalctl -u sync-sheets.service -n 50 --no-pager
    ```
 
 ## Установка серверного планировщика (systemd timer для напоминаний)

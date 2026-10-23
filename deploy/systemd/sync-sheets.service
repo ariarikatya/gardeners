@@ -1,18 +1,19 @@
 # Systemd service for Google Sheets hourly sync
+# Переменные GOOGLE_SERVICE_ACCOUNT_KEY и GOOGLE_SHEET_ID берутся из /etc/gardening-site.env
+# Copy this file to /etc/systemd/system/sync-sheets.service and adjust user/paths if needed.
+
 [Unit]
 Description=Hourly Google Sheets sync for Gardening site
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=root
 WorkingDirectory=/opt/anemon
 Environment=TZ=Europe/Moscow
 EnvironmentFile=/etc/gardening-site.env
 ExecStart=/usr/bin/env node /opt/anemon/scripts/sync-sheets.js
-Restart=on-failure
-RestartSec=60
 
 [Install]
 WantedBy=multi-user.target

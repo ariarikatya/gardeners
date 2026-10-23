@@ -1,10 +1,15 @@
 # Systemd timer to run sync-sheets.service hourly
+# Copy to /etc/systemd/system/sync-sheets.timer and enable with:
+# sudo systemctl daemon-reload
+# sudo systemctl enable --now sync-sheets.timer
+
 [Unit]
-Description=Run Google Sheets sync hourly
+Description=Timer to run Google Sheets sync hourly
 
 [Timer]
-OnCalendar=*-*-* *:00:00
+OnCalendar=hourly
 Persistent=true
+Unit=sync-sheets.service
 
 [Install]
 WantedBy=timers.target

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-359a60a';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-bad56f8';
 const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -59,20 +59,35 @@ self.addEventListener('activate', (event) => {
 });
 
 let isOfflineSessionActive = false;
+const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 
-async function getGardenerCacheAge() {
+async function isOfflineSession() {
+  if (isOfflineSessionActive) return true;
   try {
     const cache = await caches.open(CACHE_NAME);
-    const metaRes = await cache.match('/gardener-meta');
+    const sessionRes = await cache.match('/offline-session');
+    if (sessionRes) {
+      isOfflineSessionActive = true;
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+async function getPageCacheAge(pathname) {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const metaKey = pathname + '-meta';
+    const metaRes = await cache.match(metaKey);
     if (metaRes) {
       const data = await metaRes.json();
       if (data && data.ts) {
         return Date.now() - data.ts;
       }
     }
-    const cachedGardener = await cache.match('/gardener');
-    if (cachedGardener) {
-      const dateHeader = cachedGardener.headers.get('Date');
+    const cachedPage = await cache.match(pathname);
+    if (cachedPage) {
+      const dateHeader = cachedPage.headers.get('Date');
       if (dateHeader) {
         const dateMs = new Date(dateHeader).getTime();
         if (!isNaN(dateMs)) return Date.now() - dateMs;
@@ -90,6 +105,15 @@ self.addEventListener('message', (event) => {
       self.skipWaiting();
     } else if (event.data.type === 'OFFLINE_SESSION') {
       isOfflineSessionActive = Boolean(event.data.active);
+      caches.open(CACHE_NAME).then((cache) => {
+        if (event.data.active) {
+          cache.put('/offline-session', new Response(JSON.stringify({ active: true, ts: event.data.ts || Date.now() }), {
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        } else {
+          cache.delete('/offline-session');
+        }
+      }).catch(() => {});
     }
   }
 });
@@ -170,7 +194,7 @@ self.addEventListener('fetch', (event) => {
           const netRes = await fetchWithTimeout(request, 5000);
           if (netRes) {
             // Если сервер ответил редиректом (например, middleware редиректит неавторизованного на /login)
-            // ВОЗВРАЩАЕМ РЕДИРЕКТ СРАЗУ, БЕЗ ФОЛЛБЭКОВ НА КЭШ /gardener!
+            // ВОЗВРАЩАЕМ РЕДИРЕКТ СРАЗУ, БЕЗ ФОЛЛБЭКОВ НА КЭШ!
             if (netRes.redirected || (netRes.status >= 300 && netRes.status < 400)) {
               return netRes;
             }
@@ -178,15 +202,18 @@ self.addEventListener('fetch', (event) => {
               const resClone = netRes.clone();
               caches.open(CACHE_NAME).then((cache) => {
                 try {
+                  const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
+                    headers: { 'Content-Type': 'application/json' }
+                  });
                   if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                     cache.put('/gardener', resClone);
-                    cache.put('/gardener-meta', new Response(JSON.stringify({ ts: Date.now() }), {
-                      headers: { 'Content-Type': 'application/json' }
-                    }));
+                    cache.put('/gardener-meta', metaRes);
                   } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
                     cache.put('/admin', resClone);
+                    cache.put('/admin-meta', metaRes);
                   } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
                     cache.put('/leader', resClone);
+                    cache.put('/leader-meta', metaRes);
                   } else if (url.pathname === '/login' || url.pathname.startsWith('/login')) {
                     cache.put('/login', resClone);
                   }
@@ -208,24 +235,28 @@ self.addEventListener('fetch', (event) => {
           }
         }
 
-        const cachedGardener = await caches.match('/gardener');
-        const age = await getGardenerCacheAge();
-        const MAX_AGE_24H = 24 * 60 * 60 * 1000;
+        const isOfflineActive = await isOfflineSession();
 
-        if (isOfflineSessionActive && cachedGardener && age < MAX_AGE_24H && (url.pathname === '/gardener' || url.pathname.startsWith('/gardener'))) {
-          return cachedGardener;
+        if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+          const cachedGardener = await caches.match('/gardener');
+          const age = await getPageCacheAge('/gardener');
+          if (cachedGardener && cachedGardener.ok && cachedGardener.status === 200 && age < MAX_AGE_24H) {
+            return cachedGardener;
+          }
         }
 
         if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
           const cachedAdmin = await caches.match('/admin');
-          if (cachedAdmin && cachedAdmin.ok && cachedAdmin.status === 200) {
+          const age = await getPageCacheAge('/admin');
+          if (cachedAdmin && cachedAdmin.ok && cachedAdmin.status === 200 && age < MAX_AGE_24H) {
             return cachedAdmin;
           }
         }
 
         if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
           const cachedLeader = await caches.match('/leader');
-          if (cachedLeader && cachedLeader.ok && cachedLeader.status === 200) {
+          const age = await getPageCacheAge('/leader');
+          if (cachedLeader && cachedLeader.ok && cachedLeader.status === 200 && age < MAX_AGE_24H) {
             return cachedLeader;
           }
         }

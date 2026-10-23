@@ -36,31 +36,17 @@ module.exports = {
 
 ## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
 
-Синхронизация Google Таблиц выполняется каждые 60 минут.
+Синхронизация Google Таблиц выполняется каждые 60 минут с помощью серверного таймера `systemd`.
 
-### Основной вариант: GitHub Actions Workflow
-Workflow `.github/workflows/sheets-sync.yml` автоматически каждый час выполняет запрос к `POST /api/admin/sync-sheets-cron`.
+### Настройка Systemd Timer (`node scripts/sync-sheets.js`):
+```bash
+sudo cp deploy/systemd/sync-sheets.* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sync-sheets.timer
+sudo systemctl list-timers
+```
 
-**Параметры в GitHub Actions Secrets:**
-- `SITE_URL`: `https://anemonagro.ru`
-- `CRON_SECRET`: секретный токен, совпадающий с `CRON_SECRET` в `.env`.
-
----
-
-### Варианты для VPS:
-
-1. **Системный crontab (curl):**
-   ```bash
-   0 * * * * curl -s -X POST -H "x-cron-secret: YOUR_CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
-   ```
-
-2. **Systemd Timer (`node scripts/sync-sheets.js`):**
-   ```bash
-   sudo cp deploy/systemd/sync-sheets.service /etc/systemd/system/
-   sudo cp deploy/systemd/sync-sheets.timer /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now sync-sheets.timer
-   ```
+> **Обратите внимание:** Администратор после деплоя обязан вручную включить таймер командами выше, иначе почасовой синхронизации не будет.
 
 На клиенте при открытии страницы `/admin` также действует авто-синхронизация, если с последней прошло >60 минут.
 
@@ -85,7 +71,7 @@ sleep 3 && pm2 logs anemon --lines 20   # Убедиться в отсутств
 
 1. **Никогда не выполняйте `rm -rf .next` без последующего `npm run build` до перезапуска `pm2`.**
    Если перезапустить `pm2` при отсутствии директории `.next` или с недостроенным билдом, Next.js упадет с ошибкой:
-   `Error: Could not find a production build in the '.next' directory.`
+   `Error: Could not find a production build in the .next directory.`
 
 2. **Не перезапускайте `pm2` во время сборки `npm run build`.**
    Это вызывает смешение чанков и рантайм-краши App Router (`TypeError: Cannot read properties of null (reading 'digest')` или `Failed to find Server Action`).

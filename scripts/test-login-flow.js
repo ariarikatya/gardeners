@@ -186,6 +186,25 @@ async function runLoginFlowTests() {
   assert(apiFetchCode.includes("if (savedPhone)"), 'apiFetch.js must check savedPhone before calling auto-login');
   console.log('✅ Test 5 Passed! apiFetch.js checks savedPhone before retrying.');
 
+  // Test 6: Instant offline auto-login & SW session notification in app/login/page.js
+  console.log('Test 6: Verifying offline auto-login & SW session notification in app/login/page.js...');
+  assert(loginPageCode.includes("!navigator.onLine"), 'login/page.js must check !navigator.onLine');
+  assert(loginPageCode.includes("handleOfflineLogin()"), 'login/page.js must call handleOfflineLogin when offline');
+  assert(loginPageCode.includes("navigator.serviceWorker.ready"), 'login/page.js must await navigator.serviceWorker.ready in notifySwOfflineSession');
+  assert(loginPageCode.includes("localStorage.setItem('offline_session'"), 'login/page.js must set offline_session in localStorage');
+  console.log('✅ Test 6 Passed! Offline auto-login & SW notification logic verified.');
+
+  // Test 7: SW offline session persistence & cache age checks in public/sw.js
+  console.log('Test 7: Verifying SW offline session persistence in public/sw.js...');
+  const swPath = path.resolve('public/sw.js');
+  const swCode = fs.readFileSync(swPath, 'utf8');
+  assert(swCode.includes("OFFLINE_SESSION"), 'sw.js must handle OFFLINE_SESSION messages');
+  assert(swCode.includes("cache.put('/offline-session'"), 'sw.js must persist offline session in cache /offline-session');
+  assert(swCode.includes("isOfflineSession()"), 'sw.js must check cached offline session');
+  assert(swCode.includes("getPageCacheAge"), 'sw.js must calculate page cache age');
+  assert(swCode.includes("MAX_AGE_24H"), 'sw.js must enforce MAX_AGE_24H cache freshness');
+  console.log('✅ Test 7 Passed! SW offline session persistence & cache age checks verified.');
+
   console.log('\n🎉 ALL LOGIN FLOW & ONBOARDING TESTS PASSED SUCCESSFULLY!');
 }
 

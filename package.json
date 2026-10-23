@@ -31,7 +31,8 @@
     "test:yandex-upload-isolation": "node scripts/test-yandex-upload-isolation.js",
     "test:jwt": "node scripts/test-jwt-sliding.js",
     "test:logout": "node scripts/test-logout.js",
-    "test:login-flow": "node scripts/test-login-flow.js"
+    "test:login-flow": "node scripts/test-login-flow.js",
+    "test:offline-login": "node scripts/test-offline-saved-phone-login.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

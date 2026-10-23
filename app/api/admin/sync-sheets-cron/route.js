@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
 import { syncOrdersToSheet } from '@/lib/syncSheets';
 
+// Эндпоинт для ручного запуска и диагностики синхронизации Google Таблиц.
+// Защищён заголовком x-cron-secret или сессией администратора/руководителя (ADMIN/LEADER).
 async function checkAdmin(req) {
   const token = req.cookies.get('token')?.value;
   if (!token) return false;
