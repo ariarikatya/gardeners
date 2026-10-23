@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-0d88963';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-22abd6d';
 const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -40,11 +40,39 @@ async function fetchWithTimeout(request, timeoutMs = 5000) {
   }
 }
 
-// === INSTALL: сразу берём контроль и кэшируем APP_SHELL ===
+// Helper for checking valid cached response
+function normalizeCachedResponse(res) {
+  if (res && res.ok && res.status === 200 && !res.redirected && res.type !== 'opaque') {
+    return res;
+  }
+  return null;
+}
+
+// Helper for caching valid responses only
+function safeCachePut(cacheName, request, response) {
+  if (!response || !response.ok || response.status >= 300 || response.redirected || response.type === 'opaque') {
+    return;
+  }
+  caches.open(cacheName).then((cache) => {
+    try {
+      cache.put(request, response.clone());
+    } catch (e) {}
+  }).catch(() => {});
+}
+
+// === INSTALL: сразу берём контроль и безопасно кэшируем APP_SHELL без addAll ===
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
+    Promise.all(
+      APP_SHELL.map(async (url) => {
+        try {
+          const req = new Request(url, { credentials: 'include', redirect: 'follow' });
+          const res = await fetch(req);
+          safeCachePut(CACHE_NAME, new Request(url), res);
+        } catch (e) {}
+      })
+    )
   );
 });
 
@@ -118,7 +146,7 @@ async function getPageCacheAge(pathname) {
   return Infinity;
 }
 
-// === MESSAGE: ручное обновление и флаг офлайн-сессии ===
+// === MESSAGE: ручное обновление, роль и флаг офлайн-сессии ===
 self.addEventListener('message', (event) => {
   if (event.data) {
     if (event.data.type === 'SKIP_WAITING') {
@@ -127,28 +155,28 @@ self.addEventListener('message', (event) => {
       isOfflineSessionActive = Boolean(event.data.active);
       caches.open(CACHE_NAME).then((cache) => {
         if (event.data.active) {
-          cache.put('/offline-session', new Response(JSON.stringify({ active: true, ts: event.data.ts || Date.now() }), {
+          const payload = { active: true, ts: event.data.ts || Date.now() };
+          if (event.data.role) payload.role = event.data.role;
+          cache.put('/offline-session', new Response(JSON.stringify(payload), {
             headers: { 'Content-Type': 'application/json' }
           }));
         } else {
           cache.delete('/offline-session');
         }
       }).catch(() => {});
+    } else if (event.data.type === 'OFFLINE_ROLE') {
+      caches.open(CACHE_NAME).then((cache) => {
+        if (event.data.role) {
+          cache.put('/offline-role', new Response(JSON.stringify({ role: event.data.role, ts: Date.now() }), {
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        } else {
+          cache.delete('/offline-role');
+        }
+      }).catch(() => {});
     }
   }
 });
-
-// Helper for caching valid responses only
-function safeCachePut(cacheName, request, response) {
-  if (!response || !response.ok || response.status >= 300 || response.redirected || response.type === 'opaque') {
-    return;
-  }
-  caches.open(cacheName).then((cache) => {
-    try {
-      cache.put(request, response.clone());
-    } catch (e) {}
-  }).catch(() => {});
-}
 
 // === FETCH: умное кэширование ===
 self.addEventListener('fetch', (event) => {
@@ -179,7 +207,7 @@ self.addEventListener('fetch', (event) => {
         } catch (err) {
           const cached = await caches.match(request);
           if (cached) return cached;
-          throw err;
+          return new Response('File unavailable offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
         }
       })()
     );
@@ -197,7 +225,10 @@ self.addEventListener('fetch', (event) => {
             try {
               return await fetch(request.clone());
             } catch (err2) {
-              throw err2;
+              return new Response(
+                JSON.stringify({ offline: true, error: 'no-internet' }),
+                { status: 503, headers: { 'Content-Type': 'application/json' } }
+              );
             }
           }
         })()
@@ -247,57 +278,55 @@ self.addEventListener('fetch', (event) => {
         }
 
         // Кэш-фоллбэки ТОЛЬКО при сбое сети (оффлайн):
-        const isRootRequest = url.pathname === '/';
-        if (isRootRequest) {
-          const cachedLogin = await caches.match('/login');
-          if (cachedLogin && cachedLogin.ok && cachedLogin.status === 200) {
-            return cachedLogin;
+        try {
+          const cache = await caches.open(CACHE_NAME);
+
+          // a. Определить роль из /offline-role или /offline-session
+          let userRole = null;
+          try {
+            const roleRes = await cache.match('/offline-role');
+            if (roleRes) {
+              const roleData = await roleRes.clone().json();
+              if (roleData && roleData.role) userRole = roleData.role;
+            }
+            if (!userRole) {
+              const sessionRes = await cache.match('/offline-session');
+              if (sessionRes) {
+                const sessionData = await sessionRes.clone().json();
+                if (sessionData && sessionData.role) userRole = sessionData.role;
+              }
+            }
+          } catch (e) {}
+
+          let rolePath = null;
+          if (userRole === 'ADMIN') rolePath = '/admin';
+          else if (userRole === 'LEADER') rolePath = '/leader';
+          else if (userRole === 'GARDENER') rolePath = '/gardener';
+          else if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
+            rolePath = url.pathname;
           }
-          return new Response(OFFLINE_HTML, {
-            status: 200,
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          });
-        }
 
-        const isLoginRequest = url.pathname === '/login' || url.pathname.startsWith('/login');
-        if (isLoginRequest) {
-          const cachedLogin = await caches.match('/login');
-          if (cachedLogin && cachedLogin.ok && cachedLogin.status === 200) {
-            return cachedLogin;
+          // b. Если роль есть и соответствующая страница в кэше и проходит normalizeCachedResponse и возраст < MAX_AGE_24H
+          if (rolePath) {
+            const cacheKey = request.method !== 'GET' ? new Request(rolePath, { method: 'GET' }) : rolePath;
+            const cachedPage = normalizeCachedResponse(await cache.match(cacheKey));
+            const age = await getPageCacheAge(rolePath);
+            if (cachedPage && age < MAX_AGE_24H) {
+              return cachedPage;
+            }
           }
-        }
 
-        const isOfflineActive = await isOfflineSession();
-
-        if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
-          const cachedGardener = await caches.match('/gardener');
-          const age = await getPageCacheAge('/gardener');
-          if (cachedGardener && cachedGardener.ok && cachedGardener.status === 200 && age < MAX_AGE_24H) {
-            return cachedGardener;
+          // c. Иначе для GET-навигации вернуть caches.match('/login') (если годна)
+          if (request.method === 'GET') {
+            const loginKey = new Request('/login', { method: 'GET' });
+            const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
+            if (cachedLogin) {
+              return cachedLogin;
+            }
           }
-        }
+        } catch (e) {}
 
-        if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
-          const cachedAdmin = await caches.match('/admin');
-          const age = await getPageCacheAge('/admin');
-          if (cachedAdmin && cachedAdmin.ok && cachedAdmin.status === 200 && age < MAX_AGE_24H) {
-            return cachedAdmin;
-          }
-        }
-
-        if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
-          const cachedLeader = await caches.match('/leader');
-          const age = await getPageCacheAge('/leader');
-          if (cachedLeader && cachedLeader.ok && cachedLeader.status === 200 && age < MAX_AGE_24H) {
-            return cachedLeader;
-          }
-        }
-
-        const exactCached = await caches.match(request);
-        if (exactCached && exactCached.ok && exactCached.status === 200) {
-          return exactCached;
-        }
-
+        // d/e. Финальный фоллбэк: OFFLINE_HTML
         return new Response(OFFLINE_HTML, {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -310,30 +339,40 @@ self.addEventListener('fetch', (event) => {
   // === СТАТИКА _next/static/ (с хэшами): Cache First ===
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached && cached.ok && cached.status === 200) return cached;
-        return fetch(request).then((res) => {
+      (async () => {
+        try {
+          const cached = await caches.match(request);
+          if (cached && cached.ok && cached.status === 200) return cached;
+          const res = await fetch(request);
           if (res && res.status === 200 && res.ok && !res.redirected) {
             safeCachePut(CACHE_NAME, request, res);
           }
           return res;
-        });
-      })
+        } catch (err) {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          return new Response('Static asset unavailable', { status: 503 });
+        }
+      })()
     );
     return;
   }
 
   // === Остальное: Network First ===
   event.respondWith(
-    fetch(request)
-      .then((res) => {
-        // Кэшировать только успешные (HTTP 200, res.ok, не редирект) ответы
+    (async () => {
+      try {
+        const res = await fetch(request);
         if (res && res.status === 200 && res.ok && !res.redirected && res.type !== 'error') {
           safeCachePut(CACHE_NAME, request, res);
         }
         return res;
-      })
-      .catch(() => caches.match(request))
+      } catch (err) {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        return new Response('Unavailable offline', { status: 503 });
+      }
+    })()
   );
 });
 

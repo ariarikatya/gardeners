@@ -33,7 +33,8 @@
     "test:logout": "node scripts/test-logout.js",
     "test:login-flow": "node scripts/test-login-flow.js",
     "test:offline-login": "node scripts/test-offline-saved-phone-login.js",
-    "test:sw-appshell": "node scripts/test-sw-appshell.js"
+    "test:sw-appshell": "node scripts/test-sw-appshell.js",
+    "test:sw-offline-navigate": "node scripts/test-sw-offline-navigate.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
