@@ -569,7 +569,7 @@ export default function AdminDashboard() {
       if (!lastSync || (now - Number(lastSync) > 60 * 60 * 1000)) {
         syncInFlightRef.current = true;
         try {
-          const res = await fetch('/api/admin/sync-sheets', { method: 'POST' });
+          const res = await apiFetch('/api/admin/sync-sheets', { method: 'POST' });
           if (res.ok) {
             localStorage.setItem('last_sheets_sync_ts', String(now));
           }
@@ -2992,12 +2992,25 @@ export default function AdminDashboard() {
                                 </button>
                                 <button
                                   onClick={async () => {
-                                    await fetch('/api/admin/webleads', {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ id: lead.id, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null })
-                                    });
-                                    fetchData();
+                                    const payload = { id: lead.id, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null };
+                                    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                                      setWebLeads(prev => prev.map(l => l.id === lead.id ? { ...l, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null } : l));
+                                      await enqueueAction({
+                                        actionType: 'ADMIN_WEBLEAD_PUT',
+                                        url: '/api/admin/webleads',
+                                        method: 'PUT',
+                                        payload,
+                                        scope: 'admin'
+                                      });
+                                      await refreshQueueCount();
+                                    } else {
+                                      await fetch('/api/admin/webleads', {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(payload)
+                                      });
+                                      fetchData();
+                                    }
                                   }}
                                   className="text-[11px] bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-1 rounded"
                                 >
