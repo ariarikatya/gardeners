@@ -37,7 +37,7 @@ export async function PUT(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -57,7 +57,7 @@ export async function PUT(req) {
 
   const lead = await prisma.webLead.update({ where: { id }, data });
   const resBody = { lead };
-  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
   return NextResponse.json(resBody);
 }
 
@@ -66,7 +66,7 @@ export async function DELETE(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -111,7 +111,7 @@ export async function DELETE(req) {
     console.log('✅ [DELETE WEBLEAD] Заявка удалена из базы данных');
 
     const resBody = { success: true };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (error) {
     console.error('💥 [DELETE WEBLEAD] Критическая ошибка:', error);

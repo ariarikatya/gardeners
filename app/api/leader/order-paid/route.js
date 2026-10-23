@@ -16,7 +16,7 @@ export async function PUT(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -45,7 +45,7 @@ export async function PUT(req) {
 
     const order = await prisma.order.update({ where: { id }, data: updateData });
     const resBody = { order };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (err) {
     console.error(err);

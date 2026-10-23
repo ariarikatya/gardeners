@@ -240,6 +240,7 @@ export default function AdminDashboard() {
   // Оффлайн состояние и очередь
   const [isOffline, setIsOffline] = useState(false);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const pendingCountRef = useRef(0);
   const [conflictItems, setConflictItems] = useState([]);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
@@ -403,7 +404,9 @@ export default function AdminDashboard() {
   const refreshQueueCount = async () => {
     try {
       const stats = await getQueueStats('admin');
-      setPendingQueueCount(stats.pending + stats.syncing);
+      const count = stats.pending + stats.syncing;
+      setPendingQueueCount(count);
+      pendingCountRef.current = count;
       setConflictItems(stats.conflictItems);
       return stats;
     } catch (e) {
@@ -478,7 +481,7 @@ export default function AdminDashboard() {
     }, 30000);
 
     const handleBeforeUnload = (e) => {
-      if (pendingQueueCount > 0) {
+      if (pendingCountRef.current > 0) {
         e.preventDefault();
         e.returnValue = 'Есть неотправленные изменения! Они отправятся при следующем подключении.';
         return e.returnValue;
@@ -549,9 +552,18 @@ export default function AdminDashboard() {
   }, [currentMonth, startFromToday]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      checkSheetUrl();
+    }
+  }, []);
+
+  useEffect(() => {
     const triggerAutoSync = async () => {
       if (typeof navigator === 'undefined' || !navigator.onLine) return;
       if (syncInFlightRef.current) return;
+      const role = localStorage.getItem('auth_role');
+      if (role !== 'ADMIN' && role !== 'LEADER') return;
+
       const lastSync = localStorage.getItem('last_sheets_sync_ts');
       const now = Date.now();
       if (!lastSync || (now - Number(lastSync) > 60 * 60 * 1000)) {
@@ -739,7 +751,7 @@ export default function AdminDashboard() {
     if (isOnlineState) {
       sheetUrl = await checkSheetUrl();
     } else {
-      sheetUrl = localStorage.getItem('cached_sheet_url') || null;
+      sheetUrl = localStorage.getItem('cached_sheet_url') || process.env.NEXT_PUBLIC_GOOGLE_SHEET_URL || null;
     }
 
     if (isOnlineState && sheetUrl) {

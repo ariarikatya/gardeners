@@ -34,7 +34,7 @@ export async function POST(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -56,7 +56,7 @@ export async function POST(req) {
       data: { date: dayDate, gardenerId },
     });
     const resBody = { dayOff };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Этот день уже отмечен как выходной' }, { status: 400 });
@@ -68,7 +68,7 @@ export async function DELETE(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -76,7 +76,7 @@ export async function DELETE(req) {
   try {
     await prisma.dayOff.delete({ where: { id } });
     const resBody = { success: true };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Не удалось убрать отметку' }, { status: 400 });

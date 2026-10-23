@@ -39,7 +39,7 @@ export async function POST(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -83,7 +83,7 @@ export async function POST(req) {
     }
 
     const resBody = { success: true, isBlocked };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (error) {
     console.error('Error toggling block day:', error);

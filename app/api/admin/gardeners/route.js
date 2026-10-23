@@ -27,7 +27,7 @@ export async function POST(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -54,7 +54,7 @@ export async function POST(req) {
     });
 
     const resBody = { gardener };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Садовник с таким телефоном уже существует' }, { status: 400 });
@@ -66,7 +66,7 @@ export async function PUT(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -168,7 +168,7 @@ export async function PUT(req) {
     });
 
     const resBody = { gardener };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (e) {
     console.error('Gardener PUT error:', e);
@@ -185,13 +185,13 @@ export async function DELETE(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
   const { id } = await req.json();
   await prisma.gardener.delete({ where: { id } });
   const resBody = { success: true };
-  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
   return NextResponse.json(resBody);
 }

@@ -229,6 +229,15 @@ model ClientPushLog {
   @@index([userId])
   @@index([createdAt])
 }
+
+model IdempotencyKey {
+  key       String   @id
+  status    Int
+  body      Json
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
 model PushClientLog {
   id        String   @id @default(cuid())
   userId    String?

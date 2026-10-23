@@ -23,7 +23,7 @@ export async function POST(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
@@ -33,7 +33,7 @@ export async function POST(req) {
   try {
     const service = await prisma.service.create({ data: { name: name.trim() } });
     const resBody = { service };
-    if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
     return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Такая услуга уже есть в списке' }, { status: 400 });
@@ -45,13 +45,13 @@ export async function DELETE(req) {
 
   const idempotencyKey = getIdempotencyKey(req);
   if (idempotencyKey) {
-    const cached = getCachedIdempotencyResponse(idempotencyKey);
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
     if (cached) return NextResponse.json(cached.body, { status: cached.status });
   }
 
   const { id } = await req.json();
   await prisma.service.delete({ where: { id } });
   const resBody = { success: true };
-  if (idempotencyKey) setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
   return NextResponse.json(resBody);
 }

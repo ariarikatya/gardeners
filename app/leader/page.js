@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
@@ -90,6 +90,7 @@ export default function LeaderDashboard() {
   // Оффлайн состояние и очередь
   const [isOffline, setIsOffline] = useState(false);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const pendingCountRef = useRef(0);
   const [conflictItems, setConflictItems] = useState([]);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
 
@@ -115,7 +116,9 @@ export default function LeaderDashboard() {
   const refreshQueueCount = async () => {
     try {
       const stats = await getQueueStats('leader');
-      setPendingQueueCount(stats.pending + stats.syncing);
+      const count = stats.pending + stats.syncing;
+      setPendingQueueCount(count);
+      pendingCountRef.current = count;
       setConflictItems(stats.conflictItems);
       return stats;
     } catch (e) {
@@ -190,7 +193,7 @@ export default function LeaderDashboard() {
     }, 30000);
 
     const handleBeforeUnload = (e) => {
-      if (pendingQueueCount > 0) {
+      if (pendingCountRef.current > 0) {
         e.preventDefault();
         e.returnValue = 'Есть неотправленные изменения!';
         return e.returnValue;

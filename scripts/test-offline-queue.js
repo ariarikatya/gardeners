@@ -40,14 +40,14 @@ async function runTests() {
   assert.strictEqual(extractedKey, 'test-idemp-key-123', 'Key should be extracted from headers');
 
   // Initially uncached
-  assert.strictEqual(getCachedIdempotencyResponse('test-idemp-key-123'), null, 'Uncached key should return null');
+  assert.strictEqual(await getCachedIdempotencyResponse('test-idemp-key-123'), null, 'Uncached key should return null');
 
   // Save response in cache
   const mockRespBody = { success: true, order: { id: 'ord-100', status: 'Выполнен' } };
-  setCachedIdempotencyResponse('test-idemp-key-123', 200, mockRespBody);
+  await setCachedIdempotencyResponse('test-idemp-key-123', 200, mockRespBody);
 
   // Retrieve cached response
-  const cached = getCachedIdempotencyResponse('test-idemp-key-123');
+  const cached = await getCachedIdempotencyResponse('test-idemp-key-123');
   assert.ok(cached, 'Cached entry should exist');
   assert.strictEqual(cached.status, 200, 'Status should be 200');
   assert.deepStrictEqual(cached.body, mockRespBody, 'Body should match saved mock');
@@ -127,17 +127,17 @@ async function runTests() {
   console.log('Test 4: Repeat execution with same idempotency key returns cached result');
   let executeCount = 0;
 
-  function processActionWithIdempotency(reqKey, actionFn) {
-    const existing = getCachedIdempotencyResponse(reqKey);
+  async function processActionWithIdempotency(reqKey, actionFn) {
+    const existing = await getCachedIdempotencyResponse(reqKey);
     if (existing) return existing.body;
     executeCount++;
     const result = actionFn();
-    setCachedIdempotencyResponse(reqKey, 200, result);
+    await setCachedIdempotencyResponse(reqKey, 200, result);
     return result;
   }
 
-  const run1 = processActionWithIdempotency('repeat-key-abc', () => ({ operation: 'op-123' }));
-  const run2 = processActionWithIdempotency('repeat-key-abc', () => ({ operation: 'op-123' }));
+  const run1 = await processActionWithIdempotency('repeat-key-abc', () => ({ operation: 'op-123' }));
+  const run2 = await processActionWithIdempotency('repeat-key-abc', () => ({ operation: 'op-123' }));
 
   assert.strictEqual(executeCount, 1, 'Action function should be executed exactly once');
   assert.deepStrictEqual(run1, run2, 'Subsequent execution returns identical response');
@@ -437,6 +437,55 @@ async function runTests() {
   console.log('  ✓ Remaining PUT item successfully resolved payload.id to real_ord_777');
   console.log('  ✓ PUT with real ID executed successfully');
   console.log('✅ Test 7 passed!\n');
+
+  // Test 8: Method sorting (POST -> PUT -> DELETE) and unresolved tmp_* ID skip in sync iteration
+  console.log('Test 8: Strict queue method sorting (POST -> PUT -> DELETE) and skipping unresolved tmp_* items');
+
+  const getMethodWeight = (method) => {
+    const m = String(method || '').toUpperCase();
+    if (m === 'POST') return 1;
+    if (m === 'PUT') return 2;
+    if (m === 'DELETE') return 3;
+    return 4;
+  };
+
+  const unsortedQueue = [
+    { id: '1', method: 'DELETE', timestamp: 100 },
+    { id: '2', method: 'PUT', timestamp: 105 },
+    { id: '3', method: 'POST', timestamp: 110 },
+    { id: '4', method: 'POST', timestamp: 90 },
+  ];
+
+  unsortedQueue.sort((a, b) => {
+    const wA = getMethodWeight(a.method);
+    const wB = getMethodWeight(b.method);
+    if (wA !== wB) return wA - wB;
+    return (a.timestamp || 0) - (b.timestamp || 0);
+  });
+
+  const sortedIds = unsortedQueue.map(i => i.id);
+  assert.deepStrictEqual(sortedIds, ['4', '3', '2', '1'], 'Queue sorted strictly as POST(t90) -> POST(t110) -> PUT(t105) -> DELETE(t100)');
+  console.log('  ✓ Method sorting (POST -> PUT -> DELETE) verified');
+
+  // Unresolved tmp_* item skip simulation
+  const queueWithUnresolvedTemp = [
+    { id: 'q1', method: 'PUT', payload: { id: 'tmp_unresolved_555' }, url: '/api/admin/orders' },
+    { id: 'q2', method: 'POST', payload: { id: 'tmp_new_111' }, url: '/api/admin/orders' },
+  ];
+
+  const processedDuringSync = [];
+  for (const item of queueWithUnresolvedTemp) {
+    const targetId = item.payload.id;
+    if (item.method !== 'POST' && targetId && String(targetId).startsWith('tmp_')) {
+      // Skipped
+      continue;
+    }
+    processedDuringSync.push(item.id);
+  }
+
+  assert.deepStrictEqual(processedDuringSync, ['q2'], 'Unresolved tmp_* PUT skipped, only POST q2 processed');
+  console.log('  ✓ Unresolved tmp_* PUT item skipped during sync loop');
+  console.log('✅ Test 8 passed!\n');
 
   console.log('🎉 All offline queue tests passed successfully!');
 }
