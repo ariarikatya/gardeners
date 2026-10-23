@@ -47,7 +47,7 @@ export async function PUT(req) {
   const payload = auth.payload;
 
   const idempotencyKey = getIdempotencyKey(req);
-  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  const cached = await getCachedIdempotencyResponse(idempotencyKey);
   if (cached) {
     return NextResponse.json(cached.body, { status: cached.status });
   }
@@ -210,6 +210,6 @@ export async function PUT(req) {
   }
 
   const responseBody = { order: updated };
-  setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+  await setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
   return NextResponse.json(responseBody);
 }

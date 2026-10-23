@@ -15,6 +15,49 @@ Deployment notes — scheduled tasks and VK notifications
   - Основное окно карточек — 19:00 МСК. Хвост окна (19:00–20:59 МСК) подстраховывает вечерние задержки.
   - На каждый заказ отправляется СТРОГО не более одного напоминания в сутки (любого исхода), повтор возможен только на следующий день (идемпотентность обеспечена через `ClientPushLog`).
 
+## Почасовая синхронизация Google Таблиц (Google Sheets Hourly Sync)
+
+Автоматическое обновление Google Таблиц выполняется каждые 60 минут.
+
+### Основной способ: GitHub Actions Workflow
+В репозитории настроен автоматический GitHub Actions workflow (`.github/workflows/sheets-sync.yml`), который каждый час вызывает `POST /api/admin/sync-sheets-cron`.
+
+**Необходимые Secrets в репозитории GitHub (Settings → Secrets and variables → Actions):**
+- `SITE_URL`: Базовый URL приложения (например `https://anemonagro.ru`)
+- `CRON_SECRET`: Секретный токен авторизации (должен совпадать с `CRON_SECRET` в `.env` на сервере)
+
+---
+
+### Альтернатива на VPS: Системный crontab (curl)
+Добавьте запись в системный crontab на VPS (`crontab -e`):
+```bash
+0 * * * * curl -s -X POST -H "x-cron-secret: YOUR_CRON_SECRET" https://<ваш-домен>/api/admin/sync-sheets-cron
+```
+
+---
+
+### Альтернатива на VPS: Systemd Timer (`scripts/sync-sheets.js`)
+Для запуска прямой синхронизации через автономный скрипт на сервере под управлением `systemd`:
+
+1. Скопируйте файлы юнитов:
+   ```bash
+   sudo cp deploy/systemd/sync-sheets.service /etc/systemd/system/
+   sudo cp deploy/systemd/sync-sheets.timer /etc/systemd/system/
+   ```
+2. Убедитесь, что `/etc/gardening-site.env` содержит `DATABASE_URL`, `GOOGLE_SERVICE_ACCOUNT_KEY` и `GOOGLE_SHEET_ID`.
+3. Включите и запустите таймер:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now sync-sheets.timer
+   ```
+4. Проверьте статус запуска:
+   ```bash
+   systemctl list-timers | grep sync-sheets
+   journalctl -u sync-sheets.service -n 20 --no-pager
+   ```
+
+Дополнительно (страховка на клиенте): при открытии страницы `/admin` браузер диспетчера проверяет время последней синхронизации в `localStorage` (`last_sheets_sync_ts`). Если прошло > 60 минут, выполняется фоновая синхронизация без дублирования одновременных вызовов.
+
 ## Первый деплой на чистый сервер
 
 Пошаговые действия для настройки первого развертывания системы и планировщика reminders:
@@ -32,6 +75,7 @@ Deployment notes — scheduled tasks and VK notifications
    NEXT_PUBLIC_VAPID_PUBLIC_KEY="YOUR_VAPID_PUBLIC_KEY"
    VAPID_PRIVATE_KEY="YOUR_VAPID_PRIVATE_KEY"
    VAPID_SUBJECT="mailto:admin@example.com"
+   CRON_SECRET="YOUR_CRON_SECRET"
    ```
 
 2. **Скопировать systemd-юниты и включить таймер**:
@@ -145,13 +189,7 @@ Deployment notes — scheduled tasks and VK notifications
    ```
    Это отправит тестовое напоминание `order_reminder_test`, подтверждающее работоспособность Web Push канала.
 
-2) Vercel scheduler
-
-- If deploying to Vercel, use 'Vercel Scheduled Functions' or an external service to call the HTTP endpoint:
-  POST https://your-site.com/api/admin/scheduled
-  The endpoint requires ADMIN auth (cookie-based) or `x-cron-secret` header matching `CRON_SECRET`.
-
-3) VK notifications (leader approves expense)
+2) VK notifications (leader approves expense)
 
 - Environment variable required: VK_GROUP_TOKEN — community token with messages permission.
 - Gardener model now has `vkId` field which should store VK peer id (user id or peer id) to send a message to.
@@ -165,7 +203,7 @@ Security and notes:
 - Make sure community has permission to message users (users must start conversation with community or have allowed messages from community).
 - For reliable delivery consider using VK callback API or storing failed notifications and retrying.
 
-4) Уведомления (Web Push)
+3) Уведомления (Web Push)
 
 - Как включить пуш-уведомления:
   - В панели диспетчера (`/admin`): в шапке нажать кнопку «Включить уведомления». Браузер запросит разрешение на отправку push-уведомлений.
@@ -215,13 +253,13 @@ Security and notes:
    ```
    Или нажать кнопку «🧪 Отправить тест» в панели управления (`/admin` или `/gardener`).
 
-5) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
+4) Интеграция с amoCRM (API v4 + автоматический дедуп контактов)
 
 - Требования к правам и токенам amoCRM API:
   - Для полной работы API v4 интеграции токен должен иметь права на чтение и запись контактов (`contacts`), сделок (`leads`), примечаний и связь сущностей (`leads ↔ contacts`).
   - При отсутствии токена или прав система автоматически пишет предупреждение в лог и безопасно отправляет заявку через резервную веб-форму (`forwardToAmo` / `forwardToAmoUnsorted`). Заявки клиентов никогда не теряются.
 
-6) Вход на устройстве (Remember Device)
+5) Вход на устройстве (Remember Device)
 
 - После успешной первичной авторизации номер телефона сохраняется в `localStorage` под ключом `auth_phone`.
 - При повторном посещении страницы входа (`/login`) система автоматически предлагает войти в 1 тап: «Войти как <номер>?» с кнопками [Войти] (обращение к `/api/auth/auto-login`) и [Другой номер].

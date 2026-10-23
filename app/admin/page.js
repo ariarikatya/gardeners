@@ -1,10 +1,12 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
+import { saveCache, getCache } from '@/lib/offlineStore';
+import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -235,6 +237,15 @@ export default function AdminDashboard() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Оффлайн состояние и очередь
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const pendingCountRef = useRef(0);
+  const [conflictItems, setConflictItems] = useState([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [isSyncingQueue, setIsSyncingQueue] = useState(false);
+  const syncInFlightRef = useRef(false);
+
   // Состояния для форм заказа
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState({ date: null, gardenerId: null });
@@ -390,12 +401,109 @@ export default function AdminDashboard() {
     searchDates.push(d);
   }
 
+  const refreshQueueCount = async () => {
+    try {
+      const stats = await getQueueStats('admin');
+      const count = stats.pending + stats.syncing;
+      setPendingQueueCount(count);
+      pendingCountRef.current = count;
+      setConflictItems(stats.conflictItems);
+      return stats;
+    } catch (e) {
+      return { total: 0, pending: 0, conflict: 0, conflictItems: [] };
+    }
+  };
+
+  const logClientError = (message, err, pathname = '/admin') => {
+    try {
+      fetch('/api/client-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message + (err?.message ? `: ${err.message}` : ''),
+          stack: err?.stack || '',
+          pathname: pathname || (typeof window !== 'undefined' ? window.location.pathname : ''),
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
+  const handleSyncQueue = async () => {
+    if (isSyncingQueue || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    setIsSyncingQueue(true);
+    try {
+      const { syncedCount, hasErrors } = await syncQueue(
+        null,
+        (failedItem, errorMsg) => {
+          logClientError(`[QueueSyncError Admin] Action ${failedItem.actionType} failed`, { message: errorMsg }, '/admin');
+        },
+        'admin'
+      );
+      await refreshQueueCount();
+      if (syncedCount > 0 && !hasErrors) {
+        await fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to sync queue:', e);
+      logClientError('[QueueSyncFatalError Admin] Sync queue exception', e, '/admin');
+    } finally {
+      setIsSyncingQueue(false);
+    }
+  };
+
+  const handleRetryConflicts = async () => {
+    await retryConflicts('admin');
+    await handleSyncQueue();
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    refreshQueueCount();
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      handleSyncQueue();
+    };
+
+    const handleOfflineStatus = () => {
+      setIsOffline(true);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOfflineStatus);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        handleSyncQueue();
+      }
+    }, 30000);
+
+    const handleBeforeUnload = (e) => {
+      if (pendingCountRef.current > 0) {
+        e.preventDefault();
+        e.returnValue = 'Есть неотправленные изменения! Они отправятся при следующем подключении.';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOfflineStatus);
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [pendingQueueCount]);
+
   const loadWebLeads = async (silent = false) => {
     try {
       const resW = await apiFetch('/api/admin/webleads');
       if (resW.ok) {
         const dataW = await resW.json();
         const incomingLeads = dataW.webLeads || [];
+        saveCache('admin_webLeads', incomingLeads);
 
         setWebLeads(prevLeads => {
           if (prevLeads.length > 0) {
@@ -444,6 +552,39 @@ export default function AdminDashboard() {
   }, [currentMonth, startFromToday]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      checkSheetUrl();
+    }
+  }, []);
+
+  useEffect(() => {
+    const triggerAutoSync = async () => {
+      if (typeof navigator === 'undefined' || !navigator.onLine) return;
+      if (syncInFlightRef.current) return;
+      const role = localStorage.getItem('auth_role');
+      if (role !== 'ADMIN' && role !== 'LEADER') return;
+
+      const lastSync = localStorage.getItem('last_sheets_sync_ts');
+      const now = Date.now();
+      if (!lastSync || (now - Number(lastSync) > 60 * 60 * 1000)) {
+        syncInFlightRef.current = true;
+        try {
+          const res = await apiFetch('/api/admin/sync-sheets', { method: 'POST' });
+          if (res.ok) {
+            localStorage.setItem('last_sheets_sync_ts', String(now));
+          }
+        } catch (e) {
+        } finally {
+          syncInFlightRef.current = false;
+        }
+      }
+    };
+    triggerAutoSync();
+    const intervalId = setInterval(triggerAutoSync, 10 * 60 * 1000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       loadWebLeads(true);
     }, 15000);
@@ -487,9 +628,11 @@ export default function AdminDashboard() {
         apiFetch('/api/admin/services'),
         apiFetch('/api/auth/me')
       ]);
+
       if (resMe.ok) {
         const meData = await resMe.json();
         setCurrentUser(meData.user || null);
+        saveCache('admin_me', meData.user || null);
       }
       const dataG = resG.ok ? await resG.json() : {};
       const dataO = resO.ok ? await resO.json() : {};
@@ -497,18 +640,46 @@ export default function AdminDashboard() {
       const dataB = resB.ok ? await resB.json() : {};
       const dataS = resS.ok ? await resS.json() : {};
       const allOrd = dataO.orders || [];
+
       setGardeners(dataG.gardeners || []);
       setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
       setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(dataD.dayOffs || []);
       setBlockedDays(dataB.blockedDays || []);
       setServices(dataS.services || []);
+
+      saveCache('admin_orders', allOrd);
+      saveCache('admin_gardeners', dataG.gardeners || []);
+      saveCache('admin_services', dataS.services || []);
+      saveCache('admin_dayOffs', dataD.dayOffs || []);
+      saveCache('admin_blockedDays', dataB.blockedDays || []);
+
+      setIsOffline(false);
       await loadWebLeads(true);
     } catch (e) {
-      console.error(e);
+      console.warn('Network error during fetchData, using cached offline data:', e);
+      setIsOffline(true);
+
+      const cachedOrders = (await getCache('admin_orders'))?.data || [];
+      const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
+      const cachedServices = (await getCache('admin_services'))?.data || [];
+      const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
+      const cachedBlockedDays = (await getCache('admin_blockedDays'))?.data || [];
+      const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
+      const cachedMe = (await getCache('admin_me'))?.data || null;
+
+      setGardeners(cachedGardeners);
+      setOrders(cachedOrders.filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders(cachedOrders.filter(o => o.status === 'Аукцион' || o.wasAuction));
+      setDayOffs(cachedDayOffs);
+      setBlockedDays(cachedBlockedDays);
+      setServices(cachedServices);
+      setWebLeads(cachedWebLeads);
+      if (cachedMe) setCurrentUser(cachedMe);
     } finally {
       setLoading(false);
       setMonthLoading(false);
+      await refreshQueueCount();
     }
   };
 
@@ -554,20 +725,60 @@ export default function AdminDashboard() {
   };
 
   const [syncing, setSyncing] = useState(false);
-  const handleSyncSheets = async () => {
-    setSyncing(true);
+
+  const checkSheetUrl = async () => {
     try {
-      const res = await fetch('/api/admin/sync-sheets', { method: 'POST' });
-      const data = await res.json();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const res = await apiFetch('/api/admin/sheet-url', { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (res.ok) {
-        alert(`Синхронизировано с Google Таблицами: ${data.count} заказов`);
-      } else {
-        alert(data.error);
+        const data = await res.json();
+        if (data.url) {
+          localStorage.setItem('cached_sheet_url', data.url);
+          return data.url;
+        }
       }
-    } catch (e) {
-      alert('Не удалось синхронизировать');
-    } finally {
-      setSyncing(false);
+    } catch (e) {}
+    return localStorage.getItem('cached_sheet_url') || null;
+  };
+
+  const handleSyncSheets = async () => {
+    if (syncing) return;
+    const isOnlineState = typeof navigator !== 'undefined' && navigator.onLine;
+    let sheetUrl = null;
+
+    if (isOnlineState) {
+      sheetUrl = await checkSheetUrl();
+    } else {
+      sheetUrl = localStorage.getItem('cached_sheet_url') || process.env.NEXT_PUBLIC_GOOGLE_SHEET_URL || null;
+    }
+
+    if (isOnlineState && sheetUrl) {
+      setSyncing(true);
+      syncInFlightRef.current = true;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const res = await fetch('/api/admin/sync-sheets', {
+          method: 'POST',
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          localStorage.setItem('last_sheets_sync_ts', String(Date.now()));
+        }
+      } catch (e) {
+        console.warn('Sync sheets failed or timed out:', e.message);
+      } finally {
+        setSyncing(false);
+        syncInFlightRef.current = false;
+        window.open(sheetUrl, '_blank');
+      }
+    } else if (sheetUrl) {
+      window.open(sheetUrl, '_blank');
+    } else {
+      clientNotify('⚠️ Внимание', 'Нет соединения, откройте таблицу позже');
     }
   };
 
@@ -584,7 +795,7 @@ export default function AdminDashboard() {
 
     let matchedServiceId = lead.serviceId || '';
     if (!matchedServiceId && lead.serviceName && services.length > 0) {
-      const found = services.find(s => s.title.toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
+      const found = services.find(s => (s.name || s.title || '').toLowerCase().trim() === lead.serviceName.toLowerCase().trim());
       if (found) {
         matchedServiceId = found.id;
       }
@@ -606,29 +817,47 @@ export default function AdminDashboard() {
       fromLead: true
     };
 
-    const res = await fetch('/api/admin/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    if (res.ok) {
-      const data = await res.json();
-      await fetch('/api/admin/webleads', {
-        method: 'PUT',
+    if (isOfflineMode) {
+      const tmpId = 'tmp_auc_' + Date.now();
+      const newOrder = { ...payload, id: tmpId };
+      setAuctionOrders(prev => [newOrder, ...prev]);
+      setWebLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId } : l));
+
+      await enqueueAction({ actionType: 'ADMIN_ORDER_POST', url: '/api/admin/orders', method: 'POST', payload: { ...payload, id: tmpId }, scope: 'admin' });
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id: lead.id, status: 'Обработана', assignedTo: 'Аукцион', createdOrderId: tmpId }, scope: 'admin' });
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/orders', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: lead.id,
-          status: 'Обработана',
-          assignedTo: 'Аукцион',
-          createdOrderId: data.order ? data.order.id : undefined
-        })
+        body: JSON.stringify(payload)
       });
-      fetchData();
-      alert('Заявка успешно выставлена на аукцион!');
-    } else {
-      const data = await res.json();
-      alert(data.error || 'Не удалось отправить заявку на аукцион');
+
+      if (res.ok) {
+        const data = await res.json();
+        await fetch('/api/admin/webleads', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: lead.id,
+            status: 'Обработана',
+            assignedTo: 'Аукцион',
+            createdOrderId: data.order ? data.order.id : undefined
+          })
+        });
+        fetchData();
+        alert('Заявка успешно выставлена на аукцион!');
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Не удалось отправить заявку на аукцион');
+      }
+    } catch (err) {
+      alert('Ошибка при отправке заявки на аукцион');
     }
   };
 
@@ -690,6 +919,15 @@ export default function AdminDashboard() {
   };
 
   const handleMarkLeadProcessed = async (id) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setWebLeads(prev => prev.map(l => l.id === id ? { ...l, status: 'Обработана' } : l));
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_PUT', url: '/api/admin/webleads', method: 'PUT', payload: { id, status: 'Обработана' }, scope: 'admin' });
+      await refreshQueueCount();
+      return;
+    }
+
     await fetch('/api/admin/webleads', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -700,6 +938,16 @@ export default function AdminDashboard() {
 
   const handleDeleteLead = async (id) => {
     if (!confirm('Удалить эту заявку?')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setWebLeads(prev => prev.filter(l => l.id !== id));
+      await enqueueAction({ actionType: 'ADMIN_WEBLEAD_DELETE', url: '/api/admin/webleads', method: 'DELETE', payload: { id }, scope: 'admin' });
+      await refreshQueueCount();
+      return;
+    }
+
     await fetch('/api/admin/webleads', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -754,7 +1002,7 @@ export default function AdminDashboard() {
 
     const endpoint = '/api/admin/orders';
     const method = selectedOrder ? 'PUT' : 'POST';
-    
+
     const targetStatus = forceAuction ? 'Аукцион' : formData.status;
     const formDataCustom = {
       ...formData,
@@ -763,18 +1011,57 @@ export default function AdminDashboard() {
       wasAuction: forceAuction ? true : undefined
     };
 
-    const payload = selectedOrder
-      ? { id: selectedOrder.id, ...formDataCustom }
-      : { ...formDataCustom, fromLead: !!convertingLeadId };
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
 
-    const res = await apiFetch(endpoint, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    if (isOfflineMode) {
+      if (!selectedOrder) {
+        const tmpId = 'tmp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+        const newOrder = {
+          ...formDataCustom,
+          id: tmpId,
+          date: formDataCustom.date ? new Date(formDataCustom.date).toISOString() : new Date().toISOString(),
+          gardener: gardeners.find(g => g.id === formDataCustom.gardenerId) || null,
+          service: services.find(s => s.id === formDataCustom.serviceId) || null,
+        };
 
-    if (res.ok) {
-      const data = await res.json();
+        if (targetStatus === 'Аукцион') {
+          setAuctionOrders(prev => [newOrder, ...prev]);
+        } else {
+          setOrders(prev => [newOrder, ...prev]);
+        }
+
+        await enqueueAction({
+          actionType: 'ADMIN_ORDER_POST',
+          url: endpoint,
+          method: 'POST',
+          payload: { ...formDataCustom, id: tmpId, fromLead: !!convertingLeadId },
+          scope: 'admin'
+        });
+      } else {
+        const updatedOrder = {
+          ...selectedOrder,
+          ...formDataCustom,
+          gardener: gardeners.find(g => g.id === formDataCustom.gardenerId) || selectedOrder.gardener,
+          service: services.find(s => s.id === formDataCustom.serviceId) || selectedOrder.service,
+        };
+
+        if (targetStatus === 'Аукцион') {
+          setOrders(prev => prev.filter(o => o.id !== selectedOrder.id));
+          setAuctionOrders(prev => [updatedOrder, ...prev.filter(o => o.id !== selectedOrder.id)]);
+        } else {
+          setAuctionOrders(prev => prev.filter(o => o.id !== selectedOrder.id));
+          setOrders(prev => [...prev.filter(o => o.id !== selectedOrder.id), updatedOrder]);
+        }
+
+        await enqueueAction({
+          actionType: 'ADMIN_ORDER_PUT',
+          url: endpoint,
+          method: 'PUT',
+          payload: { id: selectedOrder.id, ...formDataCustom },
+          scope: 'admin'
+        });
+      }
+
       if (convertingLeadId) {
         const assignedGardener = gardeners.find(g => g.id === formData.gardenerId);
         const leadUpdate = {
@@ -782,28 +1069,82 @@ export default function AdminDashboard() {
           status: 'Обработана',
           assignedTo: assignedGardener ? assignedGardener.name : null
         };
-        if (!selectedOrder && data.order) {
-          // Первое назначение — запоминаем, какой заказ создан по этой заявке
-          leadUpdate.createdOrderId = data.order.id;
-        }
-        await fetch('/api/admin/webleads', {
+        setWebLeads(prev => prev.map(l => l.id === convertingLeadId ? { ...l, ...leadUpdate } : l));
+        await enqueueAction({
+          actionType: 'ADMIN_WEBLEAD_PUT',
+          url: '/api/admin/webleads',
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(leadUpdate)
+          payload: leadUpdate,
+          scope: 'admin'
         });
         setConvertingLeadId(null);
       }
+
       setShowOrderModal(false);
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    const payload = selectedOrder
+      ? { id: selectedOrder.id, ...formDataCustom }
+      : { ...formDataCustom, fromLead: !!convertingLeadId };
+
+    try {
+      const res = await apiFetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (convertingLeadId) {
+          const assignedGardener = gardeners.find(g => g.id === formData.gardenerId);
+          const leadUpdate = {
+            id: convertingLeadId,
+            status: 'Обработана',
+            assignedTo: assignedGardener ? assignedGardener.name : null
+          };
+          if (!selectedOrder && data.order) {
+            leadUpdate.createdOrderId = data.order.id;
+          }
+          await fetch('/api/admin/webleads', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(leadUpdate)
+          });
+          setConvertingLeadId(null);
+        }
+        setShowOrderModal(false);
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при сохранении заказа');
     }
   };
 
   const handleDeleteOrder = async () => {
     if (!selectedOrder) return;
     if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOfflineMode) {
+      setOrders(prev => prev.filter(o => o.id !== selectedOrder.id));
+      setAuctionOrders(prev => prev.filter(o => o.id !== selectedOrder.id));
+      await enqueueAction({
+        actionType: 'ADMIN_ORDER_DELETE',
+        url: `/api/admin/orders?id=${selectedOrder.id}`,
+        method: 'DELETE',
+        payload: { id: selectedOrder.id },
+        scope: 'admin'
+      });
+      setShowOrderModal(false);
+      await refreshQueueCount();
+      return;
+    }
 
     console.log('🖱️ [FRONTEND] Вызываю удаление заказа ID:', selectedOrder.id);
     const res = await apiFetch(`/api/admin/orders?id=${selectedOrder.id}`, {
@@ -822,17 +1163,44 @@ export default function AdminDashboard() {
 
   const handleAddGardener = async (e) => {
     e.preventDefault();
-    const res = await fetch('/api/admin/gardeners', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newGardener)
-    });
-    if (res.ok) {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_g_' + Date.now();
+      const newGardenerObj = {
+        id: tmpId,
+        name: newGardener.name,
+        phone: newGardener.phone,
+        services: services.filter(s => newGardener.serviceIds.includes(s.id))
+      };
+      setGardeners(prev => [...prev, newGardenerObj]);
+      await enqueueAction({
+        actionType: 'ADMIN_GARDENER_POST',
+        url: '/api/admin/gardeners',
+        method: 'POST',
+        payload: { ...newGardener, id: tmpId },
+        scope: 'admin'
+      });
       setNewGardener({ name: '', phone: '', serviceIds: [] });
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/gardeners', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newGardener)
+      });
+      if (res.ok) {
+        setNewGardener({ name: '', phone: '', serviceIds: [] });
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при добавлении садовника');
     }
   };
 
@@ -878,22 +1246,62 @@ export default function AdminDashboard() {
 
   const handleUpdateGardener = async (e) => {
     e.preventDefault();
-    const res = await fetch('/api/admin/gardeners', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editingGardener)
-    });
-    if (res.ok) {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setGardeners(prev => prev.map(g => g.id === editingGardener.id ? {
+        ...g,
+        ...editingGardener,
+        services: services.filter(s => editingGardener.serviceIds.includes(s.id))
+      } : g));
+      await enqueueAction({
+        actionType: 'ADMIN_GARDENER_PUT',
+        url: '/api/admin/gardeners',
+        method: 'PUT',
+        payload: editingGardener,
+        scope: 'admin'
+      });
       setEditingGardener(null);
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/gardeners', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingGardener)
+      });
+      if (res.ok) {
+        setEditingGardener(null);
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при обновлении садовника');
     }
   };
 
   const handleDeleteGardener = async (id) => {
     if (!confirm('Удалить этого садовника и его личный кабинет?')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setGardeners(prev => prev.filter(g => g.id !== id));
+      await enqueueAction({
+        actionType: 'ADMIN_GARDENER_DELETE',
+        url: '/api/admin/gardeners',
+        method: 'DELETE',
+        payload: { id },
+        scope: 'admin'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/gardeners', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -903,6 +1311,21 @@ export default function AdminDashboard() {
   };
 
   const handleRestoreRefusalOrder = async (orderId) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'Новый заказ', refusalReason: null } : o));
+      await enqueueAction({
+        actionType: 'ADMIN_ORDER_PUT',
+        url: '/api/admin/orders',
+        method: 'PUT',
+        payload: { id: orderId, status: 'Новый заказ', refusalReason: null },
+        scope: 'admin'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const res = await fetch('/api/admin/orders', {
         method: 'PUT',
@@ -928,6 +1351,36 @@ export default function AdminDashboard() {
       refusalReason: reason.trim() || 'Без указания причины'
     };
     setFormData(updatedForm);
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      if (selectedOrder) {
+        setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, ...updatedForm } : o));
+        await enqueueAction({
+          actionType: 'ADMIN_ORDER_PUT',
+          url: '/api/admin/orders',
+          method: 'PUT',
+          payload: { id: selectedOrder.id, ...updatedForm },
+          scope: 'admin'
+        });
+      } else {
+        const tmpId = 'tmp_' + Date.now();
+        const newOrder = { ...updatedForm, id: tmpId };
+        setOrders(prev => [newOrder, ...prev]);
+        await enqueueAction({
+          actionType: 'ADMIN_ORDER_POST',
+          url: '/api/admin/orders',
+          method: 'POST',
+          payload: { ...updatedForm, id: tmpId },
+          scope: 'admin'
+        });
+      }
+      setShowOrderModal(false);
+      await refreshQueueCount();
+      return;
+    }
+
     if (selectedOrder) {
       const res = await fetch('/api/admin/orders', {
         method: 'PUT',
@@ -956,6 +1409,26 @@ export default function AdminDashboard() {
   };
 
   const handleToggleBlockDay = async (dateStr, gardenerId) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const exists = blockedDays.some(b => b.gardenerId === gardenerId && b.date.startsWith(dateStr));
+      if (exists) {
+        setBlockedDays(prev => prev.filter(b => !(b.gardenerId === gardenerId && b.date.startsWith(dateStr))));
+      } else {
+        setBlockedDays(prev => [...prev, { id: 'tmp_block_' + Date.now(), gardenerId, date: dateStr }]);
+      }
+      await enqueueAction({
+        actionType: 'ADMIN_BLOCKDAY_POST',
+        url: '/api/admin/blockday',
+        method: 'POST',
+        payload: { date: dateStr, gardenerId },
+        scope: 'admin'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const res = await fetch('/api/admin/blockday', {
         method: 'POST',
@@ -977,6 +1450,24 @@ export default function AdminDashboard() {
   const handleVkBulkBind = async () => {
     if (!vkBulkText || !vkBulkText.trim()) return alert('Вставьте список phone,vkId в поле');
     setVkBulkResult(null);
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'ADMIN_VK_BULK_POST',
+        url: '/api/admin/gardeners/bulk-bind',
+        method: 'POST',
+        payload: { text: vkBulkText },
+        scope: 'admin'
+      });
+      setShowVkBulkModal(false);
+      setVkBulkText('');
+      await refreshQueueCount();
+      alert('Привязка VK добавлена в очередь и выполнится при появлении сети');
+      return;
+    }
+
     try {
       const res = await fetch('/api/admin/gardeners/bulk-bind', {
         method: 'POST',
@@ -998,22 +1489,61 @@ export default function AdminDashboard() {
   const handleAddService = async (e) => {
     e.preventDefault();
     if (!newServiceName.trim()) return;
-    const res = await fetch('/api/admin/services', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newServiceName.trim() })
-    });
-    if (res.ok) {
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_svc_' + Date.now();
+      const newSvc = { id: tmpId, name: newServiceName.trim() };
+      setServices(prev => [...prev, newSvc]);
+      await enqueueAction({
+        actionType: 'ADMIN_SERVICE_POST',
+        url: '/api/admin/services',
+        method: 'POST',
+        payload: { id: tmpId, name: newServiceName.trim() },
+        scope: 'admin'
+      });
       setNewServiceName('');
-      fetchData();
-    } else {
-      const data = await res.json();
-      alert(data.error);
+      await refreshQueueCount();
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newServiceName.trim() })
+      });
+      if (res.ok) {
+        setNewServiceName('');
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Ошибка при добавлении услуги');
     }
   };
 
   const handleDeleteService = async (id) => {
     if (!confirm('Удалить эту услугу из списка? У заказов с этой услугой она просто станет пустой.')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setServices(prev => prev.filter(s => s.id !== id));
+      await enqueueAction({
+        actionType: 'ADMIN_SERVICE_DELETE',
+        url: '/api/admin/services',
+        method: 'DELETE',
+        payload: { id },
+        scope: 'admin'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/services', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1023,6 +1553,22 @@ export default function AdminDashboard() {
   };
 
   const handleMarkDayOff = async (dateStr, gardenerId) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_dayoff_' + Date.now();
+      setDayOffs(prev => [...prev, { id: tmpId, date: dateStr, gardenerId }]);
+      await enqueueAction({
+        actionType: 'ADMIN_DAYOFF_POST',
+        url: '/api/admin/dayoff',
+        method: 'POST',
+        payload: { id: tmpId, date: dateStr, gardenerId },
+        scope: 'admin'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/dayoff', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1037,6 +1583,21 @@ export default function AdminDashboard() {
   };
 
   const handleRemoveDayOff = async (id) => {
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setDayOffs(prev => prev.filter(d => d.id !== id));
+      await enqueueAction({
+        actionType: 'ADMIN_DAYOFF_DELETE',
+        url: '/api/admin/dayoff',
+        method: 'DELETE',
+        payload: { id },
+        scope: 'admin'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     const res = await fetch('/api/admin/dayoff', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -1352,6 +1913,65 @@ export default function AdminDashboard() {
           )}
         </button>
       </div>
+
+      {/* Баннер оффлайн-режима */}
+      {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
+        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+              {pendingQueueCount > 0 && (
+                <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
+                  В очереди изменений: {pendingQueueCount}
+                </span>
+              )}
+            </div>
+            {pendingQueueCount > 0 && (
+              <button
+                onClick={handleSyncQueue}
+                disabled={isSyncingQueue}
+                className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
+              </button>
+            )}
+          </div>
+
+          {/* Блок конфликтов */}
+          {conflictItems.length > 0 && (
+            <div className="bg-rose-900/90 border border-rose-300/40 rounded-xl p-3 text-white space-y-2">
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-rose-100">⚠️ {conflictItems.length} изменений не приняты сервером (конфликт)</span>
+                <button
+                  onClick={handleRetryConflicts}
+                  className="bg-white text-rose-900 hover:bg-rose-100 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  🔄 Повторить конфликтные
+                </button>
+              </div>
+              <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                {conflictItems.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 bg-rose-950/60 p-2 rounded-lg text-[11px]">
+                    <div className="truncate flex-1">
+                      <span className="font-bold text-rose-200">{item.actionType}</span>: {JSON.stringify(item.payload).slice(0, 70)}
+                      {item.errorMsg && <span className="text-rose-300 ml-2 italic">({item.errorMsg})</span>}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await removeFromQueue(item.id);
+                        await refreshQueueCount();
+                      }}
+                      className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] whitespace-nowrap"
+                    >
+                      Отменить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="p-8 text-center text-slate-500">Загрузка данных...</div>
@@ -2013,12 +2633,39 @@ export default function AdminDashboard() {
                               Редактировать
                             </button>
                             <button
-                              onClick={() => {
+                              onClick={async () => {
                                 const vk = prompt('Введите vkId (peer id или user id) для садовника ' + g.name + ':', g.vkId || '');
                                 if (vk !== null) {
-                                  fetch('/api/admin/gardeners', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: g.id, name: g.name, phone: g.phone, serviceIds: (g.services||[]).map(s=>s.id), vkId: vk.trim() || null }) }).then(res => {
-                                    if (res.ok) fetchData(); else res.json().then(d=>alert(d.error||'Ошибка'));
-                                  });
+                                  const payload = {
+                                    id: g.id,
+                                    name: g.name,
+                                    phone: g.phone,
+                                    serviceIds: (g.services || []).map(s => s.id),
+                                    vkId: vk.trim() || null
+                                  };
+                                  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                                    setGardeners(prev => prev.map(item => item.id === g.id ? { ...item, vkId: payload.vkId } : item));
+                                    await enqueueAction({
+                                      actionType: 'ADMIN_GARDENER_VK_PUT',
+                                      url: '/api/admin/gardeners',
+                                      method: 'PUT',
+                                      payload,
+                                      scope: 'admin'
+                                    });
+                                    await refreshQueueCount();
+                                  } else {
+                                    const res = await apiFetch('/api/admin/gardeners', {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(payload)
+                                    });
+                                    if (res.ok) {
+                                      fetchData();
+                                    } else {
+                                      const d = await res.json();
+                                      alert(d.error || 'Ошибка');
+                                    }
+                                  }
                                 }
                               }}
                               className="text-sky-600 hover:bg-sky-50 px-3 py-1.5 rounded-lg text-sm transition-all"
@@ -2345,12 +2992,25 @@ export default function AdminDashboard() {
                                 </button>
                                 <button
                                   onClick={async () => {
-                                    await fetch('/api/admin/webleads', {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ id: lead.id, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null })
-                                    });
-                                    fetchData();
+                                    const payload = { id: lead.id, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null };
+                                    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                                      setWebLeads(prev => prev.map(l => l.id === lead.id ? { ...l, preferredGardenerId: null, preferredGardenerName: null, preferredInventory: null } : l));
+                                      await enqueueAction({
+                                        actionType: 'ADMIN_WEBLEAD_PUT',
+                                        url: '/api/admin/webleads',
+                                        method: 'PUT',
+                                        payload,
+                                        scope: 'admin'
+                                      });
+                                      await refreshQueueCount();
+                                    } else {
+                                      await fetch('/api/admin/webleads', {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(payload)
+                                      });
+                                      fetchData();
+                                    }
                                   }}
                                   className="text-[11px] bg-rose-600 hover:bg-rose-700 text-white font-medium px-2 py-1 rounded"
                                 >

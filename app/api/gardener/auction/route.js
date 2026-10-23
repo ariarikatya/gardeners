@@ -36,7 +36,7 @@ export async function POST(req) {
   const payload = auth.payload;
 
   const idempotencyKey = getIdempotencyKey(req);
-  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  const cached = await getCachedIdempotencyResponse(idempotencyKey);
   if (cached) {
     return NextResponse.json(cached.body, { status: cached.status });
   }
@@ -55,7 +55,7 @@ export async function POST(req) {
     if (order.status !== 'Аукцион') {
       if (order.gardenerId === payload.gardenerId) {
         const responseBody = { success: true, order };
-        setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+        await setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
         return NextResponse.json(responseBody);
       }
       return NextResponse.json({ error: 'Заказ уже забран другим садовником' }, { status: 400 });
@@ -84,7 +84,7 @@ export async function POST(req) {
     })();
 
     const responseBody = { success: true, order: updated };
-    setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+    await setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
     return NextResponse.json(responseBody);
   } catch (e) {
     console.error('Error claiming auction order:', e);

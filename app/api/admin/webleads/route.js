@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import amoApi from '@/lib/amoApi';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkAdmin(req) {
@@ -34,8 +35,18 @@ export async function GET(req) {
 export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json();
   const { id, status, assignedTo, createdOrderId, preferredGardenerId, preferredGardenerName, preferredInventory } = body;
+
+  if (id && String(id).startsWith('tmp_')) {
+    return NextResponse.json({ error: 'Cannot update temporary offline object directly, resolve real ID first' }, { status: 400 });
+  }
   const data = {};
   if (status !== undefined) data.status = status;
   if (assignedTo !== undefined) data.assignedTo = assignedTo;
@@ -45,11 +56,19 @@ export async function PUT(req) {
   if (preferredInventory !== undefined) data.preferredInventory = preferredInventory;
 
   const lead = await prisma.webLead.update({ where: { id }, data });
-  return NextResponse.json({ lead });
+  const resBody = { lead };
+  if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }
 
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
 
   try {
     const { id } = await req.json();
@@ -91,7 +110,9 @@ export async function DELETE(req) {
     await prisma.webLead.delete({ where: { id } });
     console.log('✅ [DELETE WEBLEAD] Заявка удалена из базы данных');
 
-    return NextResponse.json({ success: true });
+    const resBody = { success: true };
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (error) {
     console.error('💥 [DELETE WEBLEAD] Критическая ошибка:', error);
     return NextResponse.json({ error: 'Failed to delete weblead' }, { status: 500 });

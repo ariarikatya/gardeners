@@ -1,10 +1,12 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
+import { saveCache, getCache } from '@/lib/offlineStore';
+import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -85,6 +87,13 @@ export default function LeaderDashboard() {
   const [leaderScale, setLeaderScale] = useState(1);
   const [leaderTab, setLeaderTab] = useState('finance');
 
+  // Оффлайн состояние и очередь
+  const [isOffline, setIsOffline] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const pendingCountRef = useRef(0);
+  const [conflictItems, setConflictItems] = useState([]);
+  const [isSyncingQueue, setIsSyncingQueue] = useState(false);
+
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
     const approvedExpenses = Number(data.totals?.approvedExpenses || 0);
@@ -104,6 +113,102 @@ export default function LeaderDashboard() {
     };
   }, [data]);
 
+  const refreshQueueCount = async () => {
+    try {
+      const stats = await getQueueStats('leader');
+      const count = stats.pending + stats.syncing;
+      setPendingQueueCount(count);
+      pendingCountRef.current = count;
+      setConflictItems(stats.conflictItems);
+      return stats;
+    } catch (e) {
+      return { total: 0, pending: 0, conflict: 0, conflictItems: [] };
+    }
+  };
+
+  const logClientError = (message, err, pathname = '/leader') => {
+    try {
+      fetch('/api/client-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message + (err?.message ? `: ${err.message}` : ''),
+          stack: err?.stack || '',
+          pathname: pathname || (typeof window !== 'undefined' ? window.location.pathname : ''),
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
+  const handleRetryConflicts = async () => {
+    await retryConflicts('leader');
+    await handleSyncQueue();
+  };
+
+  const handleSyncQueue = async () => {
+    if (isSyncingQueue || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    setIsSyncingQueue(true);
+    try {
+      const { syncedCount, hasErrors } = await syncQueue(
+        null,
+        (failedItem, errorMsg) => {
+          logClientError(`[QueueSyncError Leader] Action ${failedItem.actionType} failed`, { message: errorMsg }, '/leader');
+        },
+        'leader'
+      );
+      await refreshQueueCount();
+      if (syncedCount > 0 && !hasErrors) {
+        await fetchData(startDate, endDate);
+      }
+    } catch (e) {
+      console.error('Failed to sync queue:', e);
+      logClientError('[QueueSyncFatalError Leader] Sync queue exception', e, '/leader');
+    } finally {
+      setIsSyncingQueue(false);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    refreshQueueCount();
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      handleSyncQueue();
+    };
+
+    const handleOfflineStatus = () => {
+      setIsOffline(true);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOfflineStatus);
+
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        handleSyncQueue();
+      }
+    }, 30000);
+
+    const handleBeforeUnload = (e) => {
+      if (pendingCountRef.current > 0) {
+        e.preventDefault();
+        e.returnValue = 'Есть неотправленные изменения!';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOfflineStatus);
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [pendingQueueCount]);
+
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
     setLoading(true);
     try {
@@ -119,10 +224,21 @@ export default function LeaderDashboard() {
       }
       const json = await res.json();
       setData(json);
+      saveCache(`leader_data_${nextStart}_${nextEnd}`, json);
+      saveCache('leader_data_latest', json);
+      setIsOffline(false);
     } catch (error) {
-      alert(error.message);
+      console.warn('Network error in leader fetchData, trying cache:', error.message);
+      setIsOffline(true);
+      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
+      if (cached) {
+        setData(cached);
+      } else {
+        alert(error.message);
+      }
     } finally {
       setLoading(false);
+      await refreshQueueCount();
     }
   };
 
@@ -187,14 +303,27 @@ export default function LeaderDashboard() {
         return;
       }
 
+      const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
       for (const op of opsToCreate) {
-        const res = await apiFetch('/api/leader/operations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gardenerId: gardener.id, type: op.type, amount: op.amount, description: op.description })
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Ошибка создания операции');
+        const payload = { gardenerId: gardener.id, type: op.type, amount: op.amount, description: op.description };
+        if (isOfflineMode) {
+          await enqueueAction({
+            actionType: 'LEADER_OPERATION_POST',
+            url: '/api/leader/operations',
+            method: 'POST',
+            payload,
+            scope: 'leader'
+          });
+        } else {
+          const res = await apiFetch('/api/leader/operations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Ошибка создания операции');
+        }
       }
 
       setData((prev) => ({
@@ -209,8 +338,13 @@ export default function LeaderDashboard() {
           writeoffNote: '',
         } : g),
       }));
-      await fetchData();
-      alert('Операции добавлены');
+
+      if (isOfflineMode) {
+        await refreshQueueCount();
+      } else {
+        await fetchData();
+        alert('Операции добавлены');
+      }
     } catch (error) {
       alert(error.message);
     } finally {
@@ -246,11 +380,25 @@ export default function LeaderDashboard() {
 
   const deleteOperation = async (id, confirmMsg = 'Удалить операцию?') => {
     if (!confirm(confirmMsg)) return;
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setOpsList(prev => prev.filter(op => op.id !== id));
+      await enqueueAction({
+        actionType: 'LEADER_OPERATION_DELETE',
+        url: `/api/leader/operations?id=${encodeURIComponent(id)}`,
+        method: 'DELETE',
+        payload: { id },
+        scope: 'leader'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const res = await apiFetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка удаления');
-      // обновим список
       if (opsModalGardener) await openOpsModal(opsModalGardener);
       await fetchData();
     } catch (err) {
@@ -285,10 +433,23 @@ export default function LeaderDashboard() {
     // Optimistically update orders list (checkbox state)
     setOrdersList((prev) => prev.map((o) => o.id === orderId ? { ...o, paid: nextValue.length > 0, paidTo: nextSerialized } : o));
 
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'LEADER_ORDER_PAID_PUT',
+        url: '/api/leader/order-paid',
+        method: 'PUT',
+        payload: { id: orderId, paidTo: nextSerialized },
+        scope: 'leader'
+      });
+      await refreshQueueCount();
+      return;
+    }
+
     // Prepare a snapshot to allow revert on error
     const prevDataSnapshot = data;
 
-    // Optimistically update dashboard totals and gardener row to avoid full refetch/flicker
     if (previousOrder && previousOrder.status === 'Выполнен') {
       const orderAmount = Number(previousOrder.priceFact || previousOrder.priceContract || 0);
       const prevTargets = normalizePaidTargets(previousOrder.paidTo);
@@ -303,12 +464,9 @@ export default function LeaderDashboard() {
           const oldPayout = Number(g.payout || 0);
           let newPayout = oldPayout;
 
-          // If gardener payment was removed -> payout increases by orderAmount
           if (prevTargets.includes('GARDENER') && !nextTargets.includes('GARDENER')) newPayout += orderAmount;
-          // If gardener payment was added -> payout decreases by orderAmount
           if (!prevTargets.includes('GARDENER') && nextTargets.includes('GARDENER')) newPayout -= orderAmount;
 
-          // Company target affects payout similarly
           if (prevTargets.includes('COMPANY') && !nextTargets.includes('COMPANY')) newPayout += orderAmount;
           if (!prevTargets.includes('COMPANY') && nextTargets.includes('COMPANY')) newPayout -= orderAmount;
 
@@ -330,9 +488,7 @@ export default function LeaderDashboard() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
-      // success - keep optimistic state. No full refetch to avoid flicker.
     } catch (err) {
-      // revert optimistic updates
       if (previousOrder) {
         setOrdersList((prev) => prev.map((o) => o.id === orderId ? previousOrder : o));
         setData(prevDataSnapshot);
@@ -355,6 +511,65 @@ export default function LeaderDashboard() {
           <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm whitespace-nowrap">Выйти</button>
         </div>
       </header>
+
+      {/* Баннер оффлайн-режима */}
+      {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
+        <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
+              {pendingQueueCount > 0 && (
+                <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
+                  В очереди изменений: {pendingQueueCount}
+                </span>
+              )}
+            </div>
+            {pendingQueueCount > 0 && (
+              <button
+                onClick={handleSyncQueue}
+                disabled={isSyncingQueue}
+                className="bg-white text-amber-900 hover:bg-amber-100 px-3 py-1 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {isSyncingQueue ? 'Синхронизация...' : '🔄 Синхронизировать сейчас'}
+              </button>
+            )}
+          </div>
+
+          {/* Блок конфликтов */}
+          {conflictItems.length > 0 && (
+            <div className="bg-rose-900/90 border border-rose-300/40 rounded-xl p-3 text-white space-y-2">
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-rose-100">⚠️ {conflictItems.length} изменений не приняты сервером (конфликт)</span>
+                <button
+                  onClick={handleRetryConflicts}
+                  className="bg-white text-rose-900 hover:bg-rose-100 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  🔄 Повторить конфликтные
+                </button>
+              </div>
+              <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                {conflictItems.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 bg-rose-950/60 p-2 rounded-lg text-[11px]">
+                    <div className="truncate flex-1">
+                      <span className="font-bold text-rose-200">{item.actionType}</span>: {JSON.stringify(item.payload).slice(0, 70)}
+                      {item.errorMsg && <span className="text-rose-300 ml-2 italic">({item.errorMsg})</span>}
+                    </div>
+                    <button
+                      onClick={async () => {
+                        await removeFromQueue(item.id);
+                        await refreshQueueCount();
+                      }}
+                      className="bg-rose-800 hover:bg-rose-700 px-2 py-0.5 rounded text-[10px] whitespace-nowrap"
+                    >
+                      Отменить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-2 sm:px-3 py-3 space-y-3">
         <div className="flex gap-2 border-b border-slate-200 pb-2">
@@ -602,16 +817,30 @@ export default function LeaderDashboard() {
                           />
                           <button 
                             onClick={async () => {
+                              const payload = {
+                                id: g.id,
+                                bonusPercent: g.bonusPercent,
+                                finePercent: g.finePercent,
+                                writeoffPercent: g.writeoffPercent
+                              };
+                              const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+                              if (isOfflineMode) {
+                                await enqueueAction({
+                                  actionType: 'LEADER_GARDENER_PUT',
+                                  url: '/api/leader',
+                                  method: 'PUT',
+                                  payload,
+                                  scope: 'leader'
+                                });
+                                await refreshQueueCount();
+                                alert('Процент сохранён оффлайн');
+                                return;
+                              }
                               try {
                                 const res = await fetch('/api/leader', { 
                                   method: 'PUT', 
                                   headers: { 'Content-Type': 'application/json' }, 
-                                  body: JSON.stringify({ 
-                                    id: g.id, 
-                                    bonusPercent: g.bonusPercent, 
-                                    finePercent: g.finePercent, 
-                                    writeoffPercent: g.writeoffPercent 
-                                  }) 
+                                  body: JSON.stringify(payload)
                                 });
                                 if (!res.ok) throw new Error((await res.json()).error || 'Ошибка');
                                 await fetchData();
@@ -704,6 +933,21 @@ export default function LeaderDashboard() {
                                 const descEl = document.getElementById(`fine-desc-${op.id}`);
                                 const amount = amountEl ? Number(amountEl.value) : op.amount;
                                 const description = descEl ? descEl.value : (op.description || '');
+                                const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+                                if (isOfflineMode) {
+                                  setOpsList(prev => prev.map(o => o.id === op.id ? { ...o, amount, description } : o));
+                                  await enqueueAction({
+                                    actionType: 'LEADER_OPERATION_PUT',
+                                    url: '/api/leader/operations',
+                                    method: 'PUT',
+                                    payload: { id: op.id, amount, description },
+                                    scope: 'leader'
+                                  });
+                                  await refreshQueueCount();
+                                  return;
+                                }
+
                                 try {
                                   const res = await fetch('/api/leader/operations', {
                                     method: 'PUT',
@@ -742,15 +986,28 @@ export default function LeaderDashboard() {
                               onClick={async () => {
                                 const el = document.getElementById(`approved-${op.id}`);
                                 const val = el ? Number(el.value || 0) : Number(op.amount || 0);
+                                const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+                                if (isOfflineMode) {
+                                  setOpsList(prev => prev.map(o => o.id === op.id ? { ...o, approved: true, approvedAmount: val } : o));
+                                  await enqueueAction({
+                                    actionType: 'LEADER_OPERATION_PUT',
+                                    url: '/api/leader/operations',
+                                    method: 'PUT',
+                                    payload: { id: op.id, approved: true, approvedAmount: val },
+                                    scope: 'leader'
+                                  });
+                                  await refreshQueueCount();
+                                  return;
+                                }
+
                                 try {
                                   const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: true, approvedAmount: val }) });
                                   const json = await res.json();
                                   if (!res.ok) throw new Error(json.error || 'Ошибка');
-                                  // обновим список
                                   if (opsModalGardener) await openOpsModal(opsModalGardener);
                                   await fetchData();
-                                  // если бот вк настроен, можно показать уведомление в UI
-                                  if (json.operation && json.operation.approved) alert('Трата утверждена и садовник должен получить уведомление во ВКонтакте (если указан vkId)');
+                                  if (json.operation && json.operation.approved) alert('Трата утверждена');
                                 } catch (err) { alert(err.message || 'Ошибка'); }
                               }}
                               className="bg-emerald-600 text-white px-3 py-1 rounded text-sm"
@@ -758,7 +1015,21 @@ export default function LeaderDashboard() {
 
                             <button
                               onClick={async () => {
-                                // снять утверждение
+                                const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+                                if (isOfflineMode) {
+                                  setOpsList(prev => prev.map(o => o.id === op.id ? { ...o, approved: false, approvedAmount: null } : o));
+                                  await enqueueAction({
+                                    actionType: 'LEADER_OPERATION_PUT',
+                                    url: '/api/leader/operations',
+                                    method: 'PUT',
+                                    payload: { id: op.id, approved: false, approvedAmount: null },
+                                    scope: 'leader'
+                                  });
+                                  await refreshQueueCount();
+                                  return;
+                                }
+
                                 try {
                                   const res = await fetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: false, approvedAmount: null }) });
                                   const json = await res.json();
@@ -926,6 +1197,26 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
   const handleAddItem = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      const tmpId = 'tmp_cat_' + Date.now();
+      const newItem = { id: tmpId, name: name.trim(), description: desc.trim(), image: image || null };
+      setItems(prev => [...prev, newItem]);
+      await enqueueAction({
+        actionType: 'CATALOG_POST',
+        url: '/api/catalog',
+        method: 'POST',
+        payload: { type: catalogType, id: tmpId, name: name.trim(), description: desc.trim(), image: image || null },
+        scope: 'leader'
+      });
+      setName('');
+      setDesc('');
+      setImage('');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/catalog', {
@@ -948,6 +1239,21 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
 
   const handleDeleteItem = async (id) => {
     if (!confirm('Удалить из справочника?')) return;
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      setItems(prev => prev.filter(i => i.id !== id));
+      await enqueueAction({
+        actionType: 'CATALOG_DELETE',
+        url: '/api/catalog',
+        method: 'DELETE',
+        payload: { type: catalogType, id },
+        scope: 'leader'
+      });
+      return;
+    }
+
     const res = await fetch('/api/catalog', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -963,6 +1269,21 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
     }
     if (selectedGardenerIds.length === 0) {
       alert('Выберите хотя бы одного сотрудника!');
+      return;
+    }
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'CATALOG_ASSIGN_POST',
+        url: '/api/catalog/assign',
+        method: 'POST',
+        payload: { type: catalogType, itemIds: selectedItemIds, gardenerIds: selectedGardenerIds, action },
+        scope: 'leader'
+      });
+      alert('Массовое назначение добавлено в очередь');
+      setSelectedItemIds([]);
       return;
     }
 

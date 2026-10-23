@@ -45,7 +45,7 @@ export async function POST(req) {
   const gardenerId = auth.payload.gardenerId;
 
   const idempotencyKey = getIdempotencyKey(req);
-  const cached = getCachedIdempotencyResponse(idempotencyKey);
+  const cached = await getCachedIdempotencyResponse(idempotencyKey);
   if (cached) {
     return NextResponse.json(cached.body, { status: cached.status });
   }
@@ -57,6 +57,6 @@ export async function POST(req) {
   if (orderId) data.orderId = orderId;
   const op = await prisma.operation.create({ data });
   const responseBody = { operation: op };
-  setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
+  await setCachedIdempotencyResponse(idempotencyKey, 200, responseBody);
   return NextResponse.json(responseBody);
 }

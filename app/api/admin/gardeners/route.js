@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/jwt';
 import { calculateOrderSplit } from '@/lib/money';
+import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 
 async function checkAdmin(req) {
@@ -24,7 +25,15 @@ export async function GET(req) {
 export async function POST(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
-  const { name, phone, serviceIds } = await req.json();
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
+  const body = await req.json();
+  if (body.id && String(body.id).startsWith('tmp_')) delete body.id;
+  const { name, phone, serviceIds } = body;
   const cleanPhone = phone.replace(/\D/g, '');
 
   try {
@@ -44,7 +53,9 @@ export async function POST(req) {
       include: { services: true },
     });
 
-    return NextResponse.json({ gardener });
+    const resBody = { gardener };
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     return NextResponse.json({ error: 'Садовник с таким телефоном уже существует' }, { status: 400 });
   }
@@ -53,8 +64,18 @@ export async function POST(req) {
 export async function PUT(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const body = await req.json();
   const { id, name, phone, serviceIds, vkId, rating, reviewsCount, skills, inventory, preparations, works, reviews, photo, jobTitle, timeSlots, isRegular, annualContract, partnerId, writeoffPercent, bonusPercent, finePercent } = body;
+
+  if (id && String(id).startsWith('tmp_')) {
+    return NextResponse.json({ error: 'Cannot update temporary offline object directly, resolve real ID first' }, { status: 400 });
+  }
 
   try {
     const existing = await prisma.gardener.findUnique({ where: { id }, include: { user: true } });
@@ -146,7 +167,9 @@ export async function PUT(req) {
       include: { services: true, user: true },
     });
 
-    return NextResponse.json({ gardener });
+    const resBody = { gardener };
+    if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+    return NextResponse.json(resBody);
   } catch (e) {
     console.error('Gardener PUT error:', e);
     return NextResponse.json({ error: 'Не удалось обновить садовника' }, { status: 400 });
@@ -160,7 +183,15 @@ export async function PATCH(req) {
 export async function DELETE(req) {
   if (!(await checkAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
+  const idempotencyKey = getIdempotencyKey(req);
+  if (idempotencyKey) {
+    const cached = await getCachedIdempotencyResponse(idempotencyKey);
+    if (cached) return NextResponse.json(cached.body, { status: cached.status });
+  }
+
   const { id } = await req.json();
   await prisma.gardener.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  const resBody = { success: true };
+  if (idempotencyKey) await setCachedIdempotencyResponse(idempotencyKey, 200, resBody);
+  return NextResponse.json(resBody);
 }
