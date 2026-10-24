@@ -172,6 +172,21 @@ export default function LeaderDashboard() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const offlineSess = localStorage.getItem('offline_session') === '1';
+    const role = localStorage.getItem('auth_role') || 'LEADER';
+    if (offlineSess) {
+      localStorage.setItem('offline_session_ts', String(Date.now()));
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            targetSw.postMessage({ type: 'OFFLINE_SESSION', active: true, role, ts: Date.now() });
+            targetSw.postMessage({ type: 'OFFLINE_ROLE', role });
+          }
+        }).catch(() => {});
+      }
+    }
+
     refreshQueueCount();
 
     const handleOnline = () => {
@@ -209,8 +224,32 @@ export default function LeaderDashboard() {
     };
   }, [pendingQueueCount]);
 
+  const isOfflineSessionGuard = () => {
+    if (typeof window === 'undefined') return false;
+    return !navigator.onLine;
+  };
+
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
     setLoading(true);
+
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      if (storedRole && storedRole !== 'LEADER') {
+        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'GARDENER' ? '/gardener' : '/leader';
+        window.location.assign(correctPath);
+        return;
+      }
+
+      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
+      if (cached) {
+        setData(cached);
+      }
+      setLoading(false);
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const params = new URLSearchParams();
       if (nextStart) params.set('start', nextStart);
@@ -250,30 +289,38 @@ export default function LeaderDashboard() {
   }, [startDate, endDate]);
 
   const handleLogout = async () => {
-    try {
-      if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
+      try {
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
 
         if ('serviceWorker' in navigator) {
+          const postWithReply = (targetSw, msg) => {
+            return new Promise((resolve) => {
+              if (!targetSw) return resolve();
+              if (typeof MessageChannel === 'undefined') {
+                try { targetSw.postMessage(msg); } catch (e) {}
+                return resolve();
+              }
+              const channel = new MessageChannel();
+              const timer = setTimeout(() => resolve(), 500);
+              channel.port1.onmessage = () => { clearTimeout(timer); resolve(); };
+              try { targetSw.postMessage(msg, [channel.port2]); } catch (e) { clearTimeout(timer); resolve(); }
+            });
+          };
+
           try {
             const reg = await navigator.serviceWorker.ready;
             const targetSw = reg.active || navigator.serviceWorker.controller;
             if (targetSw) {
-              targetSw.postMessage({
-                type: 'OFFLINE_SESSION',
-                active: false,
-              });
+              await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: false, role: null });
+              await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role: null });
             }
-          } catch (e) {
-            if (navigator.serviceWorker.controller) {
-              navigator.serviceWorker.controller.postMessage({
-                type: 'OFFLINE_SESSION',
-                active: false,
-              });
-            }
-          }
+          } catch (e) {}
         }
 
         if ('PushManager' in window && 'serviceWorker' in navigator) {
@@ -288,20 +335,12 @@ export default function LeaderDashboard() {
             }
           }).catch(() => {});
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
 
-    try {
-      const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-      if (res.ok && typeof window !== 'undefined') {
-        localStorage.removeItem('auth_role');
-        localStorage.removeItem('auth_phone');
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
-      }
-    } catch (e) {}
+      try {
+        fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+      } catch (e) {}
 
-    if (typeof window !== 'undefined') {
       window.location.replace('/login');
     } else {
       router.push('/login');

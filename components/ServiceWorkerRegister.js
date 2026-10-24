@@ -65,10 +65,25 @@ export default function ServiceWorkerRegister() {
         });
     };
 
+    const triggerPrecacheRoles = () => {
+      if (navigator.onLine && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            try { targetSw.postMessage({ type: 'PRECACHE_ROLES' }); } catch (e) {}
+          }
+        }).catch(() => {});
+      }
+    };
+
     if (document.readyState === 'complete') {
       handleRegister();
+      triggerPrecacheRoles();
     } else {
-      window.addEventListener('load', handleRegister);
+      window.addEventListener('load', () => {
+        handleRegister();
+        triggerPrecacheRoles();
+      });
     }
 
     return () => {

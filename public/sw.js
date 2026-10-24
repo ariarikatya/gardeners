@@ -1,12 +1,12 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-9ed3bb2';
-const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-4d51569';
+const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Нет сети | Анемон Агро</title>
+  <title>Офлайн-режим | Анемон Агро</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
     .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
@@ -19,10 +19,36 @@ const OFFLINE_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div class="card">
-    <h1>📡 Нет связи с сервером</h1>
-    <p>Не удалось подключиться к сети. Проверьте интернет или подключение к Wi-Fi и повторите попытку.</p>
+    <h1>📡 Офлайн-режим: показаны сохранённые данные</h1>
+    <p>Подключение к интернету отсутствует. Работа продолжается в локальном автономном режиме.</p>
     <button onclick="window.location.reload()">Повторить попытку</button>
-    <button class="secondary" onclick="caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/login'; })">Очистить кэш и войти</button>
+    <button class="secondary" onclick="window.location.href='/login'">Экран входа</button>
+  </div>
+</body>
+</html>`;
+
+const OFFLINE_STALE_HTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Офлайн-режим | Анемон Агро</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
+    h1 { font-size: 20px; font-weight: 700; color: #d97706; margin: 0 0 12px; }
+    p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
+    button { background: #d97706; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
+    button.secondary { background: #e2e8f0; color: #1e293b; }
+    button:active { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📡 Офлайн-режим: данные могут быть устаревшими</h1>
+    <p>Интерфейс вашей роли задействовал сохранённый локальный кэш. Вы можете продолжать работу офлайн.</p>
+    <button onclick="window.location.reload()">Повторить попытку</button>
+    <button class="secondary" onclick="window.location.href='/login'">Экран входа</button>
   </div>
 </body>
 </html>`;
@@ -60,28 +86,50 @@ function safeCachePut(cacheName, request, response) {
   }).catch(() => {});
 }
 
+// Helper to attach X-Offline-Served: 1 header to cached response
+function withOfflineHeader(response) {
+  if (!response) return response;
+  try {
+    const headers = new Headers(response.headers);
+    headers.set('X-Offline-Served', '1');
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  } catch (e) {
+    return response;
+  }
+}
+
+async function precacheAllRoles() {
+  const cache = await caches.open(CACHE_NAME);
+  const now = Date.now();
+  const metaRes = () => new Response(JSON.stringify({ ts: now }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  await Promise.all(
+    APP_SHELL.map(async (url) => {
+      try {
+        const req = new Request(url, { credentials: 'include', redirect: 'follow' });
+        const res = await fetch(req);
+        if (res && res.ok && res.status === 200) {
+          safeCachePut(CACHE_NAME, new Request(url), res);
+          if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
+          else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes());
+          else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes());
+          else if (url === '/login') safeCachePut(CACHE_NAME, new Request('/login-meta'), metaRes());
+        }
+      } catch (e) {}
+    })
+  );
+}
+
 // === INSTALL: сразу берём контроль и безопасно кэшируем APP_SHELL без addAll ===
 self.addEventListener('install', (event) => {
   self.skipWaiting();
-  event.waitUntil(
-    Promise.all(
-      APP_SHELL.map(async (url) => {
-        try {
-          const req = new Request(url, { credentials: 'include', redirect: 'follow' });
-          const res = await fetch(req);
-          safeCachePut(CACHE_NAME, new Request(url), res);
-          if (res && res.ok && res.status === 200) {
-            const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
-              headers: { 'Content-Type': 'application/json' }
-            });
-            if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes);
-            else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes);
-            else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes);
-          }
-        } catch (e) {}
-      })
-    )
-  );
+  event.waitUntil(precacheAllRoles());
 });
 
 let isOfflineSessionActive = false;
@@ -158,33 +206,108 @@ async function getPageCacheAge(pathname) {
 
 // === MESSAGE: ручное обновление, роль и флаг офлайн-сессии ===
 self.addEventListener('message', (event) => {
-  if (event.data) {
-    if (event.data.type === 'SKIP_WAITING') {
-      self.skipWaiting();
-    } else if (event.data.type === 'OFFLINE_SESSION') {
-      isOfflineSessionActive = Boolean(event.data.active);
-      caches.open(CACHE_NAME).then((cache) => {
-        if (event.data.active) {
-          const payload = { active: true, ts: event.data.ts || Date.now() };
-          if (event.data.role) payload.role = event.data.role;
-          cache.put('/offline-session', new Response(JSON.stringify(payload), {
-            headers: { 'Content-Type': 'application/json' }
-          }));
-        } else {
-          cache.delete('/offline-session');
-        }
-      }).catch(() => {});
-    } else if (event.data.type === 'OFFLINE_ROLE') {
-      caches.open(CACHE_NAME).then((cache) => {
-        if (event.data.role) {
-          cache.put('/offline-role', new Response(JSON.stringify({ role: event.data.role, ts: Date.now() }), {
-            headers: { 'Content-Type': 'application/json' }
-          }));
-        } else {
-          cache.delete('/offline-role');
-        }
-      }).catch(() => {});
+  if (!event.data) return;
+
+  const port = event.ports && event.ports[0];
+  const reply = (success = true) => {
+    if (port) {
+      try { port.postMessage({ success }); } catch (e) {}
     }
+  };
+
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+    reply(true);
+    return;
+  }
+
+  if (event.data.type === 'OFFLINE_SESSION') {
+    isOfflineSessionActive = Boolean(event.data.active);
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        if (event.data.active) {
+          let roleToSave = event.data.role;
+          if (!roleToSave) {
+            try {
+              const existingSess = await cache.match('/offline-session');
+              if (existingSess) {
+                const sData = await existingSess.json();
+                if (sData && sData.role) roleToSave = sData.role;
+              }
+              if (!roleToSave) {
+                const existingRole = await cache.match('/offline-role');
+                if (existingRole) {
+                  const rData = await existingRole.json();
+                  if (rData && rData.role) roleToSave = rData.role;
+                }
+              }
+            } catch (e) {}
+          }
+          const payload = { active: true, ts: event.data.ts || Date.now() };
+          if (roleToSave) payload.role = roleToSave;
+          await cache.put('/offline-session', new Response(JSON.stringify(payload), {
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        } else {
+          await cache.delete('/offline-session');
+        }
+      } catch (e) {}
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'SET_OFFLINE_PHONE') {
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const existingSess = await cache.match('/offline-session');
+        let payload = { active: true, ts: Date.now() };
+        if (existingSess) {
+          try {
+            const data = await existingSess.json();
+            payload = { ...data, ...payload };
+          } catch (e) {}
+        }
+        if (event.data.phone) payload.phone = event.data.phone;
+        await cache.put('/offline-session', new Response(JSON.stringify(payload), {
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      } catch (e) {}
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'OFFLINE_ROLE') {
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        if (event.data.role) {
+          await cache.put('/offline-role', new Response(JSON.stringify({ role: event.data.role, ts: Date.now() }), {
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        } else {
+          await cache.delete('/offline-role');
+        }
+      } catch (e) {}
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'PRECACHE_ROLES') {
+    const promise = precacheAllRoles();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
   }
 });
 
@@ -271,6 +394,7 @@ self.addEventListener('fetch', (event) => {
                   });
                   if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
                     cache.put('/login', resClone);
+                    cache.put('/login-meta', metaRes);
                   } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                     cache.put('/gardener', resClone);
                     cache.put('/gardener-meta', metaRes);
@@ -294,19 +418,30 @@ self.addEventListener('fetch', (event) => {
         try {
           const cache = await caches.open(CACHE_NAME);
 
+          // Priority 1: Если запрошен конкретный /admin, /leader или /gardener и он есть в кэше — отдавать ЕГО
+          if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
+            const directKey = new Request(url.pathname, { method: 'GET' });
+            const cachedDirect = normalizeCachedResponse(await cache.match(directKey));
+            if (cachedDirect) {
+              return withOfflineHeader(cachedDirect);
+            }
+          }
+
           // a. Определить роль из /offline-role или /offline-session
           let userRole = null;
+          let isOfflineSessActive = false;
           try {
             const roleRes = await cache.match('/offline-role');
             if (roleRes) {
               const roleData = await roleRes.clone().json();
               if (roleData && roleData.role) userRole = roleData.role;
             }
-            if (!userRole) {
-              const sessionRes = await cache.match('/offline-session');
-              if (sessionRes) {
-                const sessionData = await sessionRes.clone().json();
-                if (sessionData && sessionData.role) userRole = sessionData.role;
+            const sessionRes = await cache.match('/offline-session');
+            if (sessionRes) {
+              const sessionData = await sessionRes.clone().json();
+              if (sessionData) {
+                if (!userRole && sessionData.role) userRole = sessionData.role;
+                if (sessionData.active) isOfflineSessActive = true;
               }
             }
           } catch (e) {}
@@ -315,31 +450,42 @@ self.addEventListener('fetch', (event) => {
           if (userRole === 'ADMIN') rolePath = '/admin';
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
-          else if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
-            rolePath = url.pathname;
-          }
 
-          // b. Если роль есть и соответствующая страница в кэше и проходит normalizeCachedResponse и возраст < MAX_AGE_24H
+          // Priority 2: Если роль определена — вернуть закэшированную страницу этой роли
           if (rolePath) {
-            const cacheKey = request.method !== 'GET' ? new Request(rolePath, { method: 'GET' }) : rolePath;
-            const cachedPage = normalizeCachedResponse(await cache.match(cacheKey));
-            const age = await getPageCacheAge(rolePath);
-            if (cachedPage && age < MAX_AGE_24H) {
-              return cachedPage;
+            const cacheKey = new Request(rolePath, { method: 'GET' });
+            const cachedRolePage = normalizeCachedResponse(await cache.match(cacheKey));
+            if (cachedRolePage) {
+              return withOfflineHeader(cachedRolePage);
             }
           }
 
-          // c. Иначе для GET-навигации вернуть caches.match('/login') (если годна)
-          if (request.method === 'GET') {
-            const loginKey = new Request('/login', { method: 'GET' });
-            const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
-            if (cachedLogin) {
-              return cachedLogin;
-            }
+          // Priority 3: Если роли нет или роль не в кэше — проверить любой доступный дашборд
+          const anyAdmin = normalizeCachedResponse(await cache.match(new Request('/admin', { method: 'GET' })));
+          if (anyAdmin) return withOfflineHeader(anyAdmin);
+
+          const anyLeader = normalizeCachedResponse(await cache.match(new Request('/leader', { method: 'GET' })));
+          if (anyLeader) return withOfflineHeader(anyLeader);
+
+          const anyGardener = normalizeCachedResponse(await cache.match(new Request('/gardener', { method: 'GET' })));
+          if (anyGardener) return withOfflineHeader(anyGardener);
+
+          // Priority 4: Возвращаем закэшированный /login
+          const loginKey = new Request('/login', { method: 'GET' });
+          const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
+          if (cachedLogin) {
+            return withOfflineHeader(cachedLogin);
+          }
+
+          if (isOfflineSessActive || isOfflineSessionActive) {
+            return new Response(OFFLINE_STALE_HTML, {
+              status: 200,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            });
           }
         } catch (e) {}
 
-        // d/e. Финальный фоллбэк: OFFLINE_HTML
+        // e. Финальный фоллбэк: OFFLINE_HTML
         return new Response(OFFLINE_HTML, {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' },

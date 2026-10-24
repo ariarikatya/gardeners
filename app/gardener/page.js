@@ -308,7 +308,24 @@ export default function GardenerDashboard() {
     }
   };
 
+  const isOfflineSessionGuard = () => {
+    if (typeof window === 'undefined') return false;
+    return !navigator.onLine;
+  };
+
   const fetchOrders = async (silent = false) => {
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      if (storedRole && storedRole !== 'GARDENER') {
+        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'LEADER' ? '/leader' : '/gardener';
+        window.location.assign(correctPath);
+        return;
+      }
+      if (!silent) setLoading(false);
+      return;
+    }
+
     try {
       const [resOrders, resOps] = await Promise.all([
         apiFetch('/api/gardener/orders'),
@@ -361,7 +378,7 @@ export default function GardenerDashboard() {
   };
 
   const fetchAuction = async (isManualRefresh = false) => {
-    if (typeof window !== 'undefined' && !navigator.onLine) {
+    if (isOfflineSessionGuard()) {
       setIsOffline(true);
       if (isManualRefresh) {
         alert('Нет сети — показаны сохранённые данные');
@@ -388,6 +405,12 @@ export default function GardenerDashboard() {
   };
 
   const fetchProfile = async () => {
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      setLoadingWorks(false);
+      return;
+    }
+
     setLoadingWorks(true);
     try {
       const res = await apiFetch('/api/gardener/profile');
@@ -501,6 +524,23 @@ export default function GardenerDashboard() {
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const offlineSess = localStorage.getItem('offline_session') === '1';
+      const role = localStorage.getItem('auth_role') || 'GARDENER';
+      if (offlineSess) {
+        localStorage.setItem('offline_session_ts', String(Date.now()));
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then((reg) => {
+            const targetSw = reg.active || navigator.serviceWorker.controller;
+            if (targetSw) {
+              targetSw.postMessage({ type: 'OFFLINE_SESSION', active: true, role, ts: Date.now() });
+              targetSw.postMessage({ type: 'OFFLINE_ROLE', role });
+            }
+          }).catch(() => {});
+        }
+      }
+    }
+
     loadFromCache();
     fetchOrders();
     fetchProfile();
@@ -662,30 +702,38 @@ export default function GardenerDashboard() {
   };
 
   const handleLogout = async () => {
-    try {
-      if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
+      try {
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
 
         if ('serviceWorker' in navigator) {
+          const postWithReply = (targetSw, msg) => {
+            return new Promise((resolve) => {
+              if (!targetSw) return resolve();
+              if (typeof MessageChannel === 'undefined') {
+                try { targetSw.postMessage(msg); } catch (e) {}
+                return resolve();
+              }
+              const channel = new MessageChannel();
+              const timer = setTimeout(() => resolve(), 500);
+              channel.port1.onmessage = () => { clearTimeout(timer); resolve(); };
+              try { targetSw.postMessage(msg, [channel.port2]); } catch (e) { clearTimeout(timer); resolve(); }
+            });
+          };
+
           try {
             const reg = await navigator.serviceWorker.ready;
             const targetSw = reg.active || navigator.serviceWorker.controller;
             if (targetSw) {
-              targetSw.postMessage({
-                type: 'OFFLINE_SESSION',
-                active: false,
-              });
+              await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: false, role: null });
+              await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role: null });
             }
-          } catch (e) {
-            if (navigator.serviceWorker.controller) {
-              navigator.serviceWorker.controller.postMessage({
-                type: 'OFFLINE_SESSION',
-                active: false,
-              });
-            }
-          }
+          } catch (e) {}
         }
 
         if ('PushManager' in window && 'serviceWorker' in navigator) {
@@ -700,20 +748,12 @@ export default function GardenerDashboard() {
             }
           }).catch(() => {});
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
 
-    try {
-      const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-      if (res.ok && typeof window !== 'undefined') {
-        localStorage.removeItem('auth_role');
-        localStorage.removeItem('auth_phone');
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
-      }
-    } catch (e) {}
+      try {
+        fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+      } catch (e) {}
 
-    if (typeof window !== 'undefined') {
       window.location.replace('/login');
     } else {
       router.push('/login');
