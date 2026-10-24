@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-4d51569';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-c673e6c';
 const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -87,11 +87,14 @@ function safeCachePut(cacheName, request, response) {
 }
 
 // Helper to attach X-Offline-Served: 1 header to cached response
-function withOfflineHeader(response) {
+function withOfflineHeader(response, extraHeaders = {}) {
   if (!response) return response;
   try {
     const headers = new Headers(response.headers);
     headers.set('X-Offline-Served', '1');
+    for (const [k, v] of Object.entries(extraHeaders)) {
+      headers.set(k, v);
+    }
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -114,7 +117,7 @@ async function precacheAllRoles() {
       try {
         const req = new Request(url, { credentials: 'include', redirect: 'follow' });
         const res = await fetch(req);
-        if (res && res.ok && res.status === 200) {
+        if (res && res.ok && res.status === 200 && !res.redirected) {
           safeCachePut(CACHE_NAME, new Request(url), res);
           if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
           else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes());
@@ -257,6 +260,38 @@ self.addEventListener('message', (event) => {
 
     if (event.waitUntil) event.waitUntil(promise);
     promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'GET_OFFLINE_ROLE') {
+    const promise = (async () => {
+      let role = null;
+      let phone = null;
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const roleRes = await cache.match('/offline-role');
+        if (roleRes) {
+          const rData = await roleRes.json();
+          if (rData && rData.role) role = rData.role;
+        }
+        const sessionRes = await cache.match('/offline-session');
+        if (sessionRes) {
+          const sData = await sessionRes.json();
+          if (sData) {
+            if (!role && sData.role) role = sData.role;
+            if (sData.phone) phone = sData.phone;
+          }
+        }
+      } catch (e) {}
+      return { role, phone };
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then((resData) => {
+      if (port) {
+        try { port.postMessage({ success: true, ...resData }); } catch (e) {}
+      }
+    }).catch(() => reply(false));
     return;
   }
 
@@ -458,19 +493,15 @@ self.addEventListener('fetch', (event) => {
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
             }
+            // Если роль известна, но страница роли НЕ в кэше — вернуть /login с заголовком X-Offline-Session: 1
+            const loginKey = new Request('/login', { method: 'GET' });
+            const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
+            if (cachedLogin) {
+              return withOfflineHeader(cachedLogin, { 'X-Offline-Session': '1' });
+            }
           }
 
-          // Priority 3: Если роли нет или роль не в кэше — проверить любой доступный дашборд
-          const anyAdmin = normalizeCachedResponse(await cache.match(new Request('/admin', { method: 'GET' })));
-          if (anyAdmin) return withOfflineHeader(anyAdmin);
-
-          const anyLeader = normalizeCachedResponse(await cache.match(new Request('/leader', { method: 'GET' })));
-          if (anyLeader) return withOfflineHeader(anyLeader);
-
-          const anyGardener = normalizeCachedResponse(await cache.match(new Request('/gardener', { method: 'GET' })));
-          if (anyGardener) return withOfflineHeader(anyGardener);
-
-          // Priority 4: Возвращаем закэшированный /login
+          // Priority 3: Если роли нет — возвращаем закэшированный /login
           const loginKey = new Request('/login', { method: 'GET' });
           const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
           if (cachedLogin) {

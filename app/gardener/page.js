@@ -530,13 +530,37 @@ export default function GardenerDashboard() {
       if (offlineSess) {
         localStorage.setItem('offline_session_ts', String(Date.now()));
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then((reg) => {
-            const targetSw = reg.active || navigator.serviceWorker.controller;
-            if (targetSw) {
-              targetSw.postMessage({ type: 'OFFLINE_SESSION', active: true, role, ts: Date.now() });
-              targetSw.postMessage({ type: 'OFFLINE_ROLE', role });
-            }
-          }).catch(() => {});
+          const postWithReply = (targetSw, msg) => {
+            return new Promise((resolve) => {
+              if (!targetSw) return resolve();
+              if (typeof MessageChannel === 'undefined') {
+                try { targetSw.postMessage(msg); } catch (e) {}
+                return resolve();
+              }
+              const channel = new MessageChannel();
+              const timer = setTimeout(() => {
+                try {
+                  const retryChannel = new MessageChannel();
+                  const retryTimer = setTimeout(() => resolve(), 1000);
+                  retryChannel.port1.onmessage = () => { clearTimeout(retryTimer); resolve(); };
+                  targetSw.postMessage(msg, [retryChannel.port2]);
+                } catch (e) { resolve(); }
+              }, 2500);
+              channel.port1.onmessage = () => { clearTimeout(timer); resolve(); };
+              try { targetSw.postMessage(msg, [channel.port2]); } catch (e) { resolve(); }
+            });
+          };
+
+          (async () => {
+            try {
+              const reg = await navigator.serviceWorker.ready;
+              const targetSw = reg.active || navigator.serviceWorker.controller;
+              if (targetSw) {
+                await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: true, role, ts: Date.now() });
+                await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role });
+              }
+            } catch (e) {}
+          })();
         }
       }
     }
