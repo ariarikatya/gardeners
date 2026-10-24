@@ -704,18 +704,6 @@ export default function GardenerDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
-        const currentPhone = localStorage.getItem('auth_phone');
-        if (currentPhone) {
-          try {
-            const mapStr = localStorage.getItem('phone_roles_map');
-            if (mapStr) {
-              const map = JSON.parse(mapStr);
-              delete map[currentPhone];
-              localStorage.setItem('phone_roles_map', JSON.stringify(map));
-            }
-          } catch (e) {}
-        }
-
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');

@@ -85,11 +85,22 @@ export default function LoginPage() {
               return resolve();
             }
             const channel = new MessageChannel();
-            const timer = setTimeout(() => resolve(), 500);
+            const timer = setTimeout(() => {
+              try {
+                const retryChannel = new MessageChannel();
+                const retryTimer = setTimeout(() => resolve(), 1000);
+                retryChannel.port1.onmessage = () => { clearTimeout(retryTimer); resolve(); };
+                targetSw.postMessage(msg, [retryChannel.port2]);
+              } catch (e) {
+                resolve();
+              }
+            }, 2500);
+
             channel.port1.onmessage = () => {
               clearTimeout(timer);
               resolve();
             };
+
             try {
               targetSw.postMessage(msg, [channel.port2]);
             } catch (e) {
@@ -261,10 +272,6 @@ export default function LoginPage() {
       if (isManualLogout) {
         sessionStorage.removeItem('manual_logout');
         if (typeof window !== 'undefined') {
-          const currentPhone = localStorage.getItem('auth_phone');
-          if (currentPhone) {
-            removePhoneFromRoleMap(currentPhone);
-          }
           localStorage.removeItem('auth_token');
           localStorage.removeItem('auth_role');
           localStorage.removeItem('offline_session');
@@ -292,9 +299,14 @@ export default function LoginPage() {
 
       if (offlineSessionActive) {
         const tsNum = Number(offlineSessionTs);
+        const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+
         if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_24H)) {
           localStorage.setItem('offline_session_ts', String(Date.now()));
-          notifySwOfflineSession(true);
+          notifySwOfflineSession(true, role);
+        } else if (isOffline && (saved || role)) {
+          localStorage.setItem('offline_session_ts', String(Date.now()));
+          notifySwOfflineSession(true, role);
         } else {
           localStorage.removeItem('offline_session');
           localStorage.removeItem('offline_session_ts');
