@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-9ed3bb2';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-4d51569';
 const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -23,6 +23,32 @@ const OFFLINE_HTML = `<!DOCTYPE html>
     <p>Не удалось подключиться к сети. Проверьте интернет или подключение к Wi-Fi и повторите попытку.</p>
     <button onclick="window.location.reload()">Повторить попытку</button>
     <button class="secondary" onclick="caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/login'; })">Очистить кэш и войти</button>
+  </div>
+</body>
+</html>`;
+
+const OFFLINE_STALE_HTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Офлайн-режим | Анемон Агро</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
+    h1 { font-size: 20px; font-weight: 700; color: #d97706; margin: 0 0 12px; }
+    p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
+    button { background: #d97706; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
+    button.secondary { background: #e2e8f0; color: #1e293b; }
+    button:active { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📡 Офлайн: данные могут быть устаревшими</h1>
+    <p>Кэш интерфейса этой страницы не найден или старше 24 часов. Подключитесь к сети для обновления данных.</p>
+    <button onclick="window.location.reload()">Повторить попытку</button>
+    <button class="secondary" onclick="window.location.href='/login'">Перейти к экрану входа</button>
   </div>
 </body>
 </html>`;
@@ -296,17 +322,19 @@ self.addEventListener('fetch', (event) => {
 
           // a. Определить роль из /offline-role или /offline-session
           let userRole = null;
+          let isOfflineSessActive = false;
           try {
             const roleRes = await cache.match('/offline-role');
             if (roleRes) {
               const roleData = await roleRes.clone().json();
               if (roleData && roleData.role) userRole = roleData.role;
             }
-            if (!userRole) {
-              const sessionRes = await cache.match('/offline-session');
-              if (sessionRes) {
-                const sessionData = await sessionRes.clone().json();
-                if (sessionData && sessionData.role) userRole = sessionData.role;
+            const sessionRes = await cache.match('/offline-session');
+            if (sessionRes) {
+              const sessionData = await sessionRes.clone().json();
+              if (sessionData) {
+                if (!userRole && sessionData.role) userRole = sessionData.role;
+                if (sessionData.active) isOfflineSessActive = true;
               }
             }
           } catch (e) {}
@@ -315,11 +343,22 @@ self.addEventListener('fetch', (event) => {
           if (userRole === 'ADMIN') rolePath = '/admin';
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
-          else if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
+
+          // b. Если пользователь запросил конкретный /gardener|/admin|/leader, но его роль зафиксирована как другая
+          if (userRole && rolePath && ['/admin', '/leader', '/gardener'].includes(url.pathname) && url.pathname !== rolePath) {
+            const roleKey = new Request(rolePath, { method: 'GET' });
+            const cachedRolePage = normalizeCachedResponse(await cache.match(roleKey));
+            const age = await getPageCacheAge(rolePath);
+            if (cachedRolePage && age < MAX_AGE_24H) {
+              return cachedRolePage;
+            }
+          }
+
+          if (!rolePath && ['/admin', '/leader', '/gardener'].includes(url.pathname)) {
             rolePath = url.pathname;
           }
 
-          // b. Если роль есть и соответствующая страница в кэше и проходит normalizeCachedResponse и возраст < MAX_AGE_24H
+          // c. Если роль есть и соответствующая страница в кэше и проходит normalizeCachedResponse и возраст < MAX_AGE_24H
           if (rolePath) {
             const cacheKey = request.method !== 'GET' ? new Request(rolePath, { method: 'GET' }) : rolePath;
             const cachedPage = normalizeCachedResponse(await cache.match(cacheKey));
@@ -327,9 +366,16 @@ self.addEventListener('fetch', (event) => {
             if (cachedPage && age < MAX_AGE_24H) {
               return cachedPage;
             }
+            // Если была активная офлайн-сессия, но страница роли отсутствует или старше 24ч:
+            if (isOfflineSessActive || isOfflineSessionActive) {
+              return new Response(OFFLINE_STALE_HTML, {
+                status: 200,
+                headers: { 'Content-Type': 'text/html; charset=utf-8' },
+              });
+            }
           }
 
-          // c. Иначе для GET-навигации вернуть caches.match('/login') (если годна)
+          // d. Иначе для GET-навигации вернуть caches.match('/login') (если годна)
           if (request.method === 'GET') {
             const loginKey = new Request('/login', { method: 'GET' });
             const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
@@ -339,7 +385,7 @@ self.addEventListener('fetch', (event) => {
           }
         } catch (e) {}
 
-        // d/e. Финальный фоллбэк: OFFLINE_HTML
+        // e. Финальный фоллбэк: OFFLINE_HTML
         return new Response(OFFLINE_HTML, {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' },

@@ -11,9 +11,37 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const notifySwOfflineSession = async (active) => {
+  const [showRoleSelectModal, setShowRoleSelectModal] = useState(false);
+  const [pendingOfflinePhone, setPendingOfflinePhone] = useState(null);
+
+  const savePhoneRoleMap = (phoneNum, role) => {
+    if (!phoneNum || !role || typeof window === 'undefined') return;
+    const clean = String(phoneNum).replace(/\D/g, '');
+    if (!clean) return;
+    try {
+      const mapStr = localStorage.getItem('phone_roles_map');
+      const map = mapStr ? JSON.parse(mapStr) : {};
+      map[clean] = role;
+      localStorage.setItem('phone_roles_map', JSON.stringify(map));
+    } catch (e) {}
+  };
+
+  const getRoleForPhone = (phoneNum) => {
+    if (!phoneNum || typeof window === 'undefined') return null;
+    const clean = String(phoneNum).replace(/\D/g, '');
+    if (!clean) return null;
+    try {
+      const mapStr = localStorage.getItem('phone_roles_map');
+      const map = mapStr ? JSON.parse(mapStr) : {};
+      return map[clean] || null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const notifySwOfflineSession = async (active, roleOverride = null) => {
     if (typeof window !== 'undefined') {
-      const role = localStorage.getItem('auth_role') || 'GARDENER';
+      const role = roleOverride || localStorage.getItem('auth_role');
       if (active) {
         localStorage.setItem('offline_session', '1');
         localStorage.setItem('offline_session_ts', String(Date.now()));
@@ -22,7 +50,7 @@ export default function LoginPage() {
         localStorage.removeItem('offline_session_ts');
       }
 
-      if ('serviceWorker' in navigator) {
+      if ('serviceWorker' in navigator && role) {
         const sendMessages = (targetSw) => {
           if (!targetSw) return;
           targetSw.postMessage({
@@ -51,7 +79,8 @@ export default function LoginPage() {
   };
 
   const redirectByRole = async (role, isOffline = false) => {
-    await notifySwOfflineSession(isOffline);
+    if (!role) return;
+    await notifySwOfflineSession(true, role);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
     if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
       if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
@@ -64,14 +93,41 @@ export default function LoginPage() {
     }
   };
 
-  const handleOfflineLogin = async () => {
+  const handleOfflineLogin = async (targetPhone = null, selectedRole = null) => {
     try {
-      if (typeof window !== 'undefined') sessionStorage.removeItem('manual_logout');
-      const role = localStorage.getItem('auth_role') || 'GARDENER';
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('manual_logout', '0');
+      }
+
+      const cleanPhone = String(targetPhone || phone || savedPhone || (typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : '') || '').replace(/\D/g, '');
+
+      let role = selectedRole || (cleanPhone ? getRoleForPhone(cleanPhone) : null) || (typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null);
+
+      if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
+        setPendingOfflinePhone(cleanPhone || null);
+        setShowRoleSelectModal(true);
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('auth_role', role);
+        if (cleanPhone) {
+          localStorage.setItem('auth_phone', cleanPhone);
+          savePhoneRoleMap(cleanPhone, role);
+        }
+      }
+
       await redirectByRole(role, true);
     } catch (e) {
-      await redirectByRole('GARDENER', true);
+      console.error('Error in handleOfflineLogin:', e);
     }
+  };
+
+  const handleRoleSelection = async (chosenRole) => {
+    setShowRoleSelectModal(false);
+    const targetPhone = pendingOfflinePhone;
+    setPendingOfflinePhone(null);
+    await handleOfflineLogin(targetPhone, chosenRole);
   };
 
   const handleAutoLoginWithPhone = async (targetPhone) => {
@@ -107,7 +163,10 @@ export default function LoginPage() {
       const cleanPhone = String(phoneToUse).replace(/\D/g, '');
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
       if (data.token) localStorage.setItem('auth_token', data.token);
-      if (data.role) localStorage.setItem('auth_role', data.role);
+      if (data.role) {
+        localStorage.setItem('auth_role', data.role);
+        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role);
+      }
 
       await redirectByRole(data.role);
     } catch (err) {
@@ -149,18 +208,18 @@ export default function LoginPage() {
       const saved = localStorage.getItem('auth_phone');
       const token = localStorage.getItem('auth_token');
       const role = localStorage.getItem('auth_role');
+      const offlineSess = localStorage.getItem('offline_session');
 
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
       }
 
-      const isOffline = typeof window !== 'undefined' && !navigator.onLine;
-      if (isOffline) {
-        if (saved || role || token) {
-          setShowOfflineOption(true);
-        }
+      if (saved || role || token || offlineSess === '1') {
+        setShowOfflineOption(true);
       }
+
+      const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
       const offlineSessionTs = localStorage.getItem('offline_session_ts');
@@ -169,9 +228,8 @@ export default function LoginPage() {
       if (offlineSessionActive) {
         const tsNum = Number(offlineSessionTs);
         if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_24H)) {
-          if (isOffline) {
-            notifySwOfflineSession(true);
-          }
+          localStorage.setItem('offline_session_ts', String(Date.now()));
+          notifySwOfflineSession(true);
         } else {
           localStorage.removeItem('offline_session');
           localStorage.removeItem('offline_session_ts');
@@ -194,12 +252,8 @@ export default function LoginPage() {
     const isNetworkOffline = typeof window !== 'undefined' && !navigator.onLine;
 
     if (isNetworkOffline) {
-      const storedPhone = localStorage.getItem('auth_phone');
-      const storedRole = localStorage.getItem('auth_role');
-      if ((storedPhone && cleanPhone && storedPhone === cleanPhone) || storedRole) {
-        await handleOfflineLogin();
-        return;
-      }
+      await handleOfflineLogin(cleanPhone);
+      return;
     }
 
     setLoading(true);
@@ -217,17 +271,17 @@ export default function LoginPage() {
 
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
       if (data.token) localStorage.setItem('auth_token', data.token);
-      if (data.role) localStorage.setItem('auth_role', data.role);
+      if (data.role) {
+        localStorage.setItem('auth_role', data.role);
+        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role);
+      }
 
       await redirectByRole(data.role);
     } catch (err) {
       const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
-      const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
-      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
-      const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
-      if (isNetworkErr && (storedPhone || storedRole || storedToken)) {
-        await handleOfflineLogin();
+      if (isNetworkErr) {
+        await handleOfflineLogin(cleanPhone);
         return;
       }
 
@@ -329,14 +383,72 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-lg font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:bg-emerald-400"
-          >
-            {loading ? 'Вход...' : 'Войти'}
-          </button>
+          <div className="space-y-3 pt-2">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-lg font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:bg-emerald-400"
+            >
+              {loading ? 'Вход...' : 'Войти'}
+            </button>
+
+            {showOfflineOption && (
+              <button
+                type="button"
+                onClick={() => handleOfflineLogin(phone)}
+                className="w-full flex justify-center py-3 px-4 border border-amber-300 rounded-lg shadow-sm text-lg font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
+              >
+                📡 Войти офлайн
+              </button>
+            )}
+          </div>
         </form>
+
+        {showRoleSelectModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4">
+              <h3 className="text-xl font-bold text-slate-900 text-center">
+                Выберите вашу роль
+              </h3>
+              <p className="text-sm text-slate-600 text-center">
+                Для входа без интернета укажите вашу роль в системе:
+              </p>
+              <div className="space-y-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleRoleSelection('GARDENER')}
+                  className="w-full py-3 px-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-semibold rounded-xl transition-colors text-base"
+                >
+                  🌿 Садовник
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRoleSelection('ADMIN')}
+                  className="w-full py-3 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 font-semibold rounded-xl transition-colors text-base"
+                >
+                  📋 Администратор / Диспетчер
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRoleSelection('LEADER')}
+                  className="w-full py-3 px-4 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-semibold rounded-xl transition-colors text-base"
+                >
+                  👑 Владелец (Leader)
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRoleSelectModal(false);
+                  setPendingOfflinePhone(null);
+                }}
+                className="w-full text-center text-sm text-slate-500 hover:text-slate-700 pt-2 font-medium"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

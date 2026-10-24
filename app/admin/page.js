@@ -460,6 +460,21 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const offlineSess = localStorage.getItem('offline_session') === '1';
+    const role = localStorage.getItem('auth_role') || 'ADMIN';
+    if (offlineSess) {
+      localStorage.setItem('offline_session_ts', String(Date.now()));
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            targetSw.postMessage({ type: 'OFFLINE_SESSION', active: true, role, ts: Date.now() });
+            targetSw.postMessage({ type: 'OFFLINE_ROLE', role });
+          }
+        }).catch(() => {});
+      }
+    }
+
     refreshQueueCount();
 
     const handleOnline = () => {
