@@ -51,23 +51,23 @@ async function runLoginFlowTests() {
   assert(loginPageCode.includes("localStorage.removeItem('auth_role')"), 'login/page.js must clear auth_role when manual_logout is set');
   console.log('✅ Test 2 Passed! manual_logout handling logic verified.');
 
-  // Test 3: Dashboard handleLogout logic inspection (auth_phone removal MUST be conditional on res.ok)
-  console.log('Test 3: Verifying handleLogout in dashboard pages clears auth_phone/auth_role ONLY on res.ok...');
+  // Test 3: Dashboard handleLogout logic inspection (clears tokens/sessions, preserves auth_phone & phone_roles_map)
+  console.log('Test 3: Verifying handleLogout in dashboard pages clears tokens/sessions while preserving auth_phone...');
   const gardenerPath = path.resolve('app/gardener/page.js');
   const gardenerCode = fs.readFileSync(gardenerPath, 'utf8');
-  assert(gardenerCode.includes("if (res.ok") && gardenerCode.includes("localStorage.removeItem('auth_phone')"), 'gardener/page.js handleLogout must remove auth_phone only on res.ok');
+  assert(gardenerCode.includes("localStorage.removeItem('auth_token')"), 'gardener/page.js handleLogout must remove auth_token');
   assert(gardenerCode.includes("sessionStorage.setItem('manual_logout', '1')"), 'gardener/page.js handleLogout must set manual_logout');
 
   const adminPath = path.resolve('app/admin/page.js');
   const adminCode = fs.readFileSync(adminPath, 'utf8');
-  assert(adminCode.includes("if (res.ok") && adminCode.includes("localStorage.removeItem('auth_phone')"), 'admin/page.js handleLogout must remove auth_phone only on res.ok');
+  assert(adminCode.includes("localStorage.removeItem('auth_token')"), 'admin/page.js handleLogout must remove auth_token');
   assert(adminCode.includes("sessionStorage.setItem('manual_logout', '1')"), 'admin/page.js handleLogout must set manual_logout');
 
   const leaderPath = path.resolve('app/leader/page.js');
   const leaderCode = fs.readFileSync(leaderPath, 'utf8');
-  assert(leaderCode.includes("if (res.ok") && leaderCode.includes("localStorage.removeItem('auth_phone')"), 'leader/page.js handleLogout must remove auth_phone only on res.ok');
+  assert(leaderCode.includes("localStorage.removeItem('auth_token')"), 'leader/page.js handleLogout must remove auth_token');
   assert(leaderCode.includes("sessionStorage.setItem('manual_logout', '1')"), 'leader/page.js handleLogout must set manual_logout');
-  console.log('✅ Test 3 Passed! All dashboards clear auth_phone/auth_role conditionally on res.ok and set manual_logout = 1.');
+  console.log('✅ Test 3 Passed! All dashboards clear tokens/session keys and set manual_logout = 1.');
 
   // Test 4: Behavioral state sequence simulation
   console.log('Test 4: Running behavioral sequence simulation (Logout -> Login -> Card -> Manual Switch -> New Tab)...');

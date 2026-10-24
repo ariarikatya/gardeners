@@ -184,33 +184,60 @@ async function getPageCacheAge(pathname) {
 
 // === MESSAGE: ручное обновление, роль и флаг офлайн-сессии ===
 self.addEventListener('message', (event) => {
-  if (event.data) {
-    if (event.data.type === 'SKIP_WAITING') {
-      self.skipWaiting();
-    } else if (event.data.type === 'OFFLINE_SESSION') {
-      isOfflineSessionActive = Boolean(event.data.active);
-      caches.open(CACHE_NAME).then((cache) => {
+  if (!event.data) return;
+
+  const port = event.ports && event.ports[0];
+  const reply = (success = true) => {
+    if (port) {
+      try { port.postMessage({ success }); } catch (e) {}
+    }
+  };
+
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+    reply(true);
+    return;
+  }
+
+  if (event.data.type === 'OFFLINE_SESSION') {
+    isOfflineSessionActive = Boolean(event.data.active);
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
         if (event.data.active) {
           const payload = { active: true, ts: event.data.ts || Date.now() };
           if (event.data.role) payload.role = event.data.role;
-          cache.put('/offline-session', new Response(JSON.stringify(payload), {
+          await cache.put('/offline-session', new Response(JSON.stringify(payload), {
             headers: { 'Content-Type': 'application/json' }
           }));
         } else {
-          cache.delete('/offline-session');
+          await cache.delete('/offline-session');
         }
-      }).catch(() => {});
-    } else if (event.data.type === 'OFFLINE_ROLE') {
-      caches.open(CACHE_NAME).then((cache) => {
+      } catch (e) {}
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'OFFLINE_ROLE') {
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
         if (event.data.role) {
-          cache.put('/offline-role', new Response(JSON.stringify({ role: event.data.role, ts: Date.now() }), {
+          await cache.put('/offline-role', new Response(JSON.stringify({ role: event.data.role, ts: Date.now() }), {
             headers: { 'Content-Type': 'application/json' }
           }));
         } else {
-          cache.delete('/offline-role');
+          await cache.delete('/offline-role');
         }
-      }).catch(() => {});
-    }
+      } catch (e) {}
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
   }
 });
 

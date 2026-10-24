@@ -7,6 +7,7 @@ export default function LoginPage() {
   const [savedPhone, setSavedPhone] = useState(null);
   const [isSavedPhoneMode, setIsSavedPhoneMode] = useState(false);
   const [showOfflineOption, setShowOfflineOption] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -51,28 +52,44 @@ export default function LoginPage() {
       }
 
       if ('serviceWorker' in navigator && role) {
-        const sendMessages = (targetSw) => {
-          if (!targetSw) return;
-          targetSw.postMessage({
-            type: 'OFFLINE_SESSION',
-            active: Boolean(active),
-            role,
-            ts: Date.now(),
+        const postWithReply = (targetSw, msg) => {
+          return new Promise((resolve) => {
+            if (!targetSw) return resolve();
+            if (typeof MessageChannel === 'undefined') {
+              try { targetSw.postMessage(msg); } catch (e) {}
+              return resolve();
+            }
+            const channel = new MessageChannel();
+            const timer = setTimeout(() => resolve(), 500);
+            channel.port1.onmessage = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+            try {
+              targetSw.postMessage(msg, [channel.port2]);
+            } catch (e) {
+              clearTimeout(timer);
+              resolve();
+            }
           });
-          if (active) {
-            targetSw.postMessage({
-              type: 'OFFLINE_ROLE',
-              role,
-            });
-          }
         };
 
         try {
           const reg = await navigator.serviceWorker.ready;
           const targetSw = reg.active || navigator.serviceWorker.controller;
-          sendMessages(targetSw);
+          if (targetSw) {
+            await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: Boolean(active), role, ts: Date.now() });
+            if (active) {
+              await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role });
+            }
+          }
         } catch (e) {
-          sendMessages(navigator.serviceWorker.controller);
+          if (navigator.serviceWorker.controller) {
+            await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_SESSION', active: Boolean(active), role, ts: Date.now() });
+            if (active) {
+              await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_ROLE', role });
+            }
+          }
         }
       }
     }
@@ -99,9 +116,17 @@ export default function LoginPage() {
         sessionStorage.setItem('manual_logout', '0');
       }
 
-      const cleanPhone = String(targetPhone || phone || savedPhone || (typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : '') || '').replace(/\D/g, '');
+      const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      const cleanPhone = String(targetPhone || phone || savedPhone || storedPhone || '').replace(/\D/g, '');
 
-      let role = selectedRole || (cleanPhone ? getRoleForPhone(cleanPhone) : null) || (typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null);
+      let role = selectedRole || (cleanPhone ? getRoleForPhone(cleanPhone) : null);
+      if (!role && cleanPhone && storedPhone && cleanPhone === storedPhone) {
+        role = storedRole;
+      }
+      if (!role && !cleanPhone) {
+        role = storedRole;
+      }
 
       if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
         setPendingOfflinePhone(cleanPhone || null);
@@ -192,6 +217,15 @@ export default function LoginPage() {
   const handleAutoLogin = () => handleAutoLoginWithPhone(savedPhone);
 
   useEffect(() => {
+    const updateOnlineStatus = () => {
+      const online = typeof window !== 'undefined' ? navigator.onLine : true;
+      setIsOnline(online);
+    };
+
+    updateOnlineStatus();
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+
     try {
       const isManualLogout = typeof window !== 'undefined' && sessionStorage.getItem('manual_logout') === '1';
 
@@ -215,11 +249,9 @@ export default function LoginPage() {
         setIsSavedPhoneMode(true);
       }
 
-      if (saved || role || token || offlineSess === '1') {
+      if (!navigator.onLine || saved || role || token || offlineSess === '1') {
         setShowOfflineOption(true);
       }
-
-      const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
       const offlineSessionTs = localStorage.getItem('offline_session_ts');
@@ -238,6 +270,11 @@ export default function LoginPage() {
     } catch (e) {
       // localStorage error fallback
     }
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+    };
   }, []);
 
   const handleLogin = async (e) => {
@@ -292,6 +329,10 @@ export default function LoginPage() {
   };
 
   const formattedSavedPhone = savedPhone ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : '';
+  const savedRole = savedPhone ? getRoleForPhone(savedPhone) || (typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null) : null;
+  const roleLabel = savedRole === 'ADMIN' ? 'Администратор' : savedRole === 'LEADER' ? 'Владелец' : savedRole === 'GARDENER' ? 'Садовник' : null;
+
+  const isOfflineNow = !isOnline || (typeof window !== 'undefined' && !navigator.onLine);
 
   if (isSavedPhoneMode && savedPhone) {
     return (
@@ -302,7 +343,9 @@ export default function LoginPage() {
               Вход в систему
             </h2>
             <p className="mt-2 text-center text-base text-slate-600 font-medium">
-              Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>?<br />Это ваш номер?
+              Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>
+              {roleLabel ? <span className="block text-xs font-semibold text-emerald-700 mt-1">Роль: {roleLabel}</span> : null}
+              <br />Это ваш номер?
             </p>
           </div>
 
@@ -315,17 +358,23 @@ export default function LoginPage() {
           <div className="space-y-3 pt-2">
             <button
               type="button"
-              onClick={handleAutoLogin}
+              onClick={() => {
+                if (isOfflineNow) {
+                  handleOfflineLogin(savedPhone);
+                } else {
+                  handleAutoLogin();
+                }
+              }}
               disabled={loading}
               className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-lg font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:bg-emerald-400"
             >
               {loading ? 'Вход...' : 'Да, войти'}
             </button>
 
-            {showOfflineOption && (
+            {(showOfflineOption || isOfflineNow) && (
               <button
                 type="button"
-                onClick={handleOfflineLogin}
+                onClick={() => handleOfflineLogin(savedPhone)}
                 className="w-full flex justify-center py-3 px-4 border border-amber-300 rounded-lg shadow-sm text-lg font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
               >
                 📡 Войти офлайн

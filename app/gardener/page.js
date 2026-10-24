@@ -679,30 +679,38 @@ export default function GardenerDashboard() {
   };
 
   const handleLogout = async () => {
-    try {
-      if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined') {
+      try {
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
 
         if ('serviceWorker' in navigator) {
+          const postWithReply = (targetSw, msg) => {
+            return new Promise((resolve) => {
+              if (!targetSw) return resolve();
+              if (typeof MessageChannel === 'undefined') {
+                try { targetSw.postMessage(msg); } catch (e) {}
+                return resolve();
+              }
+              const channel = new MessageChannel();
+              const timer = setTimeout(() => resolve(), 500);
+              channel.port1.onmessage = () => { clearTimeout(timer); resolve(); };
+              try { targetSw.postMessage(msg, [channel.port2]); } catch (e) { clearTimeout(timer); resolve(); }
+            });
+          };
+
           try {
             const reg = await navigator.serviceWorker.ready;
             const targetSw = reg.active || navigator.serviceWorker.controller;
             if (targetSw) {
-              targetSw.postMessage({
-                type: 'OFFLINE_SESSION',
-                active: false,
-              });
+              await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: false });
+              await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role: null });
             }
-          } catch (e) {
-            if (navigator.serviceWorker.controller) {
-              navigator.serviceWorker.controller.postMessage({
-                type: 'OFFLINE_SESSION',
-                active: false,
-              });
-            }
-          }
+          } catch (e) {}
         }
 
         if ('PushManager' in window && 'serviceWorker' in navigator) {
@@ -717,20 +725,12 @@ export default function GardenerDashboard() {
             }
           }).catch(() => {});
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
 
-    try {
-      const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-      if (res.ok && typeof window !== 'undefined') {
-        localStorage.removeItem('auth_role');
-        localStorage.removeItem('auth_phone');
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
-      }
-    } catch (e) {}
+      try {
+        fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+      } catch (e) {}
 
-    if (typeof window !== 'undefined') {
       window.location.replace('/login');
     } else {
       router.push('/login');
