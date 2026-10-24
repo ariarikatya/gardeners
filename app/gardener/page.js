@@ -310,15 +310,18 @@ export default function GardenerDashboard() {
 
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
-    if (!navigator.onLine) return true;
-    const offlineSess = localStorage.getItem('offline_session') === '1';
-    const offlineTs = Number(localStorage.getItem('offline_session_ts') || '0');
-    return offlineSess && offlineTs > 0 && (Date.now() - offlineTs < 24 * 60 * 60 * 1000);
+    return !navigator.onLine;
   };
 
   const fetchOrders = async (silent = false) => {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      if (storedRole && storedRole !== 'GARDENER') {
+        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'LEADER' ? '/leader' : '/gardener';
+        window.location.assign(correctPath);
+        return;
+      }
       if (!silent) setLoading(false);
       return;
     }

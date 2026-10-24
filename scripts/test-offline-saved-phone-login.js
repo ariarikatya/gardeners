@@ -209,18 +209,15 @@ async function runOfflineSavedPhoneLoginTest() {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
       }
     } catch (e) {}
 
     try {
-      const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-      if (res.ok && typeof window !== 'undefined') {
-        localStorage.removeItem('auth_role');
-        localStorage.removeItem('auth_phone');
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
-      }
+      fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     } catch (e) {}
 
     if (typeof window !== 'undefined') {
@@ -230,13 +227,49 @@ async function runOfflineSavedPhoneLoginTest() {
 
   await handleLogout();
 
-  // Assertion 6: auth_token is removed
+  // Assertion 6: auth_token and auth_role are removed on logout
   assert(mockLocalStorage.getItem('auth_token') === null, 'auth_token must be removed on logout');
-  // Assertion 7: auth_phone and auth_role remain in localStorage on failed/offline logout
+  assert(mockLocalStorage.getItem('auth_role') === null, 'auth_role must be removed on logout');
+  // Assertion 7: auth_phone remains in localStorage on offline logout
   assert(mockLocalStorage.getItem('auth_phone') === '79991234567', 'auth_phone must remain in localStorage on offline logout');
-  assert(mockLocalStorage.getItem('auth_role') === 'ADMIN', 'auth_role must remain in localStorage on offline logout');
   assert(replacedLocationUrl === '/login', 'window.location.replace("/login") executed');
-  console.log('✅ Assertion 6 & 7 Passed: Offline handleLogout preserved auth_phone and auth_role in localStorage.');
+  console.log('✅ Assertion 6 & 7 Passed: Offline handleLogout preserved auth_phone in localStorage while clearing token/role.');
+
+  // 7. Testing phone_roles_map & unmapped phone role modal selection
+  console.log('\nTesting Phone Role Map & Role Modal Selection...');
+
+  const savePhoneRoleMap = (phoneNum, roleVal) => {
+    const clean = String(phoneNum).replace(/\D/g, '');
+    if (!clean) return;
+    try {
+      const mapStr = mockLocalStorage.getItem('phone_roles_map');
+      const map = mapStr ? JSON.parse(mapStr) : {};
+      map[clean] = roleVal;
+      mockLocalStorage.setItem('phone_roles_map', JSON.stringify(map));
+    } catch (e) {}
+  };
+
+  const removePhoneFromRoleMap = (phoneNum) => {
+    const clean = String(phoneNum).replace(/\D/g, '');
+    if (!clean) return;
+    try {
+      const mapStr = mockLocalStorage.getItem('phone_roles_map');
+      if (mapStr) {
+        const map = JSON.parse(mapStr);
+        delete map[clean];
+        mockLocalStorage.setItem('phone_roles_map', JSON.stringify(map));
+      }
+    } catch (e) {}
+  };
+
+  savePhoneRoleMap('79001112233', 'ADMIN');
+  const savedMap = JSON.parse(mockLocalStorage.getItem('phone_roles_map'));
+  assert(savedMap['79001112233'] === 'ADMIN', 'phone_roles_map must store role for 79001112233');
+
+  removePhoneFromRoleMap('79001112233');
+  const updatedMap = JSON.parse(mockLocalStorage.getItem('phone_roles_map'));
+  assert(updatedMap['79001112233'] === undefined, 'removePhoneFromRoleMap must delete phone entry');
+  console.log('✅ Assertion 8 Passed: phone_roles_map save & remove verified.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN & LOGOUT TESTS PASSED SUCCESSFULLY!');
 }

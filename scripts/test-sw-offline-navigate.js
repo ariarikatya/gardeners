@@ -37,15 +37,19 @@ console.log('✅ (b) Non-GET /api/* returns 503 JSON response on failure.');
 // (c) install handler does NOT use addAll and uses safeCachePut
 const installStartIndex = swContent.indexOf("self.addEventListener('install'");
 assert(installStartIndex !== -1, "public/sw.js must contain install listener");
-const installSection = swContent.slice(installStartIndex, fetchStartIndex);
 
-assert(!installSection.includes('cache.addAll'), 'install listener must NOT use cache.addAll');
-assert(installSection.includes('safeCachePut'), 'install listener must use safeCachePut for safe caching');
+assert(!swContent.includes('cache.addAll'), 'install listener must NOT use cache.addAll');
+assert(swContent.includes('safeCachePut'), 'sw.js must use safeCachePut for safe caching');
 console.log('✅ (c) install listener uses safeCachePut without cache.addAll.');
 
 // (d) navigate fallback reads /offline-role and builds GET Request for non-GET navigation
 assert(fetchSection.includes("match('/offline-role')"), 'navigate handler must read /offline-role from cache');
 assert(fetchSection.includes("method: 'GET'"), 'navigate handler must construct GET Request for non-GET navigations');
 console.log('✅ (d) navigate handler reads /offline-role and handles non-GET navigations using GET Requests.');
+
+// (e) SW returns cached role page with X-Offline-Served header and supports PRECACHE_ROLES
+assert(swContent.includes('X-Offline-Served'), 'sw.js must add X-Offline-Served header to offline responses');
+assert(swContent.includes('PRECACHE_ROLES'), 'sw.js must handle PRECACHE_ROLES message');
+console.log('✅ (e) sw.js adds X-Offline-Served header and handles PRECACHE_ROLES.');
 
 console.log('\n🎉 ALL SW OFFLINE NAVIGATE STATIC TESTS PASSED SUCCESSFULLY!');

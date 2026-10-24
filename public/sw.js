@@ -86,28 +86,50 @@ function safeCachePut(cacheName, request, response) {
   }).catch(() => {});
 }
 
+// Helper to attach X-Offline-Served: 1 header to cached response
+function withOfflineHeader(response) {
+  if (!response) return response;
+  try {
+    const headers = new Headers(response.headers);
+    headers.set('X-Offline-Served', '1');
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  } catch (e) {
+    return response;
+  }
+}
+
+async function precacheAllRoles() {
+  const cache = await caches.open(CACHE_NAME);
+  const now = Date.now();
+  const metaRes = () => new Response(JSON.stringify({ ts: now }), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  await Promise.all(
+    APP_SHELL.map(async (url) => {
+      try {
+        const req = new Request(url, { credentials: 'include', redirect: 'follow' });
+        const res = await fetch(req);
+        if (res && res.ok && res.status === 200) {
+          safeCachePut(CACHE_NAME, new Request(url), res);
+          if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
+          else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes());
+          else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes());
+          else if (url === '/login') safeCachePut(CACHE_NAME, new Request('/login-meta'), metaRes());
+        }
+      } catch (e) {}
+    })
+  );
+}
+
 // === INSTALL: сразу берём контроль и безопасно кэшируем APP_SHELL без addAll ===
 self.addEventListener('install', (event) => {
   self.skipWaiting();
-  event.waitUntil(
-    Promise.all(
-      APP_SHELL.map(async (url) => {
-        try {
-          const req = new Request(url, { credentials: 'include', redirect: 'follow' });
-          const res = await fetch(req);
-          safeCachePut(CACHE_NAME, new Request(url), res);
-          if (res && res.ok && res.status === 200) {
-            const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
-              headers: { 'Content-Type': 'application/json' }
-            });
-            if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes);
-            else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes);
-            else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes);
-          }
-        } catch (e) {}
-      })
-    )
-  );
+  event.waitUntil(precacheAllRoles());
 });
 
 let isOfflineSessionActive = false;
@@ -239,6 +261,13 @@ self.addEventListener('message', (event) => {
     promise.then(() => reply(true)).catch(() => reply(false));
     return;
   }
+
+  if (event.data.type === 'PRECACHE_ROLES') {
+    const promise = precacheAllRoles();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
 });
 
 // === FETCH: умное кэширование ===
@@ -324,6 +353,7 @@ self.addEventListener('fetch', (event) => {
                   });
                   if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
                     cache.put('/login', resClone);
+                    cache.put('/login-meta', metaRes);
                   } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                     cache.put('/gardener', resClone);
                     cache.put('/gardener-meta', metaRes);
@@ -371,35 +401,29 @@ self.addEventListener('fetch', (event) => {
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
 
-          // b. Если пользователь запросил конкретный /gardener|/admin|/leader, но его роль зафиксирована как другая
-          if (userRole && rolePath && ['/admin', '/leader', '/gardener'].includes(url.pathname) && url.pathname !== rolePath) {
-            const roleKey = new Request(rolePath, { method: 'GET' });
-            const cachedRolePage = normalizeCachedResponse(await cache.match(roleKey));
-            const age = await getPageCacheAge(rolePath);
-            if (cachedRolePage && age < MAX_AGE_24H) {
-              return cachedRolePage;
-            }
-          }
-
-          if (!rolePath && ['/admin', '/leader', '/gardener'].includes(url.pathname)) {
-            rolePath = url.pathname;
-          }
-
-          // c. Если роль есть и соответствующая страница в кэше и проходит normalizeCachedResponse и возраст < MAX_AGE_24H
+          // b. Если роль определена — вернуть закэшированную страницу роли независимо от возраста (старые данные лучше чем ошибка)
           if (rolePath) {
-            const cacheKey = request.method !== 'GET' ? new Request(rolePath, { method: 'GET' }) : rolePath;
-            const cachedPage = normalizeCachedResponse(await cache.match(cacheKey));
-            const age = await getPageCacheAge(rolePath);
-            if (cachedPage && age < MAX_AGE_24H) {
-              return cachedPage;
+            const cacheKey = new Request(rolePath, { method: 'GET' });
+            const cachedRolePage = normalizeCachedResponse(await cache.match(cacheKey));
+            if (cachedRolePage) {
+              return withOfflineHeader(cachedRolePage);
             }
           }
 
-          // d. Для любой навигации с активной офлайн-сессией вернуть закэшированный /login, если есть
+          // Если роли нет, но запрошен конкретный путь /gardener|/admin|/leader — проверить прямое совпадение
+          if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
+            const directKey = new Request(url.pathname, { method: 'GET' });
+            const cachedDirectPage = normalizeCachedResponse(await cache.match(directKey));
+            if (cachedDirectPage) {
+              return withOfflineHeader(cachedDirectPage);
+            }
+          }
+
+          // c. Если роли нет в кэше или роль неизвестна — возвращаем закэшированный /login
           const loginKey = new Request('/login', { method: 'GET' });
           const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
           if (cachedLogin) {
-            return cachedLogin;
+            return withOfflineHeader(cachedLogin);
           }
 
           if (isOfflineSessActive || isOfflineSessionActive) {

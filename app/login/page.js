@@ -40,6 +40,31 @@ export default function LoginPage() {
     }
   };
 
+  const removePhoneFromRoleMap = (phoneNum) => {
+    if (!phoneNum || typeof window === 'undefined') return;
+    const clean = String(phoneNum).replace(/\D/g, '');
+    if (!clean) return;
+    try {
+      const mapStr = localStorage.getItem('phone_roles_map');
+      if (mapStr) {
+        const map = JSON.parse(mapStr);
+        delete map[clean];
+        localStorage.setItem('phone_roles_map', JSON.stringify(map));
+      }
+    } catch (e) {}
+  };
+
+  const triggerSwPrecacheRoles = () => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        const targetSw = reg.active || navigator.serviceWorker.controller;
+        if (targetSw) {
+          try { targetSw.postMessage({ type: 'PRECACHE_ROLES' }); } catch (e) {}
+        }
+      }).catch(() => {});
+    }
+  };
+
   const notifySwOfflineSession = async (active, roleOverride = null) => {
     if (typeof window !== 'undefined') {
       const role = roleOverride || localStorage.getItem('auth_role');
@@ -97,7 +122,7 @@ export default function LoginPage() {
 
   const redirectByRole = async (role, isOffline = false) => {
     if (!role) return;
-    await notifySwOfflineSession(true, role);
+    await notifySwOfflineSession(isOffline, role);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
     if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
       if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
@@ -240,6 +265,10 @@ export default function LoginPage() {
       if (isManualLogout) {
         sessionStorage.removeItem('manual_logout');
         if (typeof window !== 'undefined') {
+          const currentPhone = localStorage.getItem('auth_phone');
+          if (currentPhone) {
+            removePhoneFromRoleMap(currentPhone);
+          }
           localStorage.removeItem('auth_token');
           localStorage.removeItem('auth_role');
           localStorage.removeItem('offline_session');
@@ -329,6 +358,7 @@ export default function LoginPage() {
         if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role);
       }
 
+      triggerSwPrecacheRoles();
       await redirectByRole(data.role);
     } catch (err) {
       const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);

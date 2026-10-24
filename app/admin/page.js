@@ -621,10 +621,7 @@ export default function AdminDashboard() {
 
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
-    if (!navigator.onLine) return true;
-    const offlineSess = localStorage.getItem('offline_session') === '1';
-    const offlineTs = Number(localStorage.getItem('offline_session_ts') || '0');
-    return offlineSess && offlineTs > 0 && (Date.now() - offlineTs < 24 * 60 * 60 * 1000);
+    return !navigator.onLine;
   };
 
   const fetchData = async () => {
@@ -633,6 +630,13 @@ export default function AdminDashboard() {
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
+      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      if (storedRole && storedRole !== 'ADMIN' && storedRole !== 'LEADER') {
+        const correctPath = storedRole === 'GARDENER' ? '/gardener' : '/admin';
+        window.location.assign(correctPath);
+        return;
+      }
+
       const cachedOrders = (await getCache('admin_orders'))?.data || [];
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
