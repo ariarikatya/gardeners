@@ -619,9 +619,43 @@ export default function AdminDashboard() {
     };
   }, []);
 
+  const isOfflineSessionGuard = () => {
+    if (typeof window === 'undefined') return false;
+    if (!navigator.onLine) return true;
+    const offlineSess = localStorage.getItem('offline_session') === '1';
+    const offlineTs = Number(localStorage.getItem('offline_session_ts') || '0');
+    return offlineSess && offlineTs > 0 && (Date.now() - offlineTs < 24 * 60 * 60 * 1000);
+  };
+
   const fetchData = async () => {
     setLoading(true);
     setMonthLoading(true);
+
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      const cachedOrders = (await getCache('admin_orders'))?.data || [];
+      const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
+      const cachedServices = (await getCache('admin_services'))?.data || [];
+      const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
+      const cachedBlockedDays = (await getCache('admin_blockedDays'))?.data || [];
+      const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
+      const cachedMe = (await getCache('admin_me'))?.data || null;
+
+      setGardeners(cachedGardeners);
+      setOrders(cachedOrders.filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders(cachedOrders.filter(o => o.status === 'Аукцион' || o.wasAuction));
+      setDayOffs(cachedDayOffs);
+      setBlockedDays(cachedBlockedDays);
+      setServices(cachedServices);
+      setWebLeads(cachedWebLeads);
+      if (cachedMe) setCurrentUser(cachedMe);
+
+      setLoading(false);
+      setMonthLoading(false);
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const year = currentMonth.getFullYear();
       const month = currentMonth.getMonth();

@@ -393,22 +393,20 @@ self.addEventListener('fetch', (event) => {
             if (cachedPage && age < MAX_AGE_24H) {
               return cachedPage;
             }
-            // Если была активная офлайн-сессия, но страница роли отсутствует или старше 24ч:
-            if (isOfflineSessActive || isOfflineSessionActive) {
-              return new Response(OFFLINE_STALE_HTML, {
-                status: 200,
-                headers: { 'Content-Type': 'text/html; charset=utf-8' },
-              });
-            }
           }
 
-          // d. Иначе для GET-навигации вернуть caches.match('/login') (если годна)
-          if (request.method === 'GET') {
-            const loginKey = new Request('/login', { method: 'GET' });
-            const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
-            if (cachedLogin) {
-              return cachedLogin;
-            }
+          // d. Для любой навигации с активной офлайн-сессией вернуть закэшированный /login, если есть
+          const loginKey = new Request('/login', { method: 'GET' });
+          const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
+          if (cachedLogin) {
+            return cachedLogin;
+          }
+
+          if (isOfflineSessActive || isOfflineSessionActive) {
+            return new Response(OFFLINE_STALE_HTML, {
+              status: 200,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            });
           }
         } catch (e) {}
 

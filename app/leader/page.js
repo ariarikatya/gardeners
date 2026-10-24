@@ -224,8 +224,28 @@ export default function LeaderDashboard() {
     };
   }, [pendingQueueCount]);
 
+  const isOfflineSessionGuard = () => {
+    if (typeof window === 'undefined') return false;
+    if (!navigator.onLine) return true;
+    const offlineSess = localStorage.getItem('offline_session') === '1';
+    const offlineTs = Number(localStorage.getItem('offline_session_ts') || '0');
+    return offlineSess && offlineTs > 0 && (Date.now() - offlineTs < 24 * 60 * 60 * 1000);
+  };
+
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
     setLoading(true);
+
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
+      if (cached) {
+        setData(cached);
+      }
+      setLoading(false);
+      await refreshQueueCount();
+      return;
+    }
+
     try {
       const params = new URLSearchParams();
       if (nextStart) params.set('start', nextStart);

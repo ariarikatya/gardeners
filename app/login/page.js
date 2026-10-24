@@ -178,7 +178,15 @@ export default function LoginPage() {
         body: JSON.stringify({ phone: phoneToUse }),
         credentials: 'include',
       });
-      const data = await res.json();
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        if (!res.ok || (typeof window !== 'undefined' && !navigator.onLine)) {
+          await handleOfflineLogin(phoneToUse);
+          return;
+        }
+      }
 
       if (!res.ok) {
         setIsSavedPhoneMode(false);
@@ -302,7 +310,15 @@ export default function LoginPage() {
         body: JSON.stringify({ phone }),
         credentials: 'include',
       });
-      const data = await res.json();
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        if (!res.ok || (typeof window !== 'undefined' && !navigator.onLine)) {
+          await handleOfflineLogin(cleanPhone);
+          return;
+        }
+      }
 
       if (!res.ok) throw new Error(data.error || 'Ошибка при входе');
 

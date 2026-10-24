@@ -308,7 +308,21 @@ export default function GardenerDashboard() {
     }
   };
 
+  const isOfflineSessionGuard = () => {
+    if (typeof window === 'undefined') return false;
+    if (!navigator.onLine) return true;
+    const offlineSess = localStorage.getItem('offline_session') === '1';
+    const offlineTs = Number(localStorage.getItem('offline_session_ts') || '0');
+    return offlineSess && offlineTs > 0 && (Date.now() - offlineTs < 24 * 60 * 60 * 1000);
+  };
+
   const fetchOrders = async (silent = false) => {
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      if (!silent) setLoading(false);
+      return;
+    }
+
     try {
       const [resOrders, resOps] = await Promise.all([
         apiFetch('/api/gardener/orders'),
@@ -361,7 +375,7 @@ export default function GardenerDashboard() {
   };
 
   const fetchAuction = async (isManualRefresh = false) => {
-    if (typeof window !== 'undefined' && !navigator.onLine) {
+    if (isOfflineSessionGuard()) {
       setIsOffline(true);
       if (isManualRefresh) {
         alert('Нет сети — показаны сохранённые данные');
@@ -388,6 +402,12 @@ export default function GardenerDashboard() {
   };
 
   const fetchProfile = async () => {
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      setLoadingWorks(false);
+      return;
+    }
+
     setLoadingWorks(true);
     try {
       const res = await apiFetch('/api/gardener/profile');
