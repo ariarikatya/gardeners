@@ -65,6 +65,75 @@ export default function LoginPage() {
     }
   };
 
+  const postSwMessageWithReply = (targetSw, msg) => {
+    return new Promise((resolve) => {
+      if (!targetSw) return resolve(null);
+      if (typeof MessageChannel === 'undefined') {
+        try { targetSw.postMessage(msg); } catch (e) {}
+        return resolve(null);
+      }
+      const channel = new MessageChannel();
+      const timer = setTimeout(() => {
+        try {
+          const retryChannel = new MessageChannel();
+          const retryTimer = setTimeout(() => resolve(null), 1000);
+          retryChannel.port1.onmessage = (e) => { clearTimeout(retryTimer); resolve(e.data || null); };
+          targetSw.postMessage(msg, [retryChannel.port2]);
+        } catch (e) {
+          resolve(null);
+        }
+      }, 2500);
+
+      channel.port1.onmessage = (e) => {
+        clearTimeout(timer);
+        resolve(e.data || null);
+      };
+
+      try {
+        targetSw.postMessage(msg, [channel.port2]);
+      } catch (e) {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    });
+  };
+
+  const notifySwOfflinePhone = async (phoneNum) => {
+    if (typeof window === 'undefined' || !phoneNum) return;
+    const cleanPhone = String(phoneNum).replace(/\D/g, '');
+    if (!cleanPhone || !('serviceWorker' in navigator)) return;
+
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        await postSwMessageWithReply(targetSw, { type: 'SET_OFFLINE_PHONE', phone: cleanPhone });
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SET_OFFLINE_PHONE', phone: cleanPhone });
+      }
+    }
+  };
+
+  const querySwOfflineRole = async () => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE' });
+        return reply?.role || null;
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'GET_OFFLINE_ROLE' });
+        return reply?.role || null;
+      }
+    }
+    return null;
+  };
+
   const notifySwOfflineSession = async (active, roleOverride = null) => {
     if (typeof window !== 'undefined') {
       const role = roleOverride || localStorage.getItem('auth_role');
@@ -77,50 +146,17 @@ export default function LoginPage() {
       }
 
       if ('serviceWorker' in navigator) {
-        const postWithReply = (targetSw, msg) => {
-          return new Promise((resolve) => {
-            if (!targetSw) return resolve();
-            if (typeof MessageChannel === 'undefined') {
-              try { targetSw.postMessage(msg); } catch (e) {}
-              return resolve();
-            }
-            const channel = new MessageChannel();
-            const timer = setTimeout(() => {
-              try {
-                const retryChannel = new MessageChannel();
-                const retryTimer = setTimeout(() => resolve(), 1000);
-                retryChannel.port1.onmessage = () => { clearTimeout(retryTimer); resolve(); };
-                targetSw.postMessage(msg, [retryChannel.port2]);
-              } catch (e) {
-                resolve();
-              }
-            }, 2500);
-
-            channel.port1.onmessage = () => {
-              clearTimeout(timer);
-              resolve();
-            };
-
-            try {
-              targetSw.postMessage(msg, [channel.port2]);
-            } catch (e) {
-              clearTimeout(timer);
-              resolve();
-            }
-          });
-        };
-
         try {
           const reg = await navigator.serviceWorker.ready;
           const targetSw = reg.active || navigator.serviceWorker.controller;
           if (targetSw) {
-            await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, ts: Date.now() });
-            await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null });
+            await postSwMessageWithReply(targetSw, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, ts: Date.now() });
+            await postSwMessageWithReply(targetSw, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null });
           }
         } catch (e) {
           if (navigator.serviceWorker.controller) {
-            await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, ts: Date.now() });
-            await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null });
+            await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, ts: Date.now() });
+            await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null });
           }
         }
       }
@@ -172,6 +208,10 @@ export default function LoginPage() {
           localStorage.setItem('auth_phone', cleanPhone);
           savePhoneRoleMap(cleanPhone, role);
         }
+      }
+
+      if (cleanPhone) {
+        await notifySwOfflinePhone(cleanPhone);
       }
 
       await redirectByRole(role, true);
@@ -226,7 +266,10 @@ export default function LoginPage() {
       }
 
       const cleanPhone = String(phoneToUse).replace(/\D/g, '');
-      if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
+      if (cleanPhone) {
+        localStorage.setItem('auth_phone', cleanPhone);
+        await notifySwOfflinePhone(cleanPhone);
+      }
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
@@ -293,6 +336,23 @@ export default function LoginPage() {
         setShowOfflineOption(true);
       }
 
+      // Офлайн-обработка при старте
+      if (!navigator.onLine && saved) {
+        (async () => {
+          let resolvedRole = getRoleForPhone(saved) || role;
+          if (!resolvedRole) {
+            resolvedRole = await querySwOfflineRole();
+          }
+          if (!resolvedRole) {
+            setPendingOfflinePhone(saved);
+            setShowRoleSelectModal(true);
+          } else {
+            localStorage.setItem('auth_role', resolvedRole);
+            savePhoneRoleMap(saved, resolvedRole);
+          }
+        })();
+      }
+
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
       const offlineSessionTs = localStorage.getItem('offline_session_ts');
       const MAX_OFFLINE_AGE_24H = 24 * 60 * 60 * 1000;
@@ -304,10 +364,10 @@ export default function LoginPage() {
         if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_24H)) {
           localStorage.setItem('offline_session_ts', String(Date.now()));
           notifySwOfflineSession(true, role);
-        } else if (isOffline && (saved || role)) {
+        } else if (isOffline && (saved || role || getRoleForPhone(saved))) {
           localStorage.setItem('offline_session_ts', String(Date.now()));
-          notifySwOfflineSession(true, role);
-        } else {
+          notifySwOfflineSession(true, role || getRoleForPhone(saved));
+        } else if (!isOffline) {
           localStorage.removeItem('offline_session');
           localStorage.removeItem('offline_session_ts');
           localStorage.removeItem('auth_role');
