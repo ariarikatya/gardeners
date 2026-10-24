@@ -1,5 +1,5 @@
 const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-4d51569';
-const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
 <html lang="ru">
@@ -401,21 +401,12 @@ self.addEventListener('fetch', (event) => {
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
 
-          // b. Если роль определена — вернуть закэшированную страницу роли независимо от возраста (старые данные лучше чем ошибка)
+          // b. Если роль определена — вернуть закэшированную страницу роли
           if (rolePath) {
             const cacheKey = new Request(rolePath, { method: 'GET' });
             const cachedRolePage = normalizeCachedResponse(await cache.match(cacheKey));
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
-            }
-          }
-
-          // Если роли нет, но запрошен конкретный путь /gardener|/admin|/leader — проверить прямое совпадение
-          if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
-            const directKey = new Request(url.pathname, { method: 'GET' });
-            const cachedDirectPage = normalizeCachedResponse(await cache.match(directKey));
-            if (cachedDirectPage) {
-              return withOfflineHeader(cachedDirectPage);
             }
           }
 

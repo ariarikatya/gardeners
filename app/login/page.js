@@ -76,7 +76,7 @@ export default function LoginPage() {
         localStorage.removeItem('offline_session_ts');
       }
 
-      if ('serviceWorker' in navigator && role) {
+      if ('serviceWorker' in navigator) {
         const postWithReply = (targetSw, msg) => {
           return new Promise((resolve) => {
             if (!targetSw) return resolve();
@@ -103,17 +103,13 @@ export default function LoginPage() {
           const reg = await navigator.serviceWorker.ready;
           const targetSw = reg.active || navigator.serviceWorker.controller;
           if (targetSw) {
-            await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: Boolean(active), role, ts: Date.now() });
-            if (active) {
-              await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role });
-            }
+            await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, ts: Date.now() });
+            await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null });
           }
         } catch (e) {
           if (navigator.serviceWorker.controller) {
-            await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_SESSION', active: Boolean(active), role, ts: Date.now() });
-            if (active) {
-              await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_ROLE', role });
-            }
+            await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, ts: Date.now() });
+            await postWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null });
           }
         }
       }
@@ -302,6 +298,9 @@ export default function LoginPage() {
         } else {
           localStorage.removeItem('offline_session');
           localStorage.removeItem('offline_session_ts');
+          localStorage.removeItem('auth_role');
+          localStorage.removeItem('auth_token');
+          notifySwOfflineSession(false, null);
         }
       }
     } catch (e) {
