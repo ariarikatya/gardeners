@@ -6,7 +6,7 @@
     "prebuild": "node scripts/gen-sw-version.js",
     "dev": "node scripts/gen-sw-version.js && next dev",
     "build": "prisma generate && node -e \"if (!process.env.SKIP_DB_PUSH) require('child_process').execSync('prisma db push --accept-data-loss', { stdio: 'inherit' })\" && next build",
-    "deploy": "npm run build && pm2 restart anemon --update-env",
+    "deploy": "rm -rf .next && npm run build && pm2 reload anemon --update-env",
     "start": "next start",
     "postinstall": "prisma generate",
     "test:fines-logic": "node scripts/test-fines-logic.js",

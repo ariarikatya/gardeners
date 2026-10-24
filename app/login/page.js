@@ -50,8 +50,8 @@ export default function LoginPage() {
     }
   };
 
-  const redirectByRole = (role, isOffline = false) => {
-    notifySwOfflineSession(isOffline);
+  const redirectByRole = async (role, isOffline = false) => {
+    await notifySwOfflineSession(isOffline);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
     if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
       if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
@@ -64,13 +64,13 @@ export default function LoginPage() {
     }
   };
 
-  const handleOfflineLogin = () => {
+  const handleOfflineLogin = async () => {
     try {
       if (typeof window !== 'undefined') sessionStorage.removeItem('manual_logout');
       const role = localStorage.getItem('auth_role') || 'GARDENER';
-      redirectByRole(role, true);
+      await redirectByRole(role, true);
     } catch (e) {
-      redirectByRole('GARDENER', true);
+      await redirectByRole('GARDENER', true);
     }
   };
 
@@ -84,7 +84,7 @@ export default function LoginPage() {
     }
 
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      handleOfflineLogin();
+      await handleOfflineLogin();
       return;
     }
 
@@ -109,7 +109,7 @@ export default function LoginPage() {
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) localStorage.setItem('auth_role', data.role);
 
-      redirectByRole(data.role);
+      await redirectByRole(data.role);
     } catch (err) {
       const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
@@ -117,7 +117,7 @@ export default function LoginPage() {
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
       if (isNetworkErr && (storedPhone || storedRole || storedToken || phoneToUse)) {
-        handleOfflineLogin();
+        await handleOfflineLogin();
         return;
       }
 
@@ -197,7 +197,7 @@ export default function LoginPage() {
       const storedPhone = localStorage.getItem('auth_phone');
       const storedRole = localStorage.getItem('auth_role');
       if ((storedPhone && cleanPhone && storedPhone === cleanPhone) || storedRole) {
-        handleOfflineLogin();
+        await handleOfflineLogin();
         return;
       }
     }
@@ -219,7 +219,7 @@ export default function LoginPage() {
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) localStorage.setItem('auth_role', data.role);
 
-      redirectByRole(data.role);
+      await redirectByRole(data.role);
     } catch (err) {
       const isNetworkErr = err instanceof TypeError || err.message === 'Failed to fetch' || (typeof window !== 'undefined' && !navigator.onLine);
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
@@ -227,7 +227,7 @@ export default function LoginPage() {
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
       if (isNetworkErr && (storedPhone || storedRole || storedToken)) {
-        handleOfflineLogin();
+        await handleOfflineLogin();
         return;
       }
 

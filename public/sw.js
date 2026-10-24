@@ -1,4 +1,4 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261023-22abd6d';
+const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-9ed3bb2';
 const APP_SHELL = ['/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -70,6 +70,14 @@ self.addEventListener('install', (event) => {
           const req = new Request(url, { credentials: 'include', redirect: 'follow' });
           const res = await fetch(req);
           safeCachePut(CACHE_NAME, new Request(url), res);
+          if (res && res.ok && res.status === 200) {
+            const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
+              headers: { 'Content-Type': 'application/json' }
+            });
+            if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes);
+            else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes);
+            else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes);
+          }
         } catch (e) {}
       })
     )
@@ -95,6 +103,8 @@ self.addEventListener('activate', (event) => {
           if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_24H)) {
             await cache.delete('/offline-session');
             isOfflineSessionActive = false;
+          } else if (data && data.active) {
+            isOfflineSessionActive = true;
           }
         }
       } catch (e) {}
