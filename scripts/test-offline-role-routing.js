@@ -63,13 +63,13 @@ const caseA = simulateSwNavigationFallback({
 });
 assert(caseA.response === 'ADMIN_HTML' && caseA.source === 'direct_cache', 'Case A: Role exists and role page in cache should return role page');
 
-// Case B: Role exists but role page is NOT in cache -> OFFLINE_ROLE_PAGE_HTML
+// Case B: Role exists but role page is NOT in cache -> LOGIN_HTML
 const caseB = simulateSwNavigationFallback({
   requestedUrl: '/admin',
   userRole: 'ADMIN',
   cacheMap: { '/gardener': 'GARDENER_HTML', '/login': 'LOGIN_HTML' }
 });
-assert(caseB.response === 'OFFLINE_ROLE_PAGE_HTML' || (caseB.response === 'LOGIN_HTML' && caseB.header === 'X-Offline-Session'), 'Case B: Role exists but role page missing should handle offline role stub or login session fallback');
+assert(caseB.response === 'LOGIN_HTML', 'Case B: Role exists but role page missing should fallback to LOGIN_HTML');
 
 // Case C: Role is null/unknown -> /login
 const caseC = simulateSwNavigationFallback({

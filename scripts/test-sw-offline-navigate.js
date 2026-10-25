@@ -52,9 +52,9 @@ assert(swContent.includes('X-Offline-Served'), 'sw.js must add X-Offline-Served 
 assert(swContent.includes('PRECACHE_ROLES'), 'sw.js must handle PRECACHE_ROLES message');
 console.log('✅ (e) sw.js adds X-Offline-Served header and handles PRECACHE_ROLES.');
 
-// (f) SW returns OFFLINE_ROLE_PAGE_HTML when role page is missing from cache
-assert(swContent.includes('OFFLINE_ROLE_PAGE_HTML'), 'sw.js must contain OFFLINE_ROLE_PAGE_HTML fallback');
-console.log('✅ (f) sw.js contains OFFLINE_ROLE_PAGE_HTML fallback.');
+// (f) SW falls back to cached /login SPA shell when page is missing from cache
+assert(swContent.includes("new Request('/login'"), 'sw.js must fallback to /login when page missing');
+console.log('✅ (f) sw.js falls back to cached /login SPA shell when page is missing.');
 
 // (g) Activate handler deletes all old caches where k !== CACHE_NAME
 const activateIndex = swContent.indexOf("self.addEventListener('activate'");

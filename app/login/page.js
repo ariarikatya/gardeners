@@ -11,8 +11,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const [showRoleSelectModal, setShowRoleSelectModal] = useState(false);
-  const [pendingOfflinePhone, setPendingOfflinePhone] = useState(null);
 
   const savePhoneRoleMap = (phoneNum, role) => {
     if (!phoneNum || !role || typeof window === 'undefined') return;
@@ -177,8 +175,9 @@ export default function LoginPage() {
     }
   };
 
-  const handleOfflineLogin = async (targetPhone = null, selectedRole = null) => {
+  const handleOfflineLogin = async (targetPhone = null) => {
     try {
+      setError('');
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('manual_logout', '0');
       }
@@ -187,17 +186,19 @@ export default function LoginPage() {
       const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const cleanPhone = String(targetPhone || phone || savedPhone || storedPhone || '').replace(/\D/g, '');
 
-      let role = selectedRole || (cleanPhone ? getRoleForPhone(cleanPhone) : null);
+      let role = cleanPhone ? getRoleForPhone(cleanPhone) : null;
       if (!role && cleanPhone && storedPhone && cleanPhone === storedPhone) {
         role = storedRole;
       }
       if (!role && !cleanPhone) {
         role = storedRole;
       }
+      if (!role) {
+        role = await querySwOfflineRole();
+      }
 
       if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
-        setPendingOfflinePhone(cleanPhone || null);
-        setShowRoleSelectModal(true);
+        setError('Офлайн-вход недоступен для данного номера без предварительной авторизации онлайн.');
         return;
       }
 
@@ -216,14 +217,8 @@ export default function LoginPage() {
       await redirectByRole(role, true);
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
+      setError('Ошибка офлайн-входа.');
     }
-  };
-
-  const handleRoleSelection = async (chosenRole) => {
-    setShowRoleSelectModal(false);
-    const targetPhone = pendingOfflinePhone;
-    setPendingOfflinePhone(null);
-    await handleOfflineLogin(targetPhone, chosenRole);
   };
 
   const handleAutoLoginWithPhone = async (targetPhone) => {
@@ -326,25 +321,6 @@ export default function LoginPage() {
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
-      }
-
-
-      // Офлайн-обработка при старте — автоматический переход на роль-страницу
-      if (!navigator.onLine) {
-        (async () => {
-          const targetPhone = saved || phone;
-          let resolvedRole = targetPhone ? getRoleForPhone(targetPhone) : null;
-          if (!resolvedRole && role) resolvedRole = role;
-          if (!resolvedRole) {
-            resolvedRole = await querySwOfflineRole();
-          }
-          if (!resolvedRole) {
-            setPendingOfflinePhone(targetPhone || null);
-            setShowRoleSelectModal(true);
-          } else {
-            await handleOfflineLogin(targetPhone, resolvedRole);
-          }
-        })();
       }
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
@@ -546,51 +522,6 @@ export default function LoginPage() {
           </div>
         </form>
 
-        {showRoleSelectModal && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4">
-              <h3 className="text-xl font-bold text-slate-900 text-center">
-                Выберите вашу роль
-              </h3>
-              <p className="text-sm text-slate-600 text-center">
-                Для входа без интернета укажите вашу роль в системе:
-              </p>
-              <div className="space-y-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => handleRoleSelection('GARDENER')}
-                  className="w-full py-3 px-4 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-semibold rounded-xl transition-colors text-base"
-                >
-                  🌿 Садовник
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRoleSelection('ADMIN')}
-                  className="w-full py-3 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 font-semibold rounded-xl transition-colors text-base"
-                >
-                  📋 Администратор / Диспетчер
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRoleSelection('LEADER')}
-                  className="w-full py-3 px-4 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-semibold rounded-xl transition-colors text-base"
-                >
-                  👑 Владелец (Leader)
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRoleSelectModal(false);
-                  setPendingOfflinePhone(null);
-                }}
-                className="w-full text-center text-sm text-slate-500 hover:text-slate-700 pt-2 font-medium"
-              >
-                Отмена
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

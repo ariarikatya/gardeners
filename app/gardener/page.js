@@ -336,12 +336,11 @@ export default function GardenerDashboard() {
         apiFetch('/api/gardener/operations')
       ]);
 
-      if (!resOrders.ok && !resOps.ok) {
-        setIsOffline(true);
-        return;
+      if (!resOrders.ok) {
+        throw new Error('Server returned error or offline 503');
       }
 
-      const data = resOrders.ok ? await resOrders.json() : {};
+      const data = await resOrders.json();
       const ops = resOps.ok ? await resOps.json() : {};
       const incomingOrders = data.orders || [];
 

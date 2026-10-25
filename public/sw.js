@@ -14,86 +14,6 @@ function getCacheName() {
 let CACHE_NAME = getCacheName();
 const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
-const OFFLINE_HTML = `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Офлайн-режим | Анемон Агро</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
-    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
-    h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 12px; }
-    p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
-    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
-    button.secondary { background: #e2e8f0; color: #1e293b; }
-    button:active { opacity: 0.9; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>📡 Офлайн-режим: показаны сохранённые данные</h1>
-    <p>Подключение к интернету отсутствует. Работа продолжается в локальном автономном режиме.</p>
-    <button onclick="window.location.reload()">Повторить попытку</button>
-    <button class="secondary" onclick="window.location.href='/login'">Экран входа</button>
-  </div>
-</body>
-</html>`;
-
-const OFFLINE_ROLE_PAGE_HTML = `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Рабочий кабинет (Офлайн) | Анемон Агро</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
-    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 420px; width: 100%; border: 1px solid #e2e8f0; }
-    h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 12px; }
-    p { font-size: 14px; color: #64748b; margin: 0 0 16px; line-height: 1.5; }
-    .badge { display: inline-block; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 20px; border: 1px solid #a7f3d0; margin-bottom: 16px; }
-    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
-    button.secondary { background: #e2e8f0; color: #1e293b; }
-    button:active { opacity: 0.9; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>🌿 Ваша роль авторизована</h1>
-    <div class="badge">📡 Автономный офлайн-режим</div>
-    <p>Данные будут автоматически синхронизированы после подключения к интернету.</p>
-    <button onclick="window.location.reload()">Повторить попытку</button>
-    <button class="secondary" onclick="window.location.href='/login'">Экран входа</button>
-  </div>
-</body>
-</html>`;
-
-const OFFLINE_STALE_HTML = `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Офлайн-режим | Анемон Агро</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
-    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 400px; width: 100%; border: 1px solid #e2e8f0; }
-    h1 { font-size: 20px; font-weight: 700; color: #d97706; margin: 0 0 12px; }
-    p { font-size: 14px; color: #64748b; margin: 0 0 20px; line-height: 1.5; }
-    button { background: #d97706; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
-    button.secondary { background: #e2e8f0; color: #1e293b; }
-    button:active { opacity: 0.9; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>📡 Офлайн-режим: данные могут быть устаревшими</h1>
-    <p>Интерфейс вашей роли задействовал сохранённый локальный кэш. Вы можете продолжать работу офлайн.</p>
-    <button onclick="window.location.reload()">Повторить попытку</button>
-    <button class="secondary" onclick="window.location.href='/login'">Экран входа</button>
-  </div>
-</body>
-</html>`;
-
 async function fetchWithTimeout(request, timeoutMs = 5000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -506,30 +426,26 @@ self.addEventListener('fetch', (event) => {
         try {
           const cache = await caches.open(CACHE_NAME);
 
-          // Priority 1: Если запрошен конкретный /admin, /leader или /gardener и он есть в кэше — отдавать ЕГО
-          if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
-            const directKey = new Request(url.pathname, { method: 'GET' });
-            const cachedDirect = await normalizeCachedResponse(await cache.match(directKey));
-            if (cachedDirect) {
-              return withOfflineHeader(cachedDirect);
-            }
+          // Priority 1: Если запрошенный маршрут напрямую есть в кэше — отдавать ЕГО
+          const directKey = new Request(url.pathname, { method: 'GET' });
+          const cachedDirect = await normalizeCachedResponse(await cache.match(directKey));
+          if (cachedDirect) {
+            return withOfflineHeader(cachedDirect);
           }
 
-          // a. Определить роль из /offline-role или /offline-session
+          // Priority 2: Если запрошенный маршрут отсутствует, но известна роль — попробовать страницу роли
           let userRole = null;
-          let isOfflineSessActive = false;
           try {
             const roleRes = await cache.match('/offline-role');
             if (roleRes) {
               const roleData = await roleRes.clone().json();
               if (roleData && roleData.role) userRole = roleData.role;
             }
-            const sessionRes = await cache.match('/offline-session');
-            if (sessionRes) {
-              const sessionData = await sessionRes.clone().json();
-              if (sessionData) {
-                if (!userRole && sessionData.role) userRole = sessionData.role;
-                if (sessionData.active) isOfflineSessActive = true;
+            if (!userRole) {
+              const sessionRes = await cache.match('/offline-session');
+              if (sessionRes) {
+                const sessionData = await sessionRes.clone().json();
+                if (sessionData && sessionData.role) userRole = sessionData.role;
               }
             }
           } catch (e) {}
@@ -539,40 +455,30 @@ self.addEventListener('fetch', (event) => {
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
 
-          // Priority 2: Если роль определена — вернуть закэшированную страницу этой роли
           if (rolePath) {
-            const cacheKey = new Request(rolePath, { method: 'GET' });
-            const cachedRolePage = await normalizeCachedResponse(await cache.match(cacheKey));
+            const roleKey = new Request(rolePath, { method: 'GET' });
+            const cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
             }
-            // Если роль известна, но страница роли НЕ в кэше — возвращаем OFFLINE_ROLE_PAGE_HTML (не /login!)
-            return new Response(OFFLINE_ROLE_PAGE_HTML, {
-              status: 200,
-              headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' },
-            });
           }
 
-          // Priority 3: Если роли нет — возвращаем закэшированный /login
+          // Priority 3: Стандартный экран логина / подтверждения номера из кэша SPA (/login)
           const loginKey = new Request('/login', { method: 'GET' });
           const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey));
           if (cachedLogin) {
             return withOfflineHeader(cachedLogin);
           }
 
-          if (isOfflineSessActive || isOfflineSessionActive) {
-            return new Response(OFFLINE_STALE_HTML, {
-              status: 200,
-              headers: { 'Content-Type': 'text/html; charset=utf-8' },
-            });
+          // Priority 4: Корень SPA (/)
+          const rootKey = new Request('/', { method: 'GET' });
+          const cachedRoot = await normalizeCachedResponse(await cache.match(rootKey));
+          if (cachedRoot) {
+            return withOfflineHeader(cachedRoot);
           }
         } catch (e) {}
 
-        // e. Финальный фоллбэк: OFFLINE_HTML
-        return new Response(OFFLINE_HTML, {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        });
+        return new Response('Offline login unavailable', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
       })()
     );
     return;
