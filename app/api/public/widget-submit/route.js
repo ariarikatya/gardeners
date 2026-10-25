@@ -104,78 +104,103 @@ export async function POST(req) {
       },
     });
 
-    // Web push notifications for dispatchers and preferred gardener (fire-and-forget)
-    (async () => {
-      try {
-        const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
-        const bodyParts = [
-          `Услуга: ${serviceName || 'Не указана'}`,
-          `Дата: ${prefDateStr}`,
-          body.district ? `Район: ${body.district}` : null,
-        ].filter(Boolean).join(', ');
+    let notificationSent = false;
+    let notificationErrorMsg = null;
 
-        const pushRes = await sendToRoles(['ADMIN', 'LEADER'], {
-          title: '🌐 Новая заявка с сайта',
-          body: bodyParts,
-          tag: lead.id,
-          url: '/admin',
-        });
+    try {
+      const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
+      const bodyParts = [
+        `Услуга: ${serviceName || 'Не указана'}`,
+        `Дата: ${prefDateStr}`,
+        body.district ? `Район: ${body.district}` : null,
+      ].filter(Boolean).join(', ');
 
-        const deliveredCount = pushRes?.deliveredCount || 0;
+      const pushRes = await sendToRoles(['ADMIN', 'LEADER'], {
+        title: '🌐 Новая заявка с сайта',
+        body: bodyParts,
+        tag: lead.id,
+        url: '/admin',
+      });
 
-        if (finalGardenerId) {
-          const prefGardenerUser = await prisma.user.findFirst({
-            where: { gardenerId: finalGardenerId },
-          });
-          if (prefGardenerUser) {
-            await sendToUser(prefGardenerUser.id, {
-              title: '🌐 Новая заявка с сайта',
-              body: bodyParts,
-              tag: lead.id,
-              url: '/gardener',
-            });
-          }
-        }
+      const deliveredCount = pushRes?.deliveredCount || 0;
+      const failedCount = pushRes?.failedCount || 0;
+      const hasVapid = Boolean(process.env.VAPID_PRIVATE_KEY && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
 
-        // Fallback-каналы при 0 доставленных Web Push уведомлений
-        if (deliveredCount === 0) {
-          console.log('⚠️ [WebLead Push] 0 подписок доставлено, задействую fallback-каналы (VK / Webhook)');
-          const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
-          const fallbackText = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»: ${ADMIN_PANEL_URL}`;
+      console.log(`[widget-submit] WebPush sendToRoles(['ADMIN', 'LEADER']) result: deliveredCount=${deliveredCount}, failedCount=${failedCount}, hasVapidKeys=${hasVapid}`);
 
-          // 1. VK fallback
-          try {
-            await notifyDispatchers(fallbackText, prisma);
-          } catch (vkErr) {
-            console.error('VK fallback error:', vkErr.message);
-          }
-
-          // 2. Webhook / Telegram fallback
-          const webhookUrl = process.env.WEBHOOK_URL || process.env.DISPATCHER_WEBHOOK_URL;
-          if (webhookUrl) {
-            try {
-              await fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  event: 'new_weblead',
-                  leadId: lead.id,
-                  name: name || 'Не указано',
-                  phone: phoneClean,
-                  serviceName,
-                  district: body.district,
-                  text: fallbackText,
-                }),
-              });
-            } catch (whErr) {
-              console.error('Webhook fallback error:', whErr.message);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('WebPush notification error:', err.message);
+      if (deliveredCount === 0) {
+        let reason = 'no active subscriptions or all push endpoints failed';
+        if (!hasVapid) reason = 'missing VAPID_PRIVATE_KEY / NEXT_PUBLIC_VAPID_PUBLIC_KEY in environment';
+        else if (failedCount > 0) reason = `all ${failedCount} push subscription attempts failed (expired 410 or network error)`;
+        console.warn(`⚠️ [widget-submit] WebPush deliveredCount is 0 for lead id ${lead.id}. Reason: ${reason}`);
+      } else {
+        notificationSent = true;
       }
-    })();
+
+      if (finalGardenerId) {
+        const prefGardenerUser = await prisma.user.findFirst({
+          where: { gardenerId: finalGardenerId },
+        });
+        if (prefGardenerUser) {
+          await sendToUser(prefGardenerUser.id, {
+            title: '🌐 Новая заявка с сайта',
+            body: bodyParts,
+            tag: lead.id,
+            url: '/gardener',
+          });
+        }
+      }
+
+      const fallbackText = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»: ${ADMIN_PANEL_URL}`;
+
+      let vkSent = false;
+      try {
+        const vkRes = await notifyDispatchers(fallbackText, prisma);
+        if (vkRes) {
+          vkSent = true;
+          notificationSent = true;
+        }
+        console.log(`[widget-submit] VK notifyDispatchers result for lead id ${lead.id}: vkSent=${vkSent}`);
+      } catch (vkErr) {
+        console.error('⚠️ [widget-submit] VK notify dispatcher error:', vkErr.message);
+      }
+
+      let webhookSent = false;
+      const webhookUrl = process.env.WEBHOOK_URL || process.env.DISPATCHER_WEBHOOK_URL;
+      if (webhookUrl) {
+        try {
+          const whRes = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'new_weblead',
+              leadId: lead.id,
+              name: name || 'Не указано',
+              phone: phoneClean,
+              serviceName,
+              district: body.district,
+              text: fallbackText,
+            }),
+          });
+          if (whRes.ok) {
+            webhookSent = true;
+            notificationSent = true;
+          }
+          console.log(`[widget-submit] Webhook dispatch result for lead id ${lead.id}: webhookSent=${webhookSent}, status=${whRes.status}`);
+        } catch (whErr) {
+          console.error('⚠️ [widget-submit] Webhook fallback error:', whErr.message);
+        }
+      }
+    } catch (err) {
+      console.error('⚠️ [widget-submit] Dispatcher notification error:', err.message);
+    }
+
+    if (!notificationSent) {
+      notificationErrorMsg = 'Заявка создана, но не удалось доставить мгновенное уведомление диспетчеру';
+      console.error(`❌ [widget-submit] WebLead created (id: ${lead.id}), BUT dispatcher notification failed across channels!`);
+    } else {
+      console.log(`✅ [widget-submit] Dispatcher notification successfully delivered for lead id: ${lead.id}`);
+    }
 
     // ...и одновременно уходит в amoCRM — сначала через API v4 с привязкой контакта, с фолбэком на веб-формы (forwardToAmoUnsorted)
     const noteParts = [];
@@ -296,18 +321,12 @@ export async function POST(req) {
 
     console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ ==========');
 
-    // Уведомление диспетчера во ВКонтакте (fire-and-forget)
-    (async () => {
-      try {
-        const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
-        const text = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»:`;
-        await notifyDispatchers(text, prisma);
-      } catch (err) {
-        console.error('VK notify dispatcher error:', err.message);
-      }
-    })();
-
-    return NextResponse.json({ success: true, id: lead.id }, { headers: CORS_HEADERS });
+    return NextResponse.json({
+      success: true,
+      id: lead.id,
+      notificationSent,
+      ...(notificationErrorMsg ? { notificationWarning: notificationErrorMsg } : {})
+    }, { headers: CORS_HEADERS });
   } catch (e) {
     console.error('[external-amocrm][widget-submit] widget-submit error:', e);
     console.log('========== КОНЕЦ ОТПРАВКИ ЗАЯВКИ (ОШИБКА) ==========');

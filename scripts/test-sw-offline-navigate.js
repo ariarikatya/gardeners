@@ -52,9 +52,13 @@ assert(swContent.includes('X-Offline-Served'), 'sw.js must add X-Offline-Served 
 assert(swContent.includes('PRECACHE_ROLES'), 'sw.js must handle PRECACHE_ROLES message');
 console.log('✅ (e) sw.js adds X-Offline-Served header and handles PRECACHE_ROLES.');
 
-// (f) SW returns OFFLINE_ROLE_PAGE_HTML when role page is missing from cache
-assert(swContent.includes('OFFLINE_ROLE_PAGE_HTML'), 'sw.js must contain OFFLINE_ROLE_PAGE_HTML fallback');
-console.log('✅ (f) sw.js contains OFFLINE_ROLE_PAGE_HTML fallback.');
+// (f) SW falls back to cached /login SPA shell when page is missing from cache and never returns 503 text
+const navBlockIndex = swContent.indexOf("request.mode === 'navigate'");
+assert(navBlockIndex !== -1, "sw.js must contain navigate handler block");
+const navBlock = swContent.slice(navBlockIndex, swContent.indexOf("url.pathname.startsWith('/_next/static/')"));
+assert(navBlock.includes("new Request('/login'"), 'sw.js must fallback to /login when page missing');
+assert(!navBlock.includes("status: 503"), 'navigate handler block in sw.js must NOT return status 503');
+console.log('✅ (f) sw.js falls back to cached /login SPA shell without 503 text for navigation.');
 
 // (g) Activate handler deletes all old caches where k !== CACHE_NAME
 const activateIndex = swContent.indexOf("self.addEventListener('activate'");

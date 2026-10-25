@@ -31,6 +31,7 @@
       var hasChildren = document.body.children && document.body.children.length > 0;
       var hasFatal = document.getElementById('fatal-error-fallback');
       if ((!hasChildren || text.length === 0) && !hasFatal) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
         showFatalError('пустая страница');
         try {
           fetch('/api/client-error', {

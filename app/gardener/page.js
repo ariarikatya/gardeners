@@ -336,12 +336,11 @@ export default function GardenerDashboard() {
         apiFetch('/api/gardener/operations')
       ]);
 
-      if (!resOrders.ok && !resOps.ok) {
-        setIsOffline(true);
-        return;
+      if (!resOrders.ok) {
+        throw new Error('Server returned error or offline 503');
       }
 
-      const data = resOrders.ok ? await resOrders.json() : {};
+      const data = await resOrders.json();
       const ops = resOps.ok ? await resOps.json() : {};
       const incomingOrders = data.orders || [];
 
@@ -583,6 +582,15 @@ export default function GardenerDashboard() {
     fetchOrders();
     fetchProfile();
     fetchAuction();
+
+    if ('serviceWorker' in navigator && navigator.onLine) {
+      navigator.serviceWorker.ready.then((reg) => {
+        const targetSw = reg.active || navigator.serviceWorker.controller;
+        if (targetSw) {
+          try { targetSw.postMessage({ type: 'PRECACHE_ROLES' }); } catch (e) {}
+        }
+      }).catch(() => {});
+    }
 
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);

@@ -511,6 +511,15 @@ export default function AdminDashboard() {
 
     refreshQueueCount();
 
+    if ('serviceWorker' in navigator && navigator.onLine) {
+      navigator.serviceWorker.ready.then((reg) => {
+        const targetSw = reg.active || navigator.serviceWorker.controller;
+        if (targetSw) {
+          try { targetSw.postMessage({ type: 'PRECACHE_ROLES' }); } catch (e) {}
+        }
+      }).catch(() => {});
+    }
+
     const handleOnline = () => {
       setIsOffline(false);
       handleSyncQueue();
@@ -720,13 +729,17 @@ export default function AdminDashboard() {
         apiFetch('/api/auth/me')
       ]);
 
+      if (!resG.ok || !resO.ok) {
+        throw new Error('Server returned error or offline 503');
+      }
+
       if (resMe.ok) {
         const meData = await resMe.json();
         setCurrentUser(meData.user || null);
         saveCache('admin_me', meData.user || null);
       }
-      const dataG = resG.ok ? await resG.json() : {};
-      const dataO = resO.ok ? await resO.json() : {};
+      const dataG = await resG.json();
+      const dataO = await resO.json();
       const dataD = resD.ok ? await resD.json() : {};
       const dataB = resB.ok ? await resB.json() : {};
       const dataS = resS.ok ? await resS.json() : {};
