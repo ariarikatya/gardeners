@@ -9,7 +9,6 @@ export default function LoginPage() {
   const [isOnline, setIsOnline] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showOfflineRoleButtons, setShowOfflineRoleButtons] = useState(false);
   const router = useRouter();
 
 
@@ -216,9 +215,7 @@ export default function LoginPage() {
       }
 
       if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
-        setIsSavedPhoneMode(false);
-        setShowOfflineRoleButtons(true);
-        setError('Для этого номера нужен один онлайн-вход для сохранения роли');
+        setError('Нужен интернет для первого входа');
         return;
       }
 
@@ -234,29 +231,21 @@ export default function LoginPage() {
         await notifySwOfflinePhone(cleanPhone);
       }
 
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            await postSwMessageWithReply(targetSw, { type: 'PRECACHE_ROLES' });
+          }
+        } catch (e) {}
+      }
+
       await redirectByRole(role, true);
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setIsSavedPhoneMode(false);
-      setShowOfflineRoleButtons(true);
-      setError('Ошибка офлайн-входа.');
+      setError('Нужен интернет для первого входа');
     }
-  };
-
-  const handleManualRoleOfflineLogin = async (selectedRole) => {
-    const rawPhone = phone || savedPhone || (typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null) || '';
-    const cleanPhone = String(rawPhone).replace(/\D/g, '');
-    if (cleanPhone) {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('auth_phone', cleanPhone);
-        savePhoneRoleMap(cleanPhone, selectedRole);
-      }
-      await notifySwOfflinePhone(cleanPhone);
-    }
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('auth_role', selectedRole);
-    }
-    await redirectByRole(selectedRole, true);
   };
 
   const handleAutoLoginWithPhone = async (targetPhone) => {
@@ -556,32 +545,6 @@ export default function LoginPage() {
               {loading ? 'Вход...' : 'Войти'}
             </button>
 
-            {(isOfflineNow || showOfflineRoleButtons) && (
-              <div className="pt-2 border-t border-slate-200 space-y-2">
-                <p className="text-xs text-slate-500 text-center font-medium">Первый вход офлайн — выберите роль:</p>
-                <button
-                  type="button"
-                  onClick={() => handleManualRoleOfflineLogin('ADMIN')}
-                  className="w-full flex justify-center py-2.5 px-4 border border-slate-300 rounded-lg shadow-xs text-sm font-medium text-slate-800 bg-emerald-50 hover:bg-emerald-100"
-                >
-                  Войти как Администратор
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleManualRoleOfflineLogin('LEADER')}
-                  className="w-full flex justify-center py-2.5 px-4 border border-slate-300 rounded-lg shadow-xs text-sm font-medium text-slate-800 bg-amber-50 hover:bg-amber-100"
-                >
-                  Войти как Владелец
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleManualRoleOfflineLogin('GARDENER')}
-                  className="w-full flex justify-center py-2.5 px-4 border border-slate-300 rounded-lg shadow-xs text-sm font-medium text-slate-800 bg-emerald-100 hover:bg-emerald-200"
-                >
-                  Войти как Садовник
-                </button>
-              </div>
-            )}
           </div>
         </form>
 

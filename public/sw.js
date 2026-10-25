@@ -12,7 +12,7 @@ function getCacheName() {
 }
 
 let CACHE_NAME = getCacheName();
-const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js'];
 
 async function fetchWithTimeout(request, timeoutMs = 5000) {
   const controller = new AbortController();
@@ -71,42 +71,69 @@ function withOfflineHeader(response, extraHeaders = {}) {
   }
 }
 
+async function cacheLoginAndChunks() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const req = new Request('/login', { credentials: 'include', redirect: 'follow' });
+    const res = await fetch(req);
+    if (res && res.ok && res.status === 200 && !res.redirected) {
+      const text = await res.clone().text();
+      safeCachePut(CACHE_NAME, new Request('/login'), res);
+      const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      safeCachePut(CACHE_NAME, new Request('/login-meta'), metaRes);
+
+      const matches = text.matchAll(/<script[^>]+src=["'](\/_next\/static\/chunks\/[^"']+)["']/g);
+      const chunkUrls = new Set();
+      for (const m of matches) {
+        if (m[1]) chunkUrls.add(m[1]);
+      }
+      await Promise.all(
+        Array.from(chunkUrls).map(async (chunkUrl) => {
+          try {
+            const chunkRes = await fetch(chunkUrl);
+            if (chunkRes && chunkRes.ok) {
+              safeCachePut(CACHE_NAME, new Request(chunkUrl), chunkRes);
+            }
+          } catch (e) {}
+        })
+      );
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 async function precacheAllRoles() {
   const cache = await caches.open(CACHE_NAME);
   const now = Date.now();
-  const metaRes = () => new Response(JSON.stringify({ ts: now }), {
-    headers: { 'Content-Type': 'application/json' }
-  });
-
+  const metaRes = () => new Response(JSON.stringify({ ts: now }), { headers: { 'Content-Type': 'application/json' } });
   let has503 = false;
   const isSessActive = await isOfflineSession();
 
   await Promise.all(
     APP_SHELL.map(async (url) => {
       try {
-        if (url === '/login' && isSessActive) {
+        if (url === '/login') {
+          if (!isSessActive) await cacheLoginAndChunks().catch(() => {});
           return;
         }
         const req = new Request(url, { credentials: 'include', redirect: 'follow' });
         const res = await fetch(req);
-        if (res && res.status === 503) {
-          has503 = true;
-        }
+        if (res && res.status === 503) has503 = true;
         if (res && res.ok && res.status === 200 && !res.redirected) {
           safeCachePut(CACHE_NAME, new Request(url), res);
           if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
           else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes());
           else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes());
-          else if (url === '/login') safeCachePut(CACHE_NAME, new Request('/login-meta'), metaRes());
         }
       } catch (e) {}
     })
   );
 
   if (has503) {
-    setTimeout(() => {
-      precacheAllRoles().catch(() => {});
-    }, 60000);
+    setTimeout(() => { precacheAllRoles().catch(() => {}); }, 60000);
   }
 }
 
@@ -242,12 +269,20 @@ self.addEventListener('message', (event) => {
           }));
         } else {
           await cache.delete('/offline-session');
+          await cacheLoginAndChunks().catch(() => {});
         }
       } catch (e) {}
     })();
 
     if (event.waitUntil) event.waitUntil(promise);
     promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'ENSURE_LOGIN_CACHED') {
+    const promise = cacheLoginAndChunks();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then((ok) => reply(ok)).catch(() => reply(false));
     return;
   }
 
@@ -549,23 +584,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // === СТАТИКА _next/static/ (с хэшами): Cache First ===
+  // === СТАТИКА _next/static/ (с хэшами): Stale-While-Revalidate ===
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
       (async () => {
-        try {
-          const cached = await caches.match(request);
-          if (cached && cached.ok && cached.status === 200) return cached;
-          const res = await fetch(request);
-          if (res && res.status === 200 && res.ok && !res.redirected) {
+        const cached = await caches.match(request);
+        const fetchPromise = fetch(request).then((res) => {
+          if (res && res.ok && res.status === 200 && !res.redirected) {
             safeCachePut(CACHE_NAME, request, res);
           }
           return res;
-        } catch (err) {
-          const cached = await caches.match(request);
-          if (cached) return cached;
-          return new Response('Static asset unavailable', { status: 503 });
+        }).catch(() => null);
+
+        if (cached && cached.ok && cached.status === 200) {
+          event.waitUntil(fetchPromise);
+          return cached;
         }
+
+        try {
+          const res = await fetchPromise;
+          if (res) return res;
+        } catch (e) {}
+
+        if (cached) return cached;
+        return new Response('Static asset unavailable', { status: 503 });
       })()
     );
     return;
