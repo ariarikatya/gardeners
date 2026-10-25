@@ -52,4 +52,15 @@ assert(swContent.includes('X-Offline-Served'), 'sw.js must add X-Offline-Served 
 assert(swContent.includes('PRECACHE_ROLES'), 'sw.js must handle PRECACHE_ROLES message');
 console.log('✅ (e) sw.js adds X-Offline-Served header and handles PRECACHE_ROLES.');
 
+// (f) SW returns OFFLINE_ROLE_PAGE_HTML when role page is missing from cache
+assert(swContent.includes('OFFLINE_ROLE_PAGE_HTML'), 'sw.js must contain OFFLINE_ROLE_PAGE_HTML fallback');
+console.log('✅ (f) sw.js contains OFFLINE_ROLE_PAGE_HTML fallback.');
+
+// (g) Activate handler deletes all old caches where k !== CACHE_NAME
+const activateIndex = swContent.indexOf("self.addEventListener('activate'");
+assert(activateIndex !== -1, 'sw.js must contain activate event listener');
+const activateBlock = swContent.slice(activateIndex, activateIndex + 600);
+assert(activateBlock.includes("keys.filter((k) => k !== CACHE_NAME)"), 'activate handler must filter keys.filter((k) => k !== CACHE_NAME)');
+console.log('✅ (g) activate handler deletes all caches where k !== CACHE_NAME.');
+
 console.log('\n🎉 ALL SW OFFLINE NAVIGATE STATIC TESTS PASSED SUCCESSFULLY!');

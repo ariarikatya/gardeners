@@ -40,6 +40,34 @@ const OFFLINE_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+const OFFLINE_ROLE_PAGE_HTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Рабочий кабинет (Офлайн) | Анемон Агро</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: white; padding: 32px 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 420px; width: 100%; border: 1px solid #e2e8f0; }
+    h1 { font-size: 20px; font-weight: 700; color: #065f46; margin: 0 0 12px; }
+    p { font-size: 14px; color: #64748b; margin: 0 0 16px; line-height: 1.5; }
+    .badge { display: inline-block; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 20px; border: 1px solid #a7f3d0; margin-bottom: 16px; }
+    button { background: #059669; color: white; border: none; padding: 12px 24px; font-size: 14px; font-weight: 600; border-radius: 10px; cursor: pointer; width: 100%; margin-bottom: 8px; }
+    button.secondary { background: #e2e8f0; color: #1e293b; }
+    button:active { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🌿 Ваша роль авторизована</h1>
+    <div class="badge">📡 Автономный офлайн-режим</div>
+    <p>Данные будут автоматически синхронизированы после подключения к интернету.</p>
+    <button onclick="window.location.reload()">Повторить попытку</button>
+    <button class="secondary" onclick="window.location.href='/login'">Экран входа</button>
+  </div>
+</body>
+</html>`;
+
 const OFFLINE_STALE_HTML = `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -163,7 +191,7 @@ self.addEventListener('activate', (event) => {
       CACHE_NAME = getCacheName();
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => (k.startsWith('anemon-agro-') || k !== CACHE_NAME) && k !== CACHE_NAME).map((k) => caches.delete(k))
+        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
       );
       try {
         const cache = await caches.open(CACHE_NAME);
@@ -518,12 +546,11 @@ self.addEventListener('fetch', (event) => {
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
             }
-            // Если роль известна, но страница роли НЕ в кэше — вернуть /login с заголовком X-Offline-Session: 1
-            const loginKey = new Request('/login', { method: 'GET' });
-            const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey));
-            if (cachedLogin) {
-              return withOfflineHeader(cachedLogin, { 'X-Offline-Session': '1' });
-            }
+            // Если роль известна, но страница роли НЕ в кэше — возвращаем OFFLINE_ROLE_PAGE_HTML (не /login!)
+            return new Response(OFFLINE_ROLE_PAGE_HTML, {
+              status: 200,
+              headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' },
+            });
           }
 
           // Priority 3: Если роли нет — возвращаем закэшированный /login

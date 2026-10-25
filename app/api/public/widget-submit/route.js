@@ -114,12 +114,14 @@ export async function POST(req) {
           body.district ? `Район: ${body.district}` : null,
         ].filter(Boolean).join(', ');
 
-        await sendToRoles(['ADMIN', 'LEADER'], {
+        const pushRes = await sendToRoles(['ADMIN', 'LEADER'], {
           title: '🌐 Новая заявка с сайта',
           body: bodyParts,
           tag: lead.id,
           url: '/admin',
         });
+
+        const deliveredCount = pushRes?.deliveredCount || 0;
 
         if (finalGardenerId) {
           const prefGardenerUser = await prisma.user.findFirst({
@@ -132,6 +134,42 @@ export async function POST(req) {
               tag: lead.id,
               url: '/gardener',
             });
+          }
+        }
+
+        // Fallback-каналы при 0 доставленных Web Push уведомлений
+        if (deliveredCount === 0) {
+          console.log('⚠️ [WebLead Push] 0 подписок доставлено, задействую fallback-каналы (VK / Webhook)');
+          const prefDateStr = prefDate ? prefDate.toISOString().split('T')[0] : 'Не указана';
+          const fallbackText = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»: ${ADMIN_PANEL_URL}`;
+
+          // 1. VK fallback
+          try {
+            await notifyDispatchers(fallbackText, prisma);
+          } catch (vkErr) {
+            console.error('VK fallback error:', vkErr.message);
+          }
+
+          // 2. Webhook / Telegram fallback
+          const webhookUrl = process.env.WEBHOOK_URL || process.env.DISPATCHER_WEBHOOK_URL;
+          if (webhookUrl) {
+            try {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  event: 'new_weblead',
+                  leadId: lead.id,
+                  name: name || 'Не указано',
+                  phone: phoneClean,
+                  serviceName,
+                  district: body.district,
+                  text: fallbackText,
+                }),
+              });
+            } catch (whErr) {
+              console.error('Webhook fallback error:', whErr.message);
+            }
           }
         }
       } catch (err) {

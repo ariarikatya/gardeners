@@ -329,19 +329,20 @@ export default function LoginPage() {
       }
 
 
-      // Офлайн-обработка при старте
-      if (!navigator.onLine && saved) {
+      // Офлайн-обработка при старте — автоматический переход на роль-страницу
+      if (!navigator.onLine) {
         (async () => {
-          let resolvedRole = getRoleForPhone(saved) || role;
+          const targetPhone = saved || phone;
+          let resolvedRole = targetPhone ? getRoleForPhone(targetPhone) : null;
+          if (!resolvedRole && role) resolvedRole = role;
           if (!resolvedRole) {
             resolvedRole = await querySwOfflineRole();
           }
           if (!resolvedRole) {
-            setPendingOfflinePhone(saved);
+            setPendingOfflinePhone(targetPhone || null);
             setShowRoleSelectModal(true);
           } else {
-            localStorage.setItem('auth_role', resolvedRole);
-            savePhoneRoleMap(saved, resolvedRole);
+            await handleOfflineLogin(targetPhone, resolvedRole);
           }
         })();
       }
