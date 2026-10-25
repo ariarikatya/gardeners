@@ -58,3 +58,4 @@ uploads/
 
 # Auto-generated service worker version
 lib/swVersion.generated.js
+lib/version.js

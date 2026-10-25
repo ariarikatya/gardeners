@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { clientLog } from '@/lib/clientLog';
 import { getQueue } from '@/lib/offlineQueue';
+import { CLIENT_VERSION } from '@/lib/pwa-env';
 
 export default function ServiceWorkerRegister() {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -14,7 +15,8 @@ export default function ServiceWorkerRegister() {
     let autoReloadTimer = null;
 
     const handleRegister = () => {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      const swUrl = `/sw.js?v=${encodeURIComponent(CLIENT_VERSION)}`;
+      navigator.serviceWorker.register(swUrl, { scope: '/' })
         .then((reg) => {
           reg.addEventListener('updatefound', () => {
             const installingWorker = reg.installing;
