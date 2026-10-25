@@ -42,16 +42,20 @@ export async function middleware(request) {
 
   let redirectUrl = null;
 
-  // LEADER разрешено посещать /admin (и /admin/users) и /leader
-  if (payload.role === 'LEADER') {
-    if (isGardenerPage) {
+  // Каждая роль имеет свою главную страницу: ADMIN -> /admin, LEADER -> /leader, GARDENER -> /gardener
+  if (payload.role === 'ADMIN') {
+    if (!isAdminPage) {
+      redirectUrl = new URL('/admin', request.url);
+    }
+  } else if (payload.role === 'LEADER') {
+    if (!isLeaderPage) {
       redirectUrl = new URL('/leader', request.url);
     }
-  } else if (isAdminPage && payload.role !== 'ADMIN') {
-    redirectUrl = new URL('/gardener', request.url);
-  } else if (isGardenerPage && payload.role !== 'GARDENER') {
-    redirectUrl = new URL('/admin', request.url);
-  } else if (isLeaderPage && payload.role !== 'LEADER') {
+  } else if (payload.role === 'GARDENER') {
+    if (!isGardenerPage) {
+      redirectUrl = new URL('/gardener', request.url);
+    }
+  } else {
     redirectUrl = new URL('/login', request.url);
   }
 

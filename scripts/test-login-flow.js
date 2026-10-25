@@ -189,7 +189,7 @@ async function runLoginFlowTests() {
   // Test 6: Instant offline auto-login & SW session notification in app/login/page.js
   console.log('Test 6: Verifying offline auto-login & SW session notification in app/login/page.js...');
   assert(loginPageCode.includes("!navigator.onLine"), 'login/page.js must check !navigator.onLine');
-  assert(loginPageCode.includes("handleOfflineLogin()"), 'login/page.js must call handleOfflineLogin when offline');
+  assert(loginPageCode.includes("handleOfflineLogin("), 'login/page.js must call handleOfflineLogin when offline');
   assert(loginPageCode.includes("navigator.serviceWorker.ready"), 'login/page.js must await navigator.serviceWorker.ready in notifySwOfflineSession');
   assert(loginPageCode.includes("localStorage.setItem('offline_session'"), 'login/page.js must set offline_session in localStorage');
   console.log('✅ Test 6 Passed! Offline auto-login & SW notification logic verified.');
