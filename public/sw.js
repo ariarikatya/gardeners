@@ -80,9 +80,14 @@ async function fetchWithTimeout(request, timeoutMs = 5000) {
 }
 
 // Helper for checking valid cached response
-function normalizeCachedResponse(res) {
+async function normalizeCachedResponse(res) {
   if (res && res.ok && res.status === 200 && !res.redirected && res.type !== 'opaque') {
-    return res;
+    try {
+      const text = await res.clone().text();
+      if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
+        return res;
+      }
+    } catch (e) {}
   }
   return null;
 }
@@ -476,7 +481,7 @@ self.addEventListener('fetch', (event) => {
           // Priority 1: Если запрошен конкретный /admin, /leader или /gardener и он есть в кэше — отдавать ЕГО
           if (['/admin', '/leader', '/gardener'].includes(url.pathname)) {
             const directKey = new Request(url.pathname, { method: 'GET' });
-            const cachedDirect = normalizeCachedResponse(await cache.match(directKey));
+            const cachedDirect = await normalizeCachedResponse(await cache.match(directKey));
             if (cachedDirect) {
               return withOfflineHeader(cachedDirect);
             }
@@ -509,13 +514,13 @@ self.addEventListener('fetch', (event) => {
           // Priority 2: Если роль определена — вернуть закэшированную страницу этой роли
           if (rolePath) {
             const cacheKey = new Request(rolePath, { method: 'GET' });
-            const cachedRolePage = normalizeCachedResponse(await cache.match(cacheKey));
+            const cachedRolePage = await normalizeCachedResponse(await cache.match(cacheKey));
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
             }
             // Если роль известна, но страница роли НЕ в кэше — вернуть /login с заголовком X-Offline-Session: 1
             const loginKey = new Request('/login', { method: 'GET' });
-            const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
+            const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey));
             if (cachedLogin) {
               return withOfflineHeader(cachedLogin, { 'X-Offline-Session': '1' });
             }
@@ -523,7 +528,7 @@ self.addEventListener('fetch', (event) => {
 
           // Priority 3: Если роли нет — возвращаем закэшированный /login
           const loginKey = new Request('/login', { method: 'GET' });
-          const cachedLogin = normalizeCachedResponse(await cache.match(loginKey));
+          const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey));
           if (cachedLogin) {
             return withOfflineHeader(cachedLogin);
           }

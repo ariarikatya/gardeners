@@ -466,8 +466,8 @@ export default function AdminDashboard() {
       window.location.assign('/login');
       return;
     }
-    if (role !== 'ADMIN' && role !== 'LEADER') {
-      const correctPath = role === 'GARDENER' ? '/gardener' : '/login';
+    if (role !== 'ADMIN') {
+      const correctPath = role === 'LEADER' ? '/leader' : role === 'GARDENER' ? '/gardener' : '/login';
       window.location.assign(correctPath);
       return;
     }
@@ -669,8 +669,8 @@ export default function AdminDashboard() {
         window.location.assign('/login');
         return;
       }
-      if (storedRole !== 'ADMIN' && storedRole !== 'LEADER') {
-        const correctPath = storedRole === 'GARDENER' ? '/gardener' : '/login';
+      if (storedRole !== 'ADMIN') {
+        const correctPath = storedRole === 'LEADER' ? '/leader' : storedRole === 'GARDENER' ? '/gardener' : '/login';
         window.location.assign(correctPath);
         return;
       }
@@ -777,7 +777,23 @@ export default function AdminDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
+        const savedPhone = localStorage.getItem('auth_phone');
+        if (savedPhone) {
+          const clean = String(savedPhone).replace(/\D/g, '');
+          if (clean) {
+            try {
+              const mapStr = localStorage.getItem('phone_roles_map');
+              if (mapStr) {
+                const map = JSON.parse(mapStr);
+                delete map[clean];
+                localStorage.setItem('phone_roles_map', JSON.stringify(map));
+              }
+            } catch (e) {}
+          }
+        }
+
         sessionStorage.setItem('manual_logout', '1');
+        localStorage.removeItem('auth_phone');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_session_cached');
