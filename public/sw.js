@@ -79,10 +79,14 @@ async function precacheAllRoles() {
   });
 
   let has503 = false;
+  const isSessActive = await isOfflineSession();
 
   await Promise.all(
     APP_SHELL.map(async (url) => {
       try {
+        if (url === '/login' && isSessActive) {
+          return;
+        }
         const req = new Request(url, { credentials: 'include', redirect: 'follow' });
         const res = await fetch(req);
         if (res && res.status === 503) {
@@ -399,21 +403,62 @@ self.addEventListener('fetch', (event) => {
         try {
           const netRes = await fetchWithTimeout(request, 5000);
           if (netRes) {
-            // Если сервер ответил редиректом (например, middleware редиректит неавторизованного на /login)
-            // ВОЗВРАЩАЕМ РЕДИРЕКТ СРАЗУ, БЕЗ ФОЛЛБЭКОВ НА КЭШ!
+            const isRedirectToLogin = netRes.redirected && netRes.url.includes('/login');
+            const is3xxRedirectToLogin = (netRes.status >= 300 && netRes.status < 400);
+            const is5xx = netRes.status === 503 || netRes.status >= 500;
+
+            if (isRedirectToLogin || is3xxRedirectToLogin || is5xx) {
+              const activeSess = await isOfflineSession();
+              if (activeSess) {
+                const cache = await caches.open(CACHE_NAME);
+                let userRole = null;
+                try {
+                  const roleRes = await cache.match('/offline-role');
+                  if (roleRes) {
+                    const roleData = await roleRes.clone().json();
+                    if (roleData && roleData.role) userRole = roleData.role;
+                  }
+                  if (!userRole) {
+                    const sessionRes = await cache.match('/offline-session');
+                    if (sessionRes) {
+                      const sessionData = await sessionRes.clone().json();
+                      if (sessionData && sessionData.role) userRole = sessionData.role;
+                    }
+                  }
+                } catch (e) {}
+
+                let rolePath = null;
+                if (userRole === 'ADMIN') rolePath = '/admin';
+                else if (userRole === 'LEADER') rolePath = '/leader';
+                else if (userRole === 'GARDENER') rolePath = '/gardener';
+
+                if (rolePath) {
+                  const roleKey = new Request(rolePath, { method: 'GET' });
+                  const cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
+                  if (cachedRolePage) {
+                    return withOfflineHeader(cachedRolePage);
+                  }
+                }
+              }
+            }
+
             if (netRes.redirected || (netRes.status >= 300 && netRes.status < 400)) {
               return netRes;
             }
+
             if (netRes.ok && netRes.status === 200) {
               const resClone = netRes.clone();
+              const isSessActive = await isOfflineSession();
               caches.open(CACHE_NAME).then((cache) => {
                 try {
                   const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
                     headers: { 'Content-Type': 'application/json' }
                   });
                   if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
-                    cache.put('/login', resClone);
-                    cache.put('/login-meta', metaRes);
+                    if (!isSessActive) {
+                      cache.put('/login', resClone);
+                      cache.put('/login-meta', metaRes);
+                    }
                   } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                     cache.put('/gardener', resClone);
                     cache.put('/gardener-meta', metaRes);

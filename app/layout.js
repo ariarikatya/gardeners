@@ -1,6 +1,7 @@
 import './globals.css';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
 import BuildVersionWatcher from '@/components/BuildVersionWatcher';
+import { CLIENT_VERSION } from '@/lib/pwa-env';
 
 export const metadata = {
   title: 'Анемон Агро',
@@ -17,7 +18,7 @@ export default function RootLayout({ children }) {
     <html lang="ru">
       <head>
         <link rel="apple-touch-icon" href="/icon-192.png" />
-        <script src="/emergency.js"></script>
+        <script src={`/emergency.js?v=${CLIENT_VERSION}`}></script>
       </head>
       <body>
         {children}
