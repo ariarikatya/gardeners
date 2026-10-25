@@ -182,21 +182,6 @@ export default function LoginPage() {
     }
   };
 
-  const checkSwPageInCache = async (rolePath) => {
-    if (typeof window === 'undefined' || !('caches' in window)) return true;
-    try {
-      const keys = await caches.keys();
-      for (const k of keys) {
-        if (k.startsWith('anemon-agro-')) {
-          const c = await caches.open(k);
-          const match = await c.match(rolePath);
-          if (match) return true;
-        }
-      }
-    } catch (e) {}
-    return false;
-  };
-
   const handleOfflineLogin = async (targetPhone = null) => {
     try {
       setError('');
@@ -221,13 +206,6 @@ export default function LoginPage() {
 
       if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
         setError('Для этого номера нужен один онлайн-вход для сохранения роли');
-        return;
-      }
-
-      const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
-      const hasCachedPage = await checkSwPageInCache(rolePath);
-      if (!hasCachedPage) {
-        setError('Для данного номера отсутствует сохранённый кэш страницы роли. Выполните один вход онлайн.');
         return;
       }
 
@@ -284,6 +262,10 @@ export default function LoginPage() {
       }
 
       if (!res.ok) {
+        if (res.status === 503 || (typeof window !== 'undefined' && !navigator.onLine)) {
+          await handleOfflineLogin(phoneToUse);
+          return;
+        }
         setIsSavedPhoneMode(false);
         throw new Error(data.error || 'Ошибка при входе');
       }
@@ -419,7 +401,13 @@ export default function LoginPage() {
         }
       }
 
-      if (!res.ok) throw new Error(data.error || 'Ошибка при входе');
+      if (!res.ok) {
+        if (res.status === 503 || (typeof window !== 'undefined' && !navigator.onLine)) {
+          await handleOfflineLogin(cleanPhone);
+          return;
+        }
+        throw new Error(data.error || 'Ошибка при входе');
+      }
 
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
       if (data.token) localStorage.setItem('auth_token', data.token);

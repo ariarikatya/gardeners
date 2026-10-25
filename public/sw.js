@@ -476,20 +476,29 @@ self.addEventListener('fetch', (event) => {
 
           // Priority 3: Стандартный экран логина / подтверждения номера из кэша SPA (/login)
           const loginKey = new Request('/login', { method: 'GET' });
-          const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey));
+          const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey)) || await cache.match('/login');
           if (cachedLogin) {
             return withOfflineHeader(cachedLogin);
           }
 
           // Priority 4: Корень SPA (/)
           const rootKey = new Request('/', { method: 'GET' });
-          const cachedRoot = await normalizeCachedResponse(await cache.match(rootKey));
+          const cachedRoot = await normalizeCachedResponse(await cache.match(rootKey)) || await cache.match('/');
           if (cachedRoot) {
             return withOfflineHeader(cachedRoot);
           }
         } catch (e) {}
 
-        return new Response('Offline login unavailable', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          const fb = await cache.match('/login') || await cache.match('/');
+          if (fb) return withOfflineHeader(fb);
+        } catch (e) {}
+
+        return new Response('<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.reload()</script></head><body></body></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' }
+        });
       })()
     );
     return;

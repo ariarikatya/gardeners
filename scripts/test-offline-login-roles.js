@@ -21,9 +21,9 @@ async function runOfflineLoginRolesTest() {
   assert(pageCode.includes("Для этого номера нужен один онлайн-вход для сохранения роли"), 'app/login/page.js must set single-line error for unrecorded phone');
   console.log('✅ Assertion 2 Passed: 1-line error for unrecorded phone present.');
 
-  // Assertion 3: handleOfflineLogin checks SW cache before redirect and reports 1-line error
-  assert(pageCode.includes("Для данного номера отсутствует сохранённый кэш страницы роли. Выполните один вход онлайн."), 'app/login/page.js must check SW cache and report 1-line error');
-  console.log('✅ Assertion 3 Passed: 1-line error for missing cache present.');
+  // Assertion 3: handleOfflineLogin seamlessly proceeds to redirect when role is known
+  assert(pageCode.includes("redirectByRole(role, true)"), 'app/login/page.js must seamlessly redirect when role is resolved offline');
+  console.log('✅ Assertion 3 Passed: Offline login proceeds directly to redirect when role is known.');
 
   console.log('\n🎉 ALL OFFLINE LOGIN ROLES TESTS PASSED SUCCESSFULLY!');
 }
