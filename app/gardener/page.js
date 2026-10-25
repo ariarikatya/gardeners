@@ -583,6 +583,15 @@ export default function GardenerDashboard() {
     fetchProfile();
     fetchAuction();
 
+    if ('serviceWorker' in navigator && navigator.onLine) {
+      navigator.serviceWorker.ready.then((reg) => {
+        const targetSw = reg.active || navigator.serviceWorker.controller;
+        if (targetSw) {
+          try { targetSw.postMessage({ type: 'PRECACHE_ROLES' }); } catch (e) {}
+        }
+      }).catch(() => {});
+    }
+
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const claimId = urlParams.get('claim');

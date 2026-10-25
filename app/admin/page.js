@@ -511,6 +511,15 @@ export default function AdminDashboard() {
 
     refreshQueueCount();
 
+    if ('serviceWorker' in navigator && navigator.onLine) {
+      navigator.serviceWorker.ready.then((reg) => {
+        const targetSw = reg.active || navigator.serviceWorker.controller;
+        if (targetSw) {
+          try { targetSw.postMessage({ type: 'PRECACHE_ROLES' }); } catch (e) {}
+        }
+      }).catch(() => {});
+    }
+
     const handleOnline = () => {
       setIsOffline(false);
       handleSyncQueue();

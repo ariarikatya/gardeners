@@ -153,15 +153,19 @@ export async function POST(req) {
 
       const fallbackText = `🌐 Новая заявка с сайта: ${name || 'Не указано'}, ${phoneClean}.\nУслуга: ${serviceName || 'Не указана'}\nЖелаемая дата: ${prefDateStr}\nОткрой раздел «Заявки»: ${ADMIN_PANEL_URL}`;
 
+      let vkSent = false;
       try {
         const vkRes = await notifyDispatchers(fallbackText, prisma);
         if (vkRes) {
+          vkSent = true;
           notificationSent = true;
         }
+        console.log(`[widget-submit] VK notifyDispatchers result for lead id ${lead.id}: vkSent=${vkSent}`);
       } catch (vkErr) {
         console.error('⚠️ [widget-submit] VK notify dispatcher error:', vkErr.message);
       }
 
+      let webhookSent = false;
       const webhookUrl = process.env.WEBHOOK_URL || process.env.DISPATCHER_WEBHOOK_URL;
       if (webhookUrl) {
         try {
@@ -179,8 +183,10 @@ export async function POST(req) {
             }),
           });
           if (whRes.ok) {
+            webhookSent = true;
             notificationSent = true;
           }
+          console.log(`[widget-submit] Webhook dispatch result for lead id ${lead.id}: webhookSent=${webhookSent}, status=${whRes.status}`);
         } catch (whErr) {
           console.error('⚠️ [widget-submit] Webhook fallback error:', whErr.message);
         }

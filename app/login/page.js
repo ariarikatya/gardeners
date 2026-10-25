@@ -182,6 +182,21 @@ export default function LoginPage() {
     }
   };
 
+  const checkSwPageInCache = async (rolePath) => {
+    if (typeof window === 'undefined' || !('caches' in window)) return true;
+    try {
+      const keys = await caches.keys();
+      for (const k of keys) {
+        if (k.startsWith('anemon-agro-')) {
+          const c = await caches.open(k);
+          const match = await c.match(rolePath);
+          if (match) return true;
+        }
+      }
+    } catch (e) {}
+    return false;
+  };
+
   const handleOfflineLogin = async (targetPhone = null) => {
     try {
       setError('');
@@ -205,7 +220,14 @@ export default function LoginPage() {
       }
 
       if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
-        setError('Офлайн-вход недоступен для данного номера без предварительной авторизации онлайн.');
+        setError('Для этого номера нужен один онлайн-вход для сохранения роли');
+        return;
+      }
+
+      const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
+      const hasCachedPage = await checkSwPageInCache(rolePath);
+      if (!hasCachedPage) {
+        setError('Для данного номера отсутствует сохранённый кэш страницы роли. Выполните один вход онлайн.');
         return;
       }
 
@@ -332,13 +354,13 @@ export default function LoginPage() {
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
       const offlineSessionTs = localStorage.getItem('offline_session_ts');
-      const MAX_OFFLINE_AGE_24H = 24 * 60 * 60 * 1000;
+      const MAX_OFFLINE_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
       if (offlineSessionActive) {
         const tsNum = Number(offlineSessionTs);
         const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
-        if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_24H)) {
+        if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_30D)) {
           localStorage.setItem('offline_session_ts', String(Date.now()));
           notifySwOfflineSession(true, role);
         } else if (isOffline && (saved || role || getRoleForPhone(saved))) {
