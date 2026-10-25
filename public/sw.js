@@ -1,4 +1,17 @@
-const CACHE_NAME = 'anemon-agro-v1.0.0-20261024-c673e6c';
+function getCacheName() {
+  try {
+    if (typeof self !== 'undefined' && self.location) {
+      const url = new URL(self.location.href || self.location);
+      const v = url.searchParams.get('v');
+      if (v) {
+        return v.startsWith('anemon-agro-') ? v : `anemon-agro-${v}`;
+      }
+    }
+  } catch (e) {}
+  return 'anemon-agro-v1.0.0';
+}
+
+let CACHE_NAME = getCacheName();
 const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png'];
 
 const OFFLINE_HTML = `<!DOCTYPE html>
@@ -142,6 +155,7 @@ const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      CACHE_NAME = getCacheName();
       const keys = await caches.keys();
       await Promise.all(
         keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
@@ -220,6 +234,12 @@ self.addEventListener('message', (event) => {
 
   if (event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+    reply(true);
+    return;
+  }
+
+  if (event.data.type === 'SET_CACHE_NAME' && event.data.cacheName) {
+    CACHE_NAME = event.data.cacheName.startsWith('anemon-agro-') ? event.data.cacheName : `anemon-agro-${event.data.cacheName}`;
     reply(true);
     return;
   }

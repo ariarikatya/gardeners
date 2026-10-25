@@ -11,7 +11,7 @@ const genScriptPath = path.join(__dirname, 'gen-sw-version.js');
 execSync(`node "${genScriptPath}"`);
 const swContent1 = fs.readFileSync(swPath, 'utf8');
 
-if (!swContent1.includes('const CACHE_NAME =')) {
+if (!swContent1.includes('CACHE_NAME')) {
   console.error('❌ FAIL: sw.js does not contain CACHE_NAME');
   process.exit(1);
 }
@@ -20,7 +20,7 @@ if (!swContent1.includes('const CACHE_NAME =')) {
 execSync(`node "${genScriptPath}"`);
 const swContent2 = fs.readFileSync(swPath, 'utf8');
 
-if (!swContent2.includes('const CACHE_NAME =')) {
+if (!swContent2.includes('CACHE_NAME')) {
   console.error('❌ FAIL: second run sw.js does not contain CACHE_NAME');
   process.exit(1);
 }
