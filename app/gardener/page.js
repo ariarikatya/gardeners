@@ -317,8 +317,12 @@ export default function GardenerDashboard() {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
       const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
-      if (storedRole && storedRole !== 'GARDENER') {
-        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'LEADER' ? '/leader' : '/gardener';
+      if (!storedRole) {
+        window.location.assign('/login');
+        return;
+      }
+      if (storedRole !== 'GARDENER') {
+        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'LEADER' ? '/leader' : '/login';
         window.location.assign(correctPath);
         return;
       }
@@ -526,7 +530,17 @@ export default function GardenerDashboard() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const offlineSess = localStorage.getItem('offline_session') === '1';
-      const role = localStorage.getItem('auth_role') || 'GARDENER';
+      const role = localStorage.getItem('auth_role');
+      if (!role) {
+        window.location.assign('/login');
+        return;
+      }
+      if (role !== 'GARDENER') {
+        const correctPath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/login';
+        window.location.assign(correctPath);
+        return;
+      }
+
       if (offlineSess) {
         localStorage.setItem('offline_session_ts', String(Date.now()));
         if ('serviceWorker' in navigator) {

@@ -461,7 +461,17 @@ export default function AdminDashboard() {
     if (typeof window === 'undefined') return;
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
-    const role = localStorage.getItem('auth_role') || 'ADMIN';
+    const role = localStorage.getItem('auth_role');
+    if (!role) {
+      window.location.assign('/login');
+      return;
+    }
+    if (role !== 'ADMIN' && role !== 'LEADER') {
+      const correctPath = role === 'GARDENER' ? '/gardener' : '/login';
+      window.location.assign(correctPath);
+      return;
+    }
+
     if (offlineSess) {
       localStorage.setItem('offline_session_ts', String(Date.now()));
       if ('serviceWorker' in navigator) {
@@ -655,8 +665,12 @@ export default function AdminDashboard() {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
       const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
-      if (storedRole && storedRole !== 'ADMIN' && storedRole !== 'LEADER') {
-        const correctPath = storedRole === 'GARDENER' ? '/gardener' : '/admin';
+      if (!storedRole) {
+        window.location.assign('/login');
+        return;
+      }
+      if (storedRole !== 'ADMIN' && storedRole !== 'LEADER') {
+        const correctPath = storedRole === 'GARDENER' ? '/gardener' : '/login';
         window.location.assign(correctPath);
         return;
       }

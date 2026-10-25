@@ -151,14 +151,14 @@ self.addEventListener('install', (event) => {
 let isOfflineSessionActive = false;
 const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 
-// === ACTIVATE: чистим все старые версии кэша и протухшие сессии ===
+// === ACTIVATE: чистим все старые версии кэша anemon-agro-* и протухшие сессии ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       CACHE_NAME = getCacheName();
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+        keys.filter((k) => (k.startsWith('anemon-agro-') || k !== CACHE_NAME) && k !== CACHE_NAME).map((k) => caches.delete(k))
       );
       try {
         const cache = await caches.open(CACHE_NAME);

@@ -14,10 +14,26 @@ export default function ServiceWorkerRegister() {
 
     let autoReloadTimer = null;
 
+    let refreshing = false;
+
+    const handleControllerChange = () => {
+      if (refreshing) return;
+      if (sessionStorage.getItem('push_flow_active') === '1') return;
+      refreshing = true;
+      clientLog('sw_controller_change_reload');
+      window.location.reload();
+    };
+
+    navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+
     const handleRegister = () => {
       const swUrl = `/sw.js?v=${encodeURIComponent(CLIENT_VERSION)}`;
       navigator.serviceWorker.register(swUrl, { scope: '/' })
         .then((reg) => {
+          if (navigator.onLine) {
+            try { reg.update(); } catch (e) {}
+          }
+
           reg.addEventListener('updatefound', () => {
             const installingWorker = reg.installing;
             if (!installingWorker) return;
@@ -90,6 +106,7 @@ export default function ServiceWorkerRegister() {
 
     return () => {
       window.removeEventListener('load', handleRegister);
+      navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
       if (autoReloadTimer) clearTimeout(autoReloadTimer);
     };
   }, []);

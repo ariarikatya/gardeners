@@ -6,7 +6,6 @@ export default function LoginPage() {
   const [phone, setPhone] = useState('');
   const [savedPhone, setSavedPhone] = useState(null);
   const [isSavedPhoneMode, setIsSavedPhoneMode] = useState(false);
-  const [showOfflineOption, setShowOfflineOption] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -237,7 +236,7 @@ export default function LoginPage() {
     }
 
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      await handleOfflineLogin();
+      await handleOfflineLogin(phoneToUse);
       return;
     }
 
@@ -284,13 +283,10 @@ export default function LoginPage() {
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
 
       if (isNetworkErr && (storedPhone || storedRole || storedToken || phoneToUse)) {
-        await handleOfflineLogin();
+        await handleOfflineLogin(phoneToUse);
         return;
       }
 
-      if (storedRole || storedPhone || storedToken) {
-        setShowOfflineOption(true);
-      }
       setError(err.message || 'Ошибка подключения');
     } finally {
       setLoading(false);
@@ -332,9 +328,6 @@ export default function LoginPage() {
         setIsSavedPhoneMode(true);
       }
 
-      if (!navigator.onLine || saved || role || token || offlineSess === '1') {
-        setShowOfflineOption(true);
-      }
 
       // Офлайн-обработка при старте
       if (!navigator.onLine && saved) {
@@ -488,15 +481,6 @@ export default function LoginPage() {
               {loading ? 'Вход...' : 'Да, войти'}
             </button>
 
-            {(showOfflineOption || isOfflineNow) && (
-              <button
-                type="button"
-                onClick={() => handleOfflineLogin(savedPhone)}
-                className="w-full flex justify-center py-3 px-4 border border-amber-300 rounded-lg shadow-sm text-lg font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
-              >
-                📡 Войти офлайн
-              </button>
-            )}
 
             <button
               type="button"
@@ -558,15 +542,6 @@ export default function LoginPage() {
               {loading ? 'Вход...' : 'Войти'}
             </button>
 
-            {showOfflineOption && (
-              <button
-                type="button"
-                onClick={() => handleOfflineLogin(phone)}
-                className="w-full flex justify-center py-3 px-4 border border-amber-300 rounded-lg shadow-sm text-lg font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
-              >
-                📡 Войти офлайн
-              </button>
-            )}
           </div>
         </form>
 

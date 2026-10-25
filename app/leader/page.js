@@ -173,7 +173,17 @@ export default function LeaderDashboard() {
     if (typeof window === 'undefined') return;
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
-    const role = localStorage.getItem('auth_role') || 'LEADER';
+    const role = localStorage.getItem('auth_role');
+    if (!role) {
+      window.location.assign('/login');
+      return;
+    }
+    if (role !== 'LEADER') {
+      const correctPath = role === 'ADMIN' ? '/admin' : role === 'GARDENER' ? '/gardener' : '/login';
+      window.location.assign(correctPath);
+      return;
+    }
+
     if (offlineSess) {
       localStorage.setItem('offline_session_ts', String(Date.now()));
       if ('serviceWorker' in navigator) {
@@ -259,8 +269,12 @@ export default function LeaderDashboard() {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
       const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
-      if (storedRole && storedRole !== 'LEADER') {
-        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'GARDENER' ? '/gardener' : '/leader';
+      if (!storedRole) {
+        window.location.assign('/login');
+        return;
+      }
+      if (storedRole !== 'LEADER') {
+        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'GARDENER' ? '/gardener' : '/login';
         window.location.assign(correctPath);
         return;
       }
