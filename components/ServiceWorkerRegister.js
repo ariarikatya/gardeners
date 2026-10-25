@@ -26,7 +26,31 @@ export default function ServiceWorkerRegister() {
 
     navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
 
-    const handleRegister = () => {
+    const cleanLegacyWorkersAndCaches = async () => {
+      try {
+        const expectedVersionParam = `v=${encodeURIComponent(CLIENT_VERSION)}`;
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const reg of registrations) {
+            const scriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
+            if (scriptUrl && !scriptUrl.includes(expectedVersionParam)) {
+              await reg.unregister();
+            }
+          }
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            if (key.startsWith('anemon-agro-') && !key.includes(CLIENT_VERSION)) {
+              await caches.delete(key);
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    const handleRegister = async () => {
+      await cleanLegacyWorkersAndCaches();
       const swUrl = `/sw.js?v=${encodeURIComponent(CLIENT_VERSION)}`;
       navigator.serviceWorker.register(swUrl, { scope: '/' })
         .then((reg) => {

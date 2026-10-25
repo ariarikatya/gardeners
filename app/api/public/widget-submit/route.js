@@ -123,7 +123,17 @@ export async function POST(req) {
       });
 
       const deliveredCount = pushRes?.deliveredCount || 0;
-      if (deliveredCount > 0) {
+      const failedCount = pushRes?.failedCount || 0;
+      const hasVapid = Boolean(process.env.VAPID_PRIVATE_KEY && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+
+      console.log(`[widget-submit] WebPush sendToRoles(['ADMIN', 'LEADER']) result: deliveredCount=${deliveredCount}, failedCount=${failedCount}, hasVapidKeys=${hasVapid}`);
+
+      if (deliveredCount === 0) {
+        let reason = 'no active subscriptions or all push endpoints failed';
+        if (!hasVapid) reason = 'missing VAPID_PRIVATE_KEY / NEXT_PUBLIC_VAPID_PUBLIC_KEY in environment';
+        else if (failedCount > 0) reason = `all ${failedCount} push subscription attempts failed (expired 410 or network error)`;
+        console.warn(`⚠️ [widget-submit] WebPush deliveredCount is 0 for lead id ${lead.id}. Reason: ${reason}`);
+      } else {
         notificationSent = true;
       }
 

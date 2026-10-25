@@ -12,14 +12,16 @@ export default function LoginPage() {
   const router = useRouter();
 
 
-  const savePhoneRoleMap = (phoneNum, role) => {
+  const savePhoneRoleMap = (phoneNum, role, name = null) => {
     if (!phoneNum || !role || typeof window === 'undefined') return;
     const clean = String(phoneNum).replace(/\D/g, '');
     if (!clean) return;
     try {
       const mapStr = localStorage.getItem('phone_roles_map');
       const map = mapStr ? JSON.parse(mapStr) : {};
-      map[clean] = role;
+      const existing = map[clean];
+      const existingName = typeof existing === 'object' ? existing?.name : null;
+      map[clean] = { role, name: name || existingName || null };
       localStorage.setItem('phone_roles_map', JSON.stringify(map));
     } catch (e) {}
   };
@@ -30,8 +32,13 @@ export default function LoginPage() {
     if (!clean) return null;
     try {
       const mapStr = localStorage.getItem('phone_roles_map');
-      const map = mapStr ? JSON.parse(mapStr) : {};
-      return map[clean] || null;
+      if (!mapStr) return null;
+      const map = JSON.parse(mapStr);
+      const val = map[clean];
+      if (!val) return null;
+      if (typeof val === 'string') return val;
+      if (typeof val === 'object' && val.role) return val.role;
+      return null;
     } catch (e) {
       return null;
     }
@@ -267,7 +274,7 @@ export default function LoginPage() {
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
-        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role);
+        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
       }
 
       await redirectByRole(data.role);
@@ -396,7 +403,7 @@ export default function LoginPage() {
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
-        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role);
+        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
       }
 
       triggerSwPrecacheRoles();

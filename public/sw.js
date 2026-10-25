@@ -78,11 +78,16 @@ async function precacheAllRoles() {
     headers: { 'Content-Type': 'application/json' }
   });
 
+  let has503 = false;
+
   await Promise.all(
     APP_SHELL.map(async (url) => {
       try {
         const req = new Request(url, { credentials: 'include', redirect: 'follow' });
         const res = await fetch(req);
+        if (res && res.status === 503) {
+          has503 = true;
+        }
         if (res && res.ok && res.status === 200 && !res.redirected) {
           safeCachePut(CACHE_NAME, new Request(url), res);
           if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
@@ -93,6 +98,12 @@ async function precacheAllRoles() {
       } catch (e) {}
     })
   );
+
+  if (has503) {
+    setTimeout(() => {
+      precacheAllRoles().catch(() => {});
+    }, 60000);
+  }
 }
 
 // === INSTALL: сразу берём контроль и безопасно кэшируем APP_SHELL без addAll ===
