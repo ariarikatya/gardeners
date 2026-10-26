@@ -257,12 +257,12 @@ async function runOfflineSavedPhoneLoginTest() {
     const mapStr = mockLocalStorage.getItem('phone_roles_map');
     const map = mapStr ? JSON.parse(mapStr) : {};
     if (!map[clean]) {
-      errorState = 'Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.';
+      errorState = 'Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.';
     }
   };
 
   await testUnknownPhoneOffline('79990000000');
-  assert(errorState.includes('Данные для этого номера ещё не сохранены'), 'Unknown phone offline must display neutral error message');
+  assert(errorState.includes('Номер не найден в сохранённых данных'), 'Unknown phone offline must display neutral error message');
   console.log('✅ Assertion 9 Passed: Unknown phone offline returns neutral error text without role selection modal.');
 
   // Scenario E1: Offline login for ADMIN / LEADER / GARDENER from card and new phone input with >24h stale cache
@@ -323,7 +323,7 @@ async function runOfflineSavedPhoneLoginTest() {
 
   assert(!loginCode.includes('Войти как'), 'app/login/page.js must NOT contain "Войти как" text');
   assert(!loginCode.includes('<select'), 'app/login/page.js must NOT contain <select> elements for role selection');
-  assert(loginCode.includes('Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.'), 'app/login/page.js must contain neutral error text');
+  assert(loginCode.includes('Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.'), 'app/login/page.js must contain neutral error text');
   console.log('✅ Code inspection verified: Neutral error text present and no role selection UI elements.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN TESTS PASSED SUCCESSFULLY!');

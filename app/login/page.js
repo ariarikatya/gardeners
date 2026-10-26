@@ -266,10 +266,10 @@ export default function LoginPage() {
         return;
       }
 
-      setError('Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.');
+      setError('Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.');
+      setError('Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.');
     }
   };
 
@@ -418,10 +418,9 @@ export default function LoginPage() {
     window.addEventListener('offline', updateOnlineStatus);
 
     try {
-      const isLogoutConfirmed = typeof window !== 'undefined' && (sessionStorage.getItem('logout_confirmed') === '1' || sessionStorage.getItem('manual_logout') === '1');
+      const isLogoutConfirmed = typeof window !== 'undefined' && sessionStorage.getItem('manual_logout') === '1';
 
       if (isLogoutConfirmed) {
-        sessionStorage.removeItem('logout_confirmed');
         sessionStorage.removeItem('manual_logout');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');
