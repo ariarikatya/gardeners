@@ -71,18 +71,19 @@ function withOfflineHeader(response, extraHeaders = {}) {
   }
 }
 
-async function cacheLoginAndChunks() {
+async function cacheRolePageAndChunks(path) {
   try {
     const cache = await caches.open(CACHE_NAME);
-    const req = new Request('/login', { credentials: 'include', redirect: 'follow' });
+    const req = new Request(path, { credentials: 'include', redirect: 'follow' });
     const res = await fetch(req);
     if (res && res.ok && res.status === 200 && !res.redirected) {
       const text = await res.clone().text();
-      safeCachePut(CACHE_NAME, new Request('/login'), res);
+      safeCachePut(CACHE_NAME, new Request(path), res);
+      const metaKey = path === '/' ? '/login-meta' : `${path}-meta`;
       const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
         headers: { 'Content-Type': 'application/json' }
       });
-      safeCachePut(CACHE_NAME, new Request('/login-meta'), metaRes);
+      safeCachePut(CACHE_NAME, new Request(metaKey), metaRes);
 
       const matches = text.matchAll(/(?:src|href)=["'](\/_next\/static\/chunks\/[^"']+)["']/g);
       const chunkUrls = new Set();
@@ -100,37 +101,42 @@ async function cacheLoginAndChunks() {
         })
       );
       return true;
+    } else if (res && res.status >= 500) {
+      console.warn(`[SW Server Error ${res.status}] Path: ${path}, Version: ${CACHE_NAME}`);
     }
   } catch (e) {}
   return false;
 }
 
+async function cacheLoginAndChunks() {
+  return cacheRolePageAndChunks('/login');
+}
+
 async function precacheAllRoles() {
   const retryCount = typeof arguments[0] === 'number' ? arguments[0] : 0;
-  const cache = await caches.open(CACHE_NAME);
-  const now = Date.now();
-  const metaRes = () => new Response(JSON.stringify({ ts: now }), { headers: { 'Content-Type': 'application/json' } });
   let has503 = false;
 
+  const rolePages = ['/login', '/admin', '/leader', '/gardener'];
+
   await Promise.all(
-    APP_SHELL.map(async (url) => {
+    rolePages.map(async (pagePath) => {
       try {
-        if (url === '/login') {
-          await cacheLoginAndChunks().catch(() => {});
-          return;
-        }
-        const req = new Request(url, { credentials: 'include', redirect: 'follow' });
-        const res = await fetch(req);
-        if (!res || !res.ok || res.status === 503) has503 = true;
-        if (res && res.ok && res.status === 200 && !res.redirected) {
-          safeCachePut(CACHE_NAME, new Request(url), res);
-          if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
-          else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes());
-          else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes());
-        }
+        const ok = await cacheRolePageAndChunks(pagePath);
+        if (!ok) has503 = true;
       } catch (e) {
         has503 = true;
       }
+    })
+  );
+
+  await Promise.all(
+    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js'].map(async (assetUrl) => {
+      try {
+        const res = await fetch(assetUrl);
+        if (res && res.ok) {
+          safeCachePut(CACHE_NAME, new Request(assetUrl), res);
+        }
+      } catch (e) {}
     })
   );
 
@@ -303,7 +309,7 @@ self.addEventListener('message', (event) => {
         }
         const sessionRes = await cache.match('/offline-session');
         if (sessionRes) {
-          const sData = await sessionRes.json();
+          const sData = await sessionRes.clone().json();
           if (sData) {
             if (!role && sData.role) role = sData.role;
             if (sData.phone) phone = sData.phone;
@@ -446,6 +452,10 @@ self.addEventListener('fetch', (event) => {
             const is3xxRedirectToLogin = (netRes.status >= 300 && netRes.status < 400);
             const is5xx = netRes.status === 503 || netRes.status >= 500;
 
+            if (is5xx && url.pathname === '/login') {
+              console.warn(`[SW Server Error ${netRes.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
+            }
+
             if (isRedirectToLogin || is3xxRedirectToLogin || is5xx) {
               const activeSess = await isOfflineSession();
               if (activeSess) {
@@ -487,7 +497,6 @@ self.addEventListener('fetch', (event) => {
 
             if (netRes.ok && netRes.status === 200) {
               const resClone = netRes.clone();
-              const isSessActive = await isOfflineSession();
               caches.open(CACHE_NAME).then((cache) => {
                 try {
                   const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
@@ -589,6 +598,9 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const cached = await caches.match(request);
         const fetchPromise = fetch(request).then((res) => {
+          if (res && res.status >= 500) {
+            console.warn(`[SW Server Error ${res.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
+          }
           if (res && res.ok && res.status === 200 && !res.redirected) {
             safeCachePut(CACHE_NAME, request, res);
           }
