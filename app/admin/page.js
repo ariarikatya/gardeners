@@ -414,6 +414,17 @@ export default function AdminDashboard() {
     }
   };
 
+  const ensureFreshUsersList = async () => {
+    if (typeof window === 'undefined' || !navigator.onLine) return;
+    try {
+      const res = await apiFetch('/api/public/offline-users');
+      if (res.ok) {
+        const data = await res.json();
+        saveCache('public_offline_users', data).catch(() => {});
+      }
+    } catch (e) {}
+  };
+
   const logClientError = (message, err, pathname = '/admin') => {
     try {
       apiFetch('/api/client-error', {
@@ -556,20 +567,47 @@ export default function AdminDashboard() {
       }
     }, 30000);
 
+    ensureFreshUsersList();
+
     const handleBeforeUnload = (e) => {
+      if (e && e.persisted) return;
+      if (typeof window !== 'undefined') {
+        const manualLogout = sessionStorage.getItem('manual_logout') === '1';
+        if (!manualLogout) {
+          localStorage.setItem('offline_session', '1');
+          localStorage.setItem('offline_session_ts', String(Date.now()));
+          const role = localStorage.getItem('auth_role') || 'ADMIN';
+          const phone = localStorage.getItem('auth_phone');
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            try {
+              navigator.serviceWorker.controller.postMessage({
+                type: 'OFFLINE_SESSION',
+                active: true,
+                role,
+                phone,
+                ts: Date.now()
+              });
+            } catch (err) {}
+          }
+        }
+      }
       if (pendingCountRef.current > 0) {
-        e.preventDefault();
-        e.returnValue = 'Есть неотправленные изменения! Они отправятся при следующем подключении.';
-        return e.returnValue;
+        if (e) {
+          e.preventDefault();
+          e.returnValue = 'Есть неотправленные изменения! Они отправятся при следующем подключении.';
+          return e.returnValue;
+        }
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOfflineStatus);
       clearInterval(interval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
     };
   }, [pendingQueueCount]);
 
@@ -820,6 +858,7 @@ export default function AdminDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
+        sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_token');

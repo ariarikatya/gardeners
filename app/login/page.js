@@ -127,14 +127,14 @@ export default function LoginPage() {
       const reg = await navigator.serviceWorker.ready;
       const targetSw = reg.active || navigator.serviceWorker.controller;
       if (targetSw) {
-        await postSwMessageWithReply(targetSw, { type: 'SYNC_PHONE_ROLE_MAP', map }, 2500);
+        await postSwMessageWithReply(targetSw, { type: 'SYNC_PHONE_ROLE_MAP', map }, 300);
       }
     } catch (e) {
       if (navigator.serviceWorker.controller) {
         try {
           const mapStr = localStorage.getItem('phone_roles_map');
           if (mapStr) {
-            postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SYNC_PHONE_ROLE_MAP', map: JSON.parse(mapStr) }, 2500);
+            postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SYNC_PHONE_ROLE_MAP', map: JSON.parse(mapStr) }, 300);
           }
         } catch (err) {}
       }
@@ -227,14 +227,23 @@ export default function LoginPage() {
     try {
       setError('');
       if (typeof window !== 'undefined') {
-        sessionStorage.setItem('manual_logout', '0');
+        sessionStorage.removeItem('manual_logout');
       }
 
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const cleanPhone = normalizeCleanPhone(rawInputPhone);
 
-      let resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+      let resolvedRole = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+        if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
+          break;
+        }
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+      }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
         const phoneToUse = cleanPhone || storedPhone || rawInputPhone;
@@ -257,10 +266,10 @@ export default function LoginPage() {
         return;
       }
 
-      setError('Нет сети. Откройте сайт с интернетом, чтобы скачать данные.');
+      setError('Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Нет сети. Откройте сайт с интернетом, чтобы скачать данные.');
+      setError('Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.');
     }
   };
 
@@ -337,6 +346,23 @@ export default function LoginPage() {
 
   const handleAutoLogin = () => handleAutoLoginWithPhone(savedPhone);
 
+  const ensureFreshUsersList = async () => {
+    if (typeof window === 'undefined' || !navigator.onLine) return;
+    try {
+      const res = await fetch('/api/public/offline-users');
+      if (res.ok) {
+        const data = await res.json();
+        const userList = Array.isArray(data) ? data : (Array.isArray(data?.users) ? data.users : []);
+        for (const u of userList) {
+          if (u && u.phone && u.role) {
+            savePhoneRoleMap(u.phone, u.role, u.name || null);
+            recordIdentityToSw(u.phone, u.role, u.name || null);
+          }
+        }
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
     const handleOnlineCheck = async () => {
       const online = typeof window !== 'undefined' ? navigator.onLine : true;
@@ -350,12 +376,27 @@ export default function LoginPage() {
         const res = await fetch('/api/version', { signal: controller.signal });
         clearTimeout(timer);
 
+        ensureFreshUsersList();
         if (res.status === 401) {
-          localStorage.removeItem('offline_session');
-          localStorage.removeItem('offline_session_ts');
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('auth_role');
-          notifySwOfflineSession(false, null);
+          const storedPhone = localStorage.getItem('auth_phone');
+          if (storedPhone) {
+            try {
+              const loginRes = await fetch('/api/auth/auto-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: storedPhone }),
+                credentials: 'include',
+              });
+              if (loginRes.ok) {
+                const data = await loginRes.json();
+                if (data.token) localStorage.setItem('auth_token', data.token);
+                if (data.role) localStorage.setItem('auth_role', data.role);
+                triggerSwPrecacheRoles();
+              }
+            } catch (autoErr) {
+              // Silent retry failure - preserve offline session and offline cache
+            }
+          }
         } else if (res.ok) {
           triggerSwPrecacheRoles();
         }
@@ -366,6 +407,10 @@ export default function LoginPage() {
 
     const updateOnlineStatus = () => {
       handleOnlineCheck();
+      if (typeof window !== 'undefined' && navigator.onLine) {
+        triggerSwPrecacheRoles();
+        ensureFreshUsersList();
+      }
     };
 
     updateOnlineStatus();
@@ -373,9 +418,10 @@ export default function LoginPage() {
     window.addEventListener('offline', updateOnlineStatus);
 
     try {
-      const isManualLogout = typeof window !== 'undefined' && sessionStorage.getItem('manual_logout') === '1';
+      const isLogoutConfirmed = typeof window !== 'undefined' && (sessionStorage.getItem('logout_confirmed') === '1' || sessionStorage.getItem('manual_logout') === '1');
 
-      if (isManualLogout) {
+      if (isLogoutConfirmed) {
+        sessionStorage.removeItem('logout_confirmed');
         sessionStorage.removeItem('manual_logout');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');
@@ -394,6 +440,14 @@ export default function LoginPage() {
 
       if (isOffline) {
         (async () => {
+          if ('serviceWorker' in navigator) {
+            try {
+              await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((resolve) => setTimeout(resolve, 1500)),
+              ]);
+            } catch (e) {}
+          }
           const resolved = await resolveOfflineRoleFromCaches(saved || role);
           if (resolved) {
             await redirectByRole(resolved, true, saved);
