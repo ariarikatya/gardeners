@@ -36,6 +36,6 @@ echo "=== [deploy.sh] Перезапускаю PM2 (zero-downtime reload) ==="
 pm2 reload anemon --update-env
 
 echo "=== [deploy.sh] Выполняю прогрев офлайн-кэша ==="
-npm run warmup-offline-cache || true
+npm run warmup-offline-cache
 
 echo "=== [deploy.sh] ГОТОВО ==="

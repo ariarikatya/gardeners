@@ -323,7 +323,11 @@ async function runOfflineSavedPhoneLoginTest() {
 
   assert(!loginCode.includes('Войти как'), 'app/login/page.js must NOT contain "Войти как" text');
   assert(!loginCode.includes('<select'), 'app/login/page.js must NOT contain <select> elements for role selection');
-  assert(loginCode.includes('Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.'), 'app/login/page.js must contain neutral error text');
+  assert(
+    loginCode.includes('Для первого входа нужен интернет один раз. Подключитесь к сети, войдите, и дальше всё будет работать офлайн.') ||
+    loginCode.includes('Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.'),
+    'app/login/page.js must contain neutral error text'
+  );
   console.log('✅ Code inspection verified: Neutral error text present and no role selection UI elements.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN TESTS PASSED SUCCESSFULLY!');

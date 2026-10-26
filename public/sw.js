@@ -364,7 +364,7 @@ async function precacheAllRoles(retryCount = 0) {
     })
   );
 
-  // Warmup offline-cache artifacts load
+  // Warmup offline-cache artifacts load (guarded against empty/invalid overrides)
   const warmupMapping = [
     { pagePath: '/login', warmupFile: '/offline-cache/login.html' },
     { pagePath: '/admin', warmupFile: '/offline-cache/admin.html' },
@@ -378,9 +378,23 @@ async function precacheAllRoles(retryCount = 0) {
         const warmupRes = await fetch(warmupFile);
         if (warmupRes && warmupRes.ok) {
           const text = await warmupRes.clone().text();
-          if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
-            safeCachePut(CACHE_NAME, new Request(pagePath), warmupRes.clone());
-            safeCachePut(OFFLINE_DATA_CACHE, new Request(pagePath), warmupRes);
+          if (text.length > 500 && (text.includes('<!DOCTYPE html>') || text.includes('<html'))) {
+            const cache = await caches.open(CACHE_NAME);
+            const pCache = await caches.open(OFFLINE_DATA_CACHE);
+            const existingPage = await cache.match(new Request(pagePath)) || await pCache.match(new Request(pagePath));
+            let shouldPut = true;
+            if (existingPage) {
+              try {
+                const existingText = await existingPage.clone().text();
+                if (existingText && existingText.length > text.length) {
+                  shouldPut = false;
+                }
+              } catch (e) {}
+            }
+            if (shouldPut) {
+              safeCachePut(CACHE_NAME, new Request(pagePath), warmupRes.clone());
+              safeCachePut(OFFLINE_DATA_CACHE, new Request(pagePath), warmupRes);
+            }
           }
         }
       } catch (e) {}
@@ -393,34 +407,40 @@ async function precacheAllRoles(retryCount = 0) {
         const res = await fetch(assetUrl);
         if (res && res.ok) {
           const targetPath = assetUrl === '/offline-cache/offline-users.json' ? '/api/public/offline-users' : assetUrl;
-          safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
-          safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res);
 
           if (assetUrl === '/api/public/offline-users' || assetUrl === '/offline-cache/offline-users.json') {
             try {
               const usersData = await res.clone().json();
               const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
-              const phoneRoleMap = {};
-              for (const u of userList) {
-                if (!u.phone || !u.role) continue;
-                const uDigits = String(u.phone).replace(/\D/g, '');
-                if (!uDigits) continue;
-                const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
-                const u7 = '7' + uTail10;
-                const u8 = '8' + uTail10;
-                const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
-                for (const k of [uTail10, u7, u8, uDigits]) {
-                  if (k) phoneRoleMap[k] = entry;
+              if (userList.length > 0) {
+                safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+                safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res.clone());
+
+                const phoneRoleMap = {};
+                for (const u of userList) {
+                  if (!u.phone || !u.role) continue;
+                  const uDigits = String(u.phone).replace(/\D/g, '');
+                  if (!uDigits) continue;
+                  const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
+                  const u7 = '7' + uTail10;
+                  const u8 = '8' + uTail10;
+                  const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
+                  for (const k of [uTail10, u7, u8, uDigits]) {
+                    if (k) phoneRoleMap[k] = entry;
+                  }
                 }
+                const mapStr = JSON.stringify(phoneRoleMap);
+                const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+                const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+                const cache = await caches.open(CACHE_NAME);
+                await cache.put('/phone-role-map', mapRes1);
+                const pCache = await caches.open(OFFLINE_DATA_CACHE);
+                await pCache.put('/phone-role-map', mapRes2);
               }
-              const mapStr = JSON.stringify(phoneRoleMap);
-              const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
-              const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
-              const cache = await caches.open(CACHE_NAME);
-              await cache.put('/phone-role-map', mapRes1);
-              const pCache = await caches.open(OFFLINE_DATA_CACHE);
-              await pCache.put('/phone-role-map', mapRes2);
             } catch (err) {}
+          } else {
+            safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+            safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res);
           }
         }
       } catch (e) {}

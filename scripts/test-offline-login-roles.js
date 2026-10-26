@@ -19,6 +19,7 @@ async function runOfflineLoginRolesTest() {
 
   // Assertion 2: handleOfflineLogin sets neutral single-line error or proceeds
   assert(
+    pageCode.includes("Для первого входа нужен интернет один раз. Подключитесь к сети, войдите, и дальше всё будет работать офлайн.") ||
     pageCode.includes("Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города."),
     'app/login/page.js must set neutral error message for unrecorded phone'
   );

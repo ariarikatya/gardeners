@@ -45,6 +45,9 @@ htmlcov/
 # Temp files
 *.tmp
 *.temp
+
+# Offline cache warmup artifacts
+public/offline-cache/
 # Google service account key (private)
 google-key.json
 

@@ -109,27 +109,58 @@ async function warmup() {
   ];
 
   let successCount = 0;
+  let validationError = null;
 
   for (const item of routes) {
     const fullUrl = `${BASE_URL.replace(/\/$/, '')}${item.path}`;
     const destPath = path.join(TARGET_DIR, item.file);
     try {
       const content = await fetchUrlWithAuth(fullUrl, item.token);
+
+      if (item.path === '/api/public/offline-users') {
+        let jsonValid = false;
+        try {
+          const parsed = JSON.parse(content);
+          const usersArr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.users) ? parsed.users : []);
+          if (usersArr.length > 0) jsonValid = true;
+        } catch (e) {}
+
+        if (!jsonValid) {
+          throw new Error('Fetched offline-users.json is empty or invalid JSON');
+        }
+      } else {
+        if (!content || content.length < 500 || (!content.includes('<!DOCTYPE html>') && !content.includes('<html'))) {
+          throw new Error(`Fetched HTML for ${item.path} is invalid or too small (${content ? content.length : 0} bytes)`);
+        }
+      }
+
       fs.writeFileSync(destPath, content, 'utf8');
       console.log(`  ✓ Saved ${item.path} -> public/offline-cache/${item.file}`);
       successCount++;
     } catch (err) {
-      if (fs.existsSync(destPath)) {
-        fs.unlinkSync(destPath);
+      // Keep existing non-empty cache file if fetch fails
+      const hasExistingFile = fs.existsSync(destPath) && fs.statSync(destPath).size > 0;
+      if (hasExistingFile) {
+        console.warn(`  ⚠️ Fetch failed for ${item.path}: ${err.message}. Preserving existing artifact at ${destPath}.`);
+      } else {
+        validationError = err.message;
+        console.error(`  ❌ Critical failure for ${item.path}: ${err.message}`);
       }
-      console.warn(`  ⚠️ Skipped ${item.path}: ${err.message}`);
     }
   }
 
-  console.log(`[warmup-offline-cache] Warmup complete. ${successCount}/${routes.length} artifacts created.`);
+  console.log(`[warmup-offline-cache] Warmup completed (${successCount}/${routes.length} fresh artifacts generated).`);
+
+  if (validationError || successCount < routes.length) {
+    const missingArtifacts = routes.filter(r => !fs.existsSync(path.join(TARGET_DIR, r.file)) || fs.statSync(path.join(TARGET_DIR, r.file)).size === 0);
+    if (missingArtifacts.length > 0) {
+      console.error(`[warmup-offline-cache] Warmup validation failed: ${missingArtifacts.map(m => m.file).join(', ')} are missing or empty.`);
+      process.exit(1);
+    }
+  }
 }
 
 warmup().catch((err) => {
   console.error('[warmup-offline-cache] Fatal warmup error:', err.message);
-  process.exit(0); // non-zero exit avoided to not break deploy pipeline
+  process.exit(1);
 });
