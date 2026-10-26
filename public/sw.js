@@ -83,14 +83,17 @@ async function recordIdentity({ phone, role, name }) {
 
 async function lookupRoleForPhone(phone) {
   if (!phone) return { success: false, roles: [], lastUsedRole: null, name: null };
-  const cleanPhone = String(phone).replace(/\D/g, '');
+  let cleanPhone = String(phone).replace(/\D/g, '');
   if (!cleanPhone) return { success: false, roles: [], lastUsedRole: null, name: null };
+  if (cleanPhone.length === 11 && cleanPhone.startsWith('8')) {
+    cleanPhone = '7' + cleanPhone.slice(1);
+  }
 
   const map = await getOfflineIdentitiesMap();
-  const item = map[cleanPhone];
+  const item = map[cleanPhone] || (cleanPhone.startsWith('7') ? map['8' + cleanPhone.slice(1)] : null);
   if (item) {
     const roles = Array.isArray(item.roles) ? item.roles : (item.role ? [item.role] : []);
-    const lastUsedRole = item.lastUsedRole || (roles.length > 0 ? roles[roles.length - 1] : null);
+    const lastUsedRole = item.lastUsedRole || item.role || (roles.length > 0 ? roles[roles.length - 1] : null);
     return {
       success: true,
       phone: cleanPhone,
@@ -469,60 +472,86 @@ self.addEventListener('message', (event) => {
       let role = null;
       let roles = [];
       let phone = event.data.phone || null;
+      let clean = phone ? String(phone).replace(/\D/g, '') : null;
+      if (clean && clean.length === 11 && clean.startsWith('8')) {
+        clean = '7' + clean.slice(1);
+      }
 
       try {
         const cache = await caches.open(CACHE_NAME);
-        if (phone) {
-          const clean = String(phone).replace(/\D/g, '');
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+
+        if (clean) {
           const lookupRes = await lookupRoleForPhone(clean);
-          if (lookupRes && lookupRes.success) {
+          if (lookupRes && lookupRes.success && lookupRes.lastUsedRole) {
             role = lookupRes.lastUsedRole;
             roles = lookupRes.roles || [];
           }
           if (!role) {
-            const mapRes = await cache.match('/phone-role-map');
-            if (mapRes) {
-              const mapData = await mapRes.json();
-              if (mapData && mapData[clean]) {
-                const val = mapData[clean];
-                if (typeof val === 'string') {
-                  role = val;
-                  roles = [val];
-                } else if (typeof val === 'object') {
-                  roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
-                  role = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+            for (const c of [cache, pCache]) {
+              try {
+                const mapRes = await c.match('/phone-role-map');
+                if (mapRes) {
+                  const mapData = await mapRes.json();
+                  const val = mapData?.[clean] || (clean.startsWith('7') ? mapData?.['8' + clean.slice(1)] : null);
+                  if (val) {
+                    if (typeof val === 'string') {
+                      role = val;
+                      roles = [val];
+                    } else if (typeof val === 'object') {
+                      roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
+                      role = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+                    }
+                    if (role) break;
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        if (!role) {
+          for (const c of [cache, pCache]) {
+            try {
+              const sessionRes = await c.match('/offline-session');
+              if (sessionRes) {
+                const sData = await sessionRes.json();
+                if (sData && sData.role) {
+                  let sPhone = sData.phone ? String(sData.phone).replace(/\D/g, '') : null;
+                  if (sPhone && sPhone.length === 11 && sPhone.startsWith('8')) sPhone = '7' + sPhone.slice(1);
+                  if (!clean || (sPhone && sPhone === clean)) {
+                    role = sData.role;
+                    roles = [sData.role];
+                    if (!clean && sPhone) clean = sPhone;
+                    break;
+                  }
                 }
               }
-            }
+            } catch (e) {}
           }
         }
 
         if (!role) {
-          const roleRes = await cache.match('/offline-role');
-          if (roleRes) {
-            const rData = await roleRes.json();
-            if (rData && rData.role) {
-              role = rData.role;
-              roles = [rData.role];
-            }
-          }
-        }
-
-        if (!role) {
-          const sessionRes = await cache.match('/offline-session');
-          if (sessionRes) {
-            const sData = await sessionRes.clone().json();
-            if (sData) {
-              if (!role && sData.role) {
-                role = sData.role;
-                roles = [sData.role];
+          for (const c of [cache, pCache]) {
+            try {
+              const roleRes = await c.match('/offline-role');
+              if (roleRes) {
+                const rData = await roleRes.json();
+                if (rData && rData.role) {
+                  let rPhone = rData.phone ? String(rData.phone).replace(/\D/g, '') : null;
+                  if (rPhone && rPhone.length === 11 && rPhone.startsWith('8')) rPhone = '7' + rPhone.slice(1);
+                  if (!clean || (rPhone && rPhone === clean)) {
+                    role = rData.role;
+                    roles = [rData.role];
+                    break;
+                  }
+                }
               }
-              if (!phone && sData.phone) phone = sData.phone;
-            }
+            } catch (e) {}
           }
         }
       } catch (e) {}
-      return { role, roles, phone };
+      return { role, roles, phone: clean };
     })();
 
     if (event.waitUntil) event.waitUntil(promise);
@@ -652,7 +681,11 @@ self.addEventListener('message', (event) => {
         const cache = await caches.open(CACHE_NAME);
         const pCache = await caches.open(OFFLINE_DATA_CACHE);
         if (event.data.role) {
-          const payload = JSON.stringify({ role: event.data.role, ts: Date.now() });
+          let phone = event.data.phone ? String(event.data.phone).replace(/\D/g, '') : null;
+          if (phone && phone.length === 11 && phone.startsWith('8')) phone = '7' + phone.slice(1);
+          const payloadObj = { role: event.data.role, ts: Date.now() };
+          if (phone) payloadObj.phone = phone;
+          const payload = JSON.stringify(payloadObj);
           await cache.put('/offline-role', new Response(payload, { headers: { 'Content-Type': 'application/json' } }));
           await pCache.put('/offline-role', new Response(payload, { headers: { 'Content-Type': 'application/json' } }));
         } else {
