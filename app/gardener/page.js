@@ -189,6 +189,17 @@ export default function GardenerDashboard() {
   const [expenseReceiptBlob, setExpenseReceiptBlob] = useState(null);
   const [submittingExpense, setSubmittingExpense] = useState(false);
 
+  const ensureFreshUsersList = async () => {
+    if (typeof window === 'undefined' || !navigator.onLine) return;
+    try {
+      const res = await apiFetch('/api/public/offline-users');
+      if (res.ok) {
+        const data = await res.json();
+        saveCache('public_offline_users', data).catch(() => {});
+      }
+    } catch (e) {}
+  };
+
   const formatLastUpdated = (timestamp) => {
     if (!timestamp) return null;
     const d = new Date(timestamp);
@@ -671,6 +682,34 @@ export default function GardenerDashboard() {
       }
     };
 
+    ensureFreshUsersList();
+
+    const handleBeforeUnload = (e) => {
+      if (e && e.persisted) return;
+      if (typeof window !== 'undefined') {
+        const manualLogout = sessionStorage.getItem('manual_logout') === '1';
+        if (!manualLogout) {
+          localStorage.setItem('offline_session', '1');
+          localStorage.setItem('offline_session_ts', String(Date.now()));
+          const role = localStorage.getItem('auth_role') || 'GARDENER';
+          const phone = localStorage.getItem('auth_phone');
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            try {
+              navigator.serviceWorker.controller.postMessage({
+                type: 'OFFLINE_SESSION',
+                active: true,
+                role,
+                phone,
+                ts: Date.now()
+              });
+            } catch (err) {}
+          }
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -680,6 +719,8 @@ export default function GardenerDashboard() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
     };
   }, []);
 

@@ -345,10 +345,9 @@ async function cacheLoginAndChunks() {
   return cacheRolePageAndChunks('/login');
 }
 
-async function precacheAllRoles() {
+async function precacheAllRoles(retryCount = 0) {
   CACHE_NAME = getCacheName();
-  const retryCount = typeof arguments[0] === 'number' ? arguments[0] : 0;
-  let has503 = false;
+  let hasError = false;
   let successCount = 0;
 
   const rolePages = ['/login', '/admin', '/leader', '/gardener'];
@@ -358,9 +357,9 @@ async function precacheAllRoles() {
       try {
         const ok = await cacheRolePageAndChunks(pagePath);
         if (ok) successCount++;
-        else has503 = true;
+        else hasError = true;
       } catch (e) {
-        has503 = true;
+        hasError = true;
       }
     })
   );
@@ -399,19 +398,22 @@ async function precacheAllRoles() {
               await pCache.put('/phone-role-map', mapRes2);
             } catch (err) {}
           }
+        } else {
+          hasError = true;
         }
-      } catch (e) {}
+      } catch (e) {
+        hasError = true;
+      }
     })
   );
 
-  if (successCount > 0) {
-    await deleteOldCaches();
+  if (hasError && retryCount < 3) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    return precacheAllRoles(retryCount + 1);
   }
 
-  if (has503 && retryCount < 3) {
-    const delays = [5000, 15000, 60000];
-    const delay = delays[retryCount] || 60000;
-    setTimeout(() => { precacheAllRoles(retryCount + 1).catch(() => {}); }, delay);
+  if (successCount > 0) {
+    await deleteOldCaches();
   }
 
   return successCount > 0;
@@ -460,7 +462,8 @@ self.addEventListener('activate', (event) => {
 
       try {
         const cache = await caches.open(CACHE_NAME);
-        const sessionRes = await cache.match('/offline-session');
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        let sessionRes = await cache.match('/offline-session') || await pCache.match('/offline-session');
         if (sessionRes) {
           const data = await sessionRes.json();
           if (data && data.active) {
@@ -952,7 +955,6 @@ self.addEventListener('fetch', (event) => {
         try {
           const cache = await caches.open(CACHE_NAME);
           const pCache = await caches.open(OFFLINE_DATA_CACHE);
-          const activeSession = await isOfflineSession();
 
           // 1. Извлекаем роль из /offline-role или /offline-session
           let userRole = null;
@@ -976,8 +978,8 @@ self.addEventListener('fetch', (event) => {
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
 
-          if (activeSession) {
-            // При активной офлайн-сессии: отдавать закэшированную СТРАНИЦУ РОЛИ пользователя
+          // A1: При активной офлайн-сессии или если по номеру/сессии определена роль — ВСЕГДА отдавать закэшированную страницу роли БЕЗ проверки getPageCacheAge
+          if (activeSession || rolePath) {
             if (rolePath) {
               const roleKey = new Request(rolePath, { method: 'GET' });
               let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey)) || await normalizeCachedResponse(await pCache.match(roleKey));
@@ -985,45 +987,19 @@ self.addEventListener('fetch', (event) => {
                 return withOfflineHeader(cachedRolePage);
               }
             }
+          }
 
-            // Запрошенный конкретный путь
-            const directKey = new Request(url.pathname, { method: 'GET' });
-            let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
-            if (cachedDirect) {
-              return withOfflineHeader(cachedDirect);
-            }
-          } else {
-            // При отсутствующей офлайн-сессии: проверяем свежесть кэша getPageCacheAge
-            const isRolePathRequest = ['/admin', '/leader', '/gardener'].some(p => url.pathname === p || url.pathname.startsWith(p + '/'));
-            const targetCheckPath = isRolePathRequest ? url.pathname : (rolePath || url.pathname);
-            const cacheAge = await getPageCacheAge(targetCheckPath);
-
+          // Запрошенный конкретный путь если роль не определена или роли в кэше нет
+          const directKey = new Request(url.pathname, { method: 'GET' });
+          let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
+          if (cachedDirect) {
+            const cacheAge = await getPageCacheAge(url.pathname);
             if (cacheAge <= MAX_AGE_24H) {
-              if (isRolePathRequest) {
-                const directKey = new Request(url.pathname, { method: 'GET' });
-                let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
-                if (cachedDirect) {
-                  return withOfflineHeader(cachedDirect);
-                }
-              }
-
-              if (rolePath) {
-                const roleKey = new Request(rolePath, { method: 'GET' });
-                let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey)) || await normalizeCachedResponse(await pCache.match(roleKey));
-                if (cachedRolePage) {
-                  return withOfflineHeader(cachedRolePage);
-                }
-              }
-
-              const directKey = new Request(url.pathname, { method: 'GET' });
-              let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
-              if (cachedDirect) {
-                return withOfflineHeader(cachedDirect);
-              }
+              return withOfflineHeader(cachedDirect);
             }
           }
 
-          // Если нет активной офлайн-сессии или кэш устарел — отдаём /login
+          // Если роль вообще нигде не найдена — остаёмся на /login
           const loginKey = new Request('/login', { method: 'GET' });
           const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey)) || await normalizeCachedResponse(await pCache.match(loginKey));
           if (cachedLogin) {

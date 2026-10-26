@@ -337,6 +337,23 @@ export default function LoginPage() {
 
   const handleAutoLogin = () => handleAutoLoginWithPhone(savedPhone);
 
+  const ensureFreshUsersList = async () => {
+    if (typeof window === 'undefined' || !navigator.onLine) return;
+    try {
+      const res = await fetch('/api/public/offline-users');
+      if (res.ok) {
+        const data = await res.json();
+        const userList = Array.isArray(data) ? data : (Array.isArray(data?.users) ? data.users : []);
+        for (const u of userList) {
+          if (u && u.phone && u.role) {
+            savePhoneRoleMap(u.phone, u.role, u.name || null);
+            recordIdentityToSw(u.phone, u.role, u.name || null);
+          }
+        }
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
     const handleOnlineCheck = async () => {
       const online = typeof window !== 'undefined' ? navigator.onLine : true;
@@ -350,6 +367,7 @@ export default function LoginPage() {
         const res = await fetch('/api/version', { signal: controller.signal });
         clearTimeout(timer);
 
+        ensureFreshUsersList();
         if (res.status === 401) {
           const storedPhone = localStorage.getItem('auth_phone');
           if (storedPhone) {

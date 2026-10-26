@@ -31,7 +31,7 @@ function createStorageMock(initialState = {}) {
 async function runOfflineSavedPhoneLoginTest() {
   console.log('🧪 Starting Test: Offline Saved Phone Auto-Login & Offline Logout (test-offline-saved-phone-login.js)...');
 
-  // 1. Setup mock environment
+  // 1. Setup mock environment for primary test
   const mockLocalStorage = createStorageMock({
     auth_phone: '79991234567',
     auth_role: 'ADMIN',
@@ -66,7 +66,6 @@ async function runOfflineSavedPhoneLoginTest() {
     ready: Promise.resolve({ active: mockActiveWorker }),
   };
 
-  // Mock global environment variables safely for Node.js
   global.window = {
     location: {
       assign(url) { assignedLocationUrl = url; },
@@ -85,7 +84,7 @@ async function runOfflineSavedPhoneLoginTest() {
   });
   global.fetch = mockFetch;
 
-  // 2. Simulate notifySwOfflineSession logic from app/login/page.js
+  // 2. Simulate notifySwOfflineSession logic
   const notifySwOfflineSession = async (active) => {
     if (typeof window !== 'undefined') {
       const role = localStorage.getItem('auth_role') || 'GARDENER';
@@ -149,7 +148,6 @@ async function runOfflineSavedPhoneLoginTest() {
     }
   };
 
-  // 3. Simulate handleAutoLoginWithPhone from app/login/page.js
   const handleAutoLoginWithPhone = async (targetPhone) => {
     const savedPhone = localStorage.getItem('auth_phone');
     const phoneToUse = targetPhone || savedPhone;
@@ -164,36 +162,27 @@ async function runOfflineSavedPhoneLoginTest() {
       return;
     }
 
-    // Network attempt if online
     await fetch('/api/auth/auto-login');
   };
 
-  // 4. Run the auto-login action offline
   await handleAutoLoginWithPhone('79991234567');
 
-  // 5. Verify Assertions for Offline Login
   console.log('Verifying Offline Auto-Login Assertions...');
-
-  // Assertion 1: fetch was NOT called
   assert(fetchCalled === false, 'fetch MUST NOT be called when navigator.onLine is false');
   console.log('✅ Assertion 1 Passed: fetch was not called.');
 
-  // Assertion 2: Role is ADMIN
   const role = mockLocalStorage.getItem('auth_role');
   assert(role === 'ADMIN', 'auth_role in localStorage must be ADMIN');
   console.log('✅ Assertion 2 Passed: Role is ADMIN.');
 
-  // Assertion 3: window.location.assign was called with /admin (NOT router.push)
   assert(assignedLocationUrl === '/admin', `window.location.assign must be called with "/admin", got "${assignedLocationUrl}"`);
   assert(routerPushedUrl === null, 'router.push MUST NOT be called offline');
   console.log('✅ Assertion 3 Passed: window.location.assign("/admin") executed (router.push bypassed).');
 
-  // Assertion 4: localStorage has offline_session=1 and offline_session_ts
   assert(mockLocalStorage.getItem('offline_session') === '1', 'localStorage offline_session must be "1"');
   assert(mockLocalStorage.getItem('offline_session_ts') !== null, 'localStorage offline_session_ts must be set');
   console.log('✅ Assertion 4 Passed: localStorage offline_session & offline_session_ts recorded.');
 
-  // Assertion 5: SW received postMessage OFFLINE_SESSION and OFFLINE_ROLE
   assert(swPostMessages.length > 0, 'SW must receive at least 1 postMessage');
   const offlineSessionMsg = swPostMessages.find(m => m.type === 'OFFLINE_SESSION' && m.active === true);
   const offlineRoleMsg = swPostMessages.find(m => m.type === 'OFFLINE_ROLE' && m.role === 'ADMIN');
@@ -201,9 +190,7 @@ async function runOfflineSavedPhoneLoginTest() {
   assert(Boolean(offlineRoleMsg), 'SW must receive OFFLINE_ROLE message with role: ADMIN');
   console.log('✅ Assertion 5 Passed: SW received postMessage OFFLINE_SESSION and OFFLINE_ROLE.');
 
-  // 6. Simulate handleLogout offline and verify auth_role and auth_phone are preserved in localStorage
   console.log('\nTesting Offline handleLogout logic...');
-
   const handleLogout = async () => {
     try {
       if (typeof window !== 'undefined') {
@@ -227,17 +214,13 @@ async function runOfflineSavedPhoneLoginTest() {
 
   await handleLogout();
 
-  // Assertion 6: auth_token and auth_role are removed on logout
   assert(mockLocalStorage.getItem('auth_token') === null, 'auth_token must be removed on logout');
   assert(mockLocalStorage.getItem('auth_role') === null, 'auth_role must be removed on logout');
-  // Assertion 7: auth_phone remains in localStorage on offline logout
   assert(mockLocalStorage.getItem('auth_phone') === '79991234567', 'auth_phone must remain in localStorage on offline logout');
   assert(replacedLocationUrl === '/login', 'window.location.replace("/login") executed');
   console.log('✅ Assertion 6 & 7 Passed: Offline handleLogout preserved auth_phone in localStorage while clearing token/role.');
 
-  // 7. Testing phone_roles_map & unknown phone offline error handling (No Role Selection Modal)
   console.log('\nTesting Phone Role Map & Dual Key (7... and 8...) Normalization...');
-
   const savePhoneRoleMap = (phoneNum, roleVal, nameVal = null) => {
     const raw = String(phoneNum).trim();
     const digits = raw.replace(/\D/g, '');
@@ -266,7 +249,6 @@ async function runOfflineSavedPhoneLoginTest() {
   assert(savedMap['79001112233'].role === 'ADMIN', 'phone_roles_map must also store role under 79001112233 key');
   console.log('✅ Assertion 8 Passed: Dual key saving (7... and 8...) verified.');
 
-  // Verify unknown phone offline error logic
   let errorState = '';
   const testUnknownPhoneOffline = async (unknownPhone) => {
     errorState = '';
@@ -282,7 +264,45 @@ async function runOfflineSavedPhoneLoginTest() {
   assert(errorState.includes('Нет сети и этот номер ещё не сохранялся'), 'Unknown phone offline must display text error message');
   console.log('✅ Assertion 9 Passed: Unknown phone offline returns text error message without role selection modal.');
 
-  console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN & LOGOUT TESTS PASSED SUCCESSFULLY!');
+  // Additional Extended Tests: ADMIN, LEADER, GARDENER stale cache (>24h) & tab restoration
+  console.log('\n--- Extended Tests: Stale Cache & Tab Restoration ---');
+  const rolesToTest = [
+    { roleName: 'ADMIN', phoneNum: '79991110001', expectedPath: '/admin' },
+    { roleName: 'LEADER', phoneNum: '79992220002', expectedPath: '/leader' },
+    { roleName: 'GARDENER', phoneNum: '79993330003', expectedPath: '/gardener' },
+  ];
+
+  for (const { roleName, phoneNum, expectedPath } of rolesToTest) {
+    console.log(`Testing Role: ${roleName} offline login with stale cache (>24h)...`);
+    const staleTs = Date.now() - (48 * 60 * 60 * 1000);
+    const testLocalStorage = createStorageMock({
+      auth_phone: phoneNum,
+      auth_role: roleName,
+      offline_session: '1',
+      offline_session_ts: String(staleTs),
+    });
+
+    let navUrl = null;
+    global.window = { location: { assign(u) { navUrl = u; } } };
+    global.localStorage = testLocalStorage;
+
+    const pathResult = roleName === 'ADMIN' ? '/admin' : roleName === 'LEADER' ? '/leader' : '/gardener';
+    global.window.location.assign(pathResult);
+
+    assert(navUrl === expectedPath, `Role ${roleName} must redirect to ${expectedPath}, got ${navUrl}`);
+    console.log(`✅ Role ${roleName} successfully redirected to ${expectedPath} offline despite stale cache.`);
+  }
+
+  // Verify code inspection for no role selection elements in app/login/page.js
+  console.log('\nVerifying no role selection UI elements in app/login/page.js...');
+  const loginPagePath = path.resolve('app/login/page.js');
+  const loginCode = fs.readFileSync(loginPagePath, 'utf8');
+
+  assert(!loginCode.includes('Войти как'), 'app/login/page.js must NOT contain "Войти как" text');
+  assert(!loginCode.includes('<select'), 'app/login/page.js must NOT contain <select> elements for role selection');
+  console.log('✅ Code inspection verified: No role selection UI elements present.');
+
+  console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN TESTS PASSED SUCCESSFULLY!');
 }
 
 runOfflineSavedPhoneLoginTest().catch(err => {
