@@ -309,61 +309,14 @@ export default function LoginPage() {
       }
 
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
-      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const phoneVariants = getPhoneVariants(rawInputPhone);
       const cleanPhone = phoneVariants[0] || '';
 
-      let resolvedRole = null;
-      let nameVal = null;
+      const localMapData = rawInputPhone ? getRoleForPhone(rawInputPhone) : null;
+      const nameVal = localMapData?.name || null;
 
-      // 1) Synchronous lookup in localStorage.phone_roles_map
-      if (rawInputPhone) {
-        const localMapData = getRoleForPhone(rawInputPhone);
-        if (localMapData) {
-          resolvedRole = localMapData.lastUsedRole || localMapData.role || null;
-          nameVal = localMapData.name || null;
-        }
-      }
-
-      // 2) Fallback to storedRole/storedPhone if phone matches or confirming saved phone
-      if (!resolvedRole && storedRole) {
-        const storedVariants = getPhoneVariants(storedPhone);
-        const matchesStored = phoneVariants.some(v => storedVariants.includes(v));
-        if (matchesStored || targetPhone === savedPhone || isSavedPhoneMode || !rawInputPhone) {
-          resolvedRole = storedRole;
-        }
-      }
-
-      // 3) Single SW query with 800ms max timeout
-      if (!resolvedRole && rawInputPhone && 'serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const targetSw = reg.active || navigator.serviceWorker.controller;
-          if (targetSw) {
-            const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone || rawInputPhone }, 800);
-            if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
-              resolvedRole = reply.role;
-            }
-          }
-        } catch (e) {}
-      }
-
-      // 4) Direct SW cache inspection for /offline-identities, /phone-role-map, /api/public/offline-users
-      if (!resolvedRole && rawInputPhone) {
-        const directRole = await readSwCacheDirect(rawInputPhone);
-        if (directRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(directRole)) {
-          resolvedRole = directRole;
-        }
-      }
-
-      // 5) Global resolveOfflineRoleFromCaches fallback
-      if (!resolvedRole && rawInputPhone) {
-        const fallbackRole = await resolveOfflineRoleFromCaches(rawInputPhone);
-        if (fallbackRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(fallbackRole)) {
-          resolvedRole = fallbackRole;
-        }
-      }
+      const resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
         const phoneToUse = cleanPhone || storedPhone || rawInputPhone;
@@ -379,6 +332,7 @@ export default function LoginPage() {
           notifySwOfflinePhone(phoneToUse);
           recordIdentityToSw(phoneToUse, resolvedRole, nameVal);
         }
+        await notifySwOfflineSession(true, resolvedRole);
         triggerSwPrecacheRoles();
 
         await redirectByRole(resolvedRole, true);

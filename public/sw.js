@@ -89,12 +89,12 @@ async function recordIdentity({ phone, role, name }) {
 
 async function lookupRoleForPhone(phone) {
   if (!phone) return { success: false, roles: [], lastUsedRole: null, name: null };
-  const digits = String(phone).replace(/\D/g, '');
-  if (!digits) return { success: false, roles: [], lastUsedRole: null, name: null };
+  const rawStr = String(phone).trim();
+  const digits = rawStr.replace(/\D/g, '');
 
   const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
   const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
-  const candidateKeys = Array.from(new Set([clean7, clean8, digits, String(phone).trim()]));
+  const candidateKeys = Array.from(new Set([clean7, clean8, digits, rawStr, '+' + clean7].filter(Boolean)));
 
   // 1. Check /offline-identities
   const map = await getOfflineIdentitiesMap();
@@ -103,7 +103,7 @@ async function lookupRoleForPhone(phone) {
     if (item) {
       const roles = Array.isArray(item.roles) ? item.roles : (item.role ? [item.role] : []);
       const lastUsedRole = item.lastUsedRole || item.role || (roles.length > 0 ? roles[roles.length - 1] : null);
-      if (lastUsedRole) {
+      if (lastUsedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(lastUsedRole)) {
         return {
           success: true,
           phone: k,
@@ -115,11 +115,25 @@ async function lookupRoleForPhone(phone) {
     }
   }
 
+  // Open all anemon-agro-* caches for inspection
+  let cachesToScan = [];
+  try {
+    const allKeys = await caches.keys();
+    const cacheNames = allKeys.filter(k => k.startsWith('anemon-agro-'));
+    if (!cacheNames.includes(CACHE_NAME)) cacheNames.push(CACHE_NAME);
+    if (!cacheNames.includes(OFFLINE_DATA_CACHE)) cacheNames.push(OFFLINE_DATA_CACHE);
+
+    for (const cName of cacheNames) {
+      try {
+        const opened = await caches.open(cName);
+        if (opened) cachesToScan.push(opened);
+      } catch (e) {}
+    }
+  } catch (e) {}
+
   // 2. Check /phone-role-map
   try {
-    const cache = await caches.open(CACHE_NAME);
-    const pCache = await caches.open(OFFLINE_DATA_CACHE);
-    for (const c of [cache, pCache]) {
+    for (const c of cachesToScan) {
       const mapRes = await c.match('/phone-role-map');
       if (mapRes) {
         const pMap = await mapRes.json();
@@ -128,7 +142,7 @@ async function lookupRoleForPhone(phone) {
           if (val) {
             const r = typeof val === 'string' ? val : (val.lastUsedRole || val.role);
             const n = typeof val === 'object' ? val.name : null;
-            if (r) {
+            if (r && ['ADMIN', 'LEADER', 'GARDENER'].includes(r)) {
               await recordIdentity({ phone: k, role: r, name: n });
               return { success: true, phone: k, roles: [r], lastUsedRole: r, name: n };
             }
@@ -140,9 +154,7 @@ async function lookupRoleForPhone(phone) {
 
   // 3. Check /api/public/offline-users pre-cached endpoint
   try {
-    const cache = await caches.open(CACHE_NAME);
-    const pCache = await caches.open(OFFLINE_DATA_CACHE);
-    for (const c of [cache, pCache]) {
+    for (const c of cachesToScan) {
       const usersRes = await c.match('/api/public/offline-users');
       if (usersRes) {
         const usersData = await usersRes.json();
@@ -153,7 +165,7 @@ async function lookupRoleForPhone(phone) {
           const u7 = uDigits.length === 11 && uDigits.startsWith('8') ? '7' + uDigits.slice(1) : (uDigits.length === 10 ? '7' + uDigits : uDigits);
           const u8 = uDigits.length === 11 && uDigits.startsWith('7') ? '8' + uDigits.slice(1) : (uDigits.length === 10 ? '8' + uDigits : uDigits);
           if (candidateKeys.includes(uDigits) || candidateKeys.includes(u7) || candidateKeys.includes(u8)) {
-            if (u.role) {
+            if (u.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(u.role)) {
               await recordIdentity({ phone: u7, role: u.role, name: u.name });
               return { success: true, phone: u7, roles: [u.role], lastUsedRole: u.role, name: u.name || null };
             }
