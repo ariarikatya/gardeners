@@ -12,6 +12,7 @@ function getCacheName() {
 }
 
 let CACHE_NAME = getCacheName();
+const OFFLINE_DATA_CACHE = 'anemon-agro-offline-data';
 const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js'];
 
 async function fetchWithTimeout(request, timeoutMs = 5000) {
@@ -31,7 +32,11 @@ async function fetchWithTimeout(request, timeoutMs = 5000) {
 async function getOfflineIdentitiesMap() {
   try {
     const cache = await caches.open(CACHE_NAME);
-    const res = await cache.match('/offline-identities');
+    let res = await cache.match('/offline-identities');
+    if (!res) {
+      const pCache = await caches.open(OFFLINE_DATA_CACHE);
+      res = await pCache.match('/offline-identities');
+    }
     if (res) {
       const data = await res.json();
       if (data && typeof data === 'object') return data;
@@ -42,10 +47,13 @@ async function getOfflineIdentitiesMap() {
 
 async function saveOfflineIdentitiesMap(map) {
   try {
+    const bodyStr = JSON.stringify(map);
+    const res1 = new Response(bodyStr, { headers: { 'Content-Type': 'application/json' } });
+    const res2 = new Response(bodyStr, { headers: { 'Content-Type': 'application/json' } });
     const cache = await caches.open(CACHE_NAME);
-    await cache.put('/offline-identities', new Response(JSON.stringify(map), {
-      headers: { 'Content-Type': 'application/json' }
-    }));
+    await cache.put('/offline-identities', res1);
+    const pCache = await caches.open(OFFLINE_DATA_CACHE);
+    await pCache.put('/offline-identities', res2);
   } catch (e) {}
 }
 
@@ -143,7 +151,7 @@ async function deleteOldCaches() {
     CACHE_NAME = getCacheName();
     const keys = await caches.keys();
     await Promise.all(
-      keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+      keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
     );
   } catch (e) {}
 }
@@ -158,12 +166,14 @@ async function cacheRolePageAndChunks(path) {
       if (!text.includes('<!DOCTYPE html>') && !text.includes('<html')) {
         return false;
       }
-      safeCachePut(CACHE_NAME, new Request(path), res);
+      safeCachePut(CACHE_NAME, new Request(path), res.clone());
+      safeCachePut(OFFLINE_DATA_CACHE, new Request(path), res.clone());
       const metaKey = path === '/' ? '/login-meta' : `${path}-meta`;
       const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
         headers: { 'Content-Type': 'application/json' }
       });
-      safeCachePut(CACHE_NAME, new Request(metaKey), metaRes);
+      safeCachePut(CACHE_NAME, new Request(metaKey), metaRes.clone());
+      safeCachePut(OFFLINE_DATA_CACHE, new Request(metaKey), metaRes);
 
       const matches = text.matchAll(/(?:src|href)=["'](\/_next\/static\/chunks\/[^"']+)["']/g);
       const chunkUrls = new Set();
@@ -257,7 +267,7 @@ self.addEventListener('activate', (event) => {
       CACHE_NAME = getCacheName();
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+        keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
       );
       try {
         const cache = await caches.open(CACHE_NAME);
@@ -281,7 +291,11 @@ async function isOfflineSession() {
   if (isOfflineSessionActive) return true;
   try {
     const cache = await caches.open(CACHE_NAME);
-    const sessionRes = await cache.match('/offline-session');
+    let sessionRes = await cache.match('/offline-session');
+    if (!sessionRes) {
+      const pCache = await caches.open(OFFLINE_DATA_CACHE);
+      sessionRes = await pCache.match('/offline-session');
+    }
     if (sessionRes) {
       const data = await sessionRes.clone().json();
       if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_30D)) {
@@ -368,11 +382,17 @@ self.addEventListener('message', (event) => {
           }
           const payload = { active: true, ts: event.data.ts || Date.now() };
           if (roleToSave) payload.role = roleToSave;
-          await cache.put('/offline-session', new Response(JSON.stringify(payload), {
-            headers: { 'Content-Type': 'application/json' }
-          }));
+          const res1 = new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
+          const res2 = new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });
+          await cache.put('/offline-session', res1);
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          await pCache.put('/offline-session', res2);
         } else {
           await cache.delete('/offline-session');
+          try {
+            const pCache = await caches.open(OFFLINE_DATA_CACHE);
+            await pCache.delete('/offline-session');
+          } catch (e) {}
           await cacheLoginAndChunks().catch(() => {});
         }
       } catch (e) {}
@@ -393,10 +413,11 @@ self.addEventListener('message', (event) => {
   if (event.data.type === 'SYNC_PHONE_ROLE_MAP' && event.data.map) {
     const promise = (async () => {
       try {
+        const mapStr = JSON.stringify(event.data.map);
         const cache = await caches.open(CACHE_NAME);
-        await cache.put('/phone-role-map', new Response(JSON.stringify(event.data.map), {
-          headers: { 'Content-Type': 'application/json' }
-        }));
+        await cache.put('/phone-role-map', new Response(mapStr, { headers: { 'Content-Type': 'application/json' } }));
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        await pCache.put('/phone-role-map', new Response(mapStr, { headers: { 'Content-Type': 'application/json' } }));
         for (const [p, val] of Object.entries(event.data.map)) {
           if (val) {
             const role = typeof val === 'string' ? val : (val.lastUsedRole || val.role);
@@ -531,12 +552,14 @@ self.addEventListener('message', (event) => {
     const promise = (async () => {
       try {
         const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
         if (event.data.role) {
-          await cache.put('/offline-role', new Response(JSON.stringify({ role: event.data.role, ts: Date.now() }), {
-            headers: { 'Content-Type': 'application/json' }
-          }));
+          const payload = JSON.stringify({ role: event.data.role, ts: Date.now() });
+          await cache.put('/offline-role', new Response(payload, { headers: { 'Content-Type': 'application/json' } }));
+          await pCache.put('/offline-role', new Response(payload, { headers: { 'Content-Type': 'application/json' } }));
         } else {
           await cache.delete('/offline-role');
+          await pCache.delete('/offline-role');
         }
       } catch (e) {}
     })();
@@ -727,7 +750,11 @@ self.addEventListener('fetch', (event) => {
 
           // Priority 1: Если запрошенный маршрут напрямую есть в кэше — отдавать ЕГО
           const directKey = new Request(url.pathname, { method: 'GET' });
-          const cachedDirect = await normalizeCachedResponse(await cache.match(directKey));
+          let cachedDirect = await normalizeCachedResponse(await cache.match(directKey));
+          if (!cachedDirect) {
+            const pCache = await caches.open(OFFLINE_DATA_CACHE);
+            cachedDirect = await normalizeCachedResponse(await pCache.match(directKey));
+          }
           if (cachedDirect) {
             return withOfflineHeader(cachedDirect);
           }
@@ -756,7 +783,11 @@ self.addEventListener('fetch', (event) => {
 
           if (rolePath) {
             const roleKey = new Request(rolePath, { method: 'GET' });
-            const cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
+            let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
+            if (!cachedRolePage) {
+              const pCache = await caches.open(OFFLINE_DATA_CACHE);
+              cachedRolePage = await normalizeCachedResponse(await pCache.match(roleKey));
+            }
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
             }
