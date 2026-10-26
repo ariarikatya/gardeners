@@ -928,7 +928,10 @@ self.addEventListener('fetch', (event) => {
           if (fb) return withOfflineHeader(fb);
         } catch (e) {}
 
-        return new Response('Offline', { status: 200, headers: { 'Content-Type': 'text/plain' } });
+        return new Response(
+          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Откройте сайт один раз при появлении интернета для полной загрузки офлайн-данных.</p></div></body></html>',
+          { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' } }
+        );
       })()
     );
     return;
