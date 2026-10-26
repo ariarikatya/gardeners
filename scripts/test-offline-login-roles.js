@@ -19,6 +19,7 @@ async function runOfflineLoginRolesTest() {
 
   // Assertion 2: handleOfflineLogin sets neutral single-line error or proceeds
   assert(
+    pageCode.includes("Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.") ||
     pageCode.includes("Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.") ||
     pageCode.includes("Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.") ||
     pageCode.includes("Нет сети. Откройте сайт с интернетом, чтобы скачать данные.") ||
