@@ -224,9 +224,45 @@ function withOfflineHeader(response, extraHeaders = {}) {
   }
 }
 
+async function restoreOfflineDataToNewCache() {
+  CACHE_NAME = getCacheName();
+  const cache = await caches.open(CACHE_NAME);
+  const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
+
+  const allCacheKeys = await caches.keys();
+  for (const k of keysToRestore) {
+    try {
+      let matchedRes = null;
+      try {
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        matchedRes = await pCache.match(k);
+      } catch (e) {}
+
+      if (!matchedRes) {
+        for (const cName of allCacheKeys) {
+          try {
+            const oldC = await caches.open(cName);
+            matchedRes = await oldC.match(k);
+            if (matchedRes) break;
+          } catch (e) {}
+        }
+      }
+
+      if (matchedRes) {
+        await cache.put(k, matchedRes.clone());
+        try {
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          await pCache.put(k, matchedRes.clone());
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+}
+
 async function deleteOldCaches() {
   try {
     CACHE_NAME = getCacheName();
+    await restoreOfflineDataToNewCache();
     const keys = await caches.keys();
     await Promise.all(
       keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
@@ -377,32 +413,33 @@ self.addEventListener('install', (event) => {
 let isOfflineSessionActive = false;
 const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
-async function restoreOfflineDataToNewCache() {
-  try {
-    CACHE_NAME = getCacheName();
-    const cache = await caches.open(CACHE_NAME);
-    const pCache = await caches.open(OFFLINE_DATA_CACHE);
-    const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
-    for (const k of keysToRestore) {
-      try {
-        const item = await pCache.match(k);
-        if (item) {
-          await cache.put(k, item.clone());
-        }
-      } catch (e) {}
-    }
-  } catch (e) {}
-}
-
 // === ACTIVATE: чистим все старые версии кэша anemon-agro-* и протухшие сессии (30 дней) ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       CACHE_NAME = getCacheName();
-      const keys = await caches.keys();
-      await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
-      );
+
+      let restoredOk = false;
+      try {
+        await restoreOfflineDataToNewCache();
+        restoredOk = true;
+      } catch (e) {
+        restoredOk = false;
+      }
+
+      await precacheAllRoles();
+
+      try {
+        await restoreOfflineDataToNewCache();
+      } catch (e) {}
+
+      if (restoredOk) {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
+        );
+      }
+
       try {
         const cache = await caches.open(CACHE_NAME);
         const sessionRes = await cache.match('/offline-session');
@@ -416,10 +453,6 @@ self.addEventListener('activate', (event) => {
           }
         }
       } catch (e) {}
-
-      await restoreOfflineDataToNewCache();
-      await precacheAllRoles();
-      await restoreOfflineDataToNewCache();
     })()
   );
   self.clients.claim();

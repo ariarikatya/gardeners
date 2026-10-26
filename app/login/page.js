@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
-import { activateOfflineSession, resolveOfflineRoleFromCaches, querySwOfflineRole } from '@/lib/offlineStore';
+import { activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -26,10 +26,27 @@ export default function LoginPage() {
     return Array.from(new Set([tail10, clean7, clean8, digits, raw, clean7 ? '+' + clean7 : ''].filter(Boolean)));
   };
 
-  const getTail10 = (p) => {
-    if (!p) return '';
-    const digits = String(p).replace(/\D/g, '');
-    return digits.length >= 10 ? digits.slice(-10) : digits;
+  const getRoleForPhone = (phoneNum) => {
+    if (!phoneNum || typeof window === 'undefined') return null;
+    try {
+      const mapStr = localStorage.getItem('phone_roles_map');
+      if (!mapStr) return null;
+      const map = JSON.parse(mapStr);
+      const variants = getPhoneVariants(phoneNum);
+      for (const k of variants) {
+        const val = map[k];
+        if (!val) continue;
+        if (typeof val === 'string') return { role: val, roles: [val], lastUsedRole: val };
+        if (typeof val === 'object' && val) {
+          const roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
+          const lastUsedRole = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+          return { role: lastUsedRole, roles, lastUsedRole, name: val.name || null };
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
   };
 
   const normalizeCleanPhone = (phoneNum) => {
@@ -62,31 +79,6 @@ export default function LoginPage() {
 
       localStorage.setItem('phone_roles_map', JSON.stringify(map));
     } catch (e) {}
-  };
-
-  const getRoleForPhone = (phoneNum) => {
-    if (!phoneNum || typeof window === 'undefined') return null;
-    const variants = getPhoneVariants(phoneNum);
-    if (variants.length === 0) return null;
-    try {
-      const mapStr = localStorage.getItem('phone_roles_map');
-      if (!mapStr) return null;
-      const map = JSON.parse(mapStr);
-
-      for (const k of variants) {
-        const val = map[k];
-        if (!val) continue;
-        if (typeof val === 'string') return { role: val, roles: [val], lastUsedRole: val };
-        if (typeof val === 'object' && val) {
-          const roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
-          const lastUsedRole = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
-          return { role: lastUsedRole, roles, lastUsedRole, name: val.name || null };
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
   };
 
   const triggerSwPrecacheRoles = () => {
@@ -239,52 +231,10 @@ export default function LoginPage() {
       }
 
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
-      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const cleanPhone = normalizeCleanPhone(rawInputPhone);
 
-      const localMapData = rawInputPhone ? getRoleForPhone(rawInputPhone) : null;
-      const nameVal = localMapData?.name || null;
-
       let resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
-
-      if (!resolvedRole && rawInputPhone && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const targetSw = reg.active || navigator.serviceWorker.controller;
-          if (targetSw) {
-            const reply = await postSwMessageWithReply(targetSw, { type: 'RESOLVE_ROLE', phone: rawInputPhone }, 2500);
-            if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
-              resolvedRole = reply.role;
-            }
-          }
-        } catch (e) {}
-      }
-
-      // Final fallbacks if resolvedRole is still null
-      if (!resolvedRole) {
-        const inputTail = getTail10(rawInputPhone);
-        const storedTail = getTail10(storedPhone);
-
-        if (storedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(storedRole)) {
-          if (!inputTail || !storedTail || inputTail === storedTail) {
-            resolvedRole = storedRole;
-          }
-        }
-      }
-
-      if (!resolvedRole && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const targetSw = reg.active || navigator.serviceWorker.controller;
-          if (targetSw) {
-            const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: null }, 2500);
-            if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
-              resolvedRole = reply.role;
-            }
-          }
-        } catch (e) {}
-      }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
         const phoneToUse = cleanPhone || storedPhone || rawInputPhone;
@@ -292,13 +242,13 @@ export default function LoginPage() {
           localStorage.setItem('auth_role', resolvedRole);
           if (phoneToUse) {
             localStorage.setItem('auth_phone', phoneToUse);
-            savePhoneRoleMap(phoneToUse, resolvedRole, nameVal);
+            savePhoneRoleMap(phoneToUse, resolvedRole);
           }
         }
 
         if (phoneToUse) {
           notifySwOfflinePhone(phoneToUse);
-          recordIdentityToSw(phoneToUse, resolvedRole, nameVal);
+          recordIdentityToSw(phoneToUse, resolvedRole);
         }
         await notifySwOfflineSession(true, resolvedRole);
         triggerSwPrecacheRoles();
@@ -444,11 +394,9 @@ export default function LoginPage() {
 
       if (isOffline) {
         (async () => {
-          const resolved = await resolveOfflineRoleFromCaches(saved);
+          const resolved = await resolveOfflineRoleFromCaches(saved || role);
           if (resolved) {
             await redirectByRole(resolved, true, saved);
-          } else if (role && ['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
-            await redirectByRole(role, true, saved);
           }
         })();
       }
@@ -465,9 +413,14 @@ export default function LoginPage() {
         if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_30D)) {
           localStorage.setItem('offline_session_ts', String(Date.now()));
           notifySwOfflineSession(true, role);
-        } else if (isOffline && (saved || role || getRoleForPhone(saved))) {
-          localStorage.setItem('offline_session_ts', String(Date.now()));
-          notifySwOfflineSession(true, role || getRoleForPhone(saved));
+        } else if (isOffline) {
+          (async () => {
+            const resRole = await resolveOfflineRoleFromCaches(saved || role);
+            if (resRole) {
+              localStorage.setItem('offline_session_ts', String(Date.now()));
+              notifySwOfflineSession(true, resRole);
+            }
+          })();
         } else if (!isOffline && offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum >= MAX_OFFLINE_AGE_30D)) {
           localStorage.removeItem('offline_session');
           localStorage.removeItem('offline_session_ts');
