@@ -10,9 +10,6 @@ export default function LoginPage() {
   const [isOnline, setIsOnline] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showRoleSelection, setShowRoleSelection] = useState(false);
-  const [selectedOfflineRole, setSelectedOfflineRole] = useState('GARDENER');
-  const [offlinePhoneForRole, setOfflinePhoneForRole] = useState('');
   const router = useRouter();
 
   const savePhoneRoleMap = (phoneNum, role, name = null) => {
@@ -23,8 +20,17 @@ export default function LoginPage() {
       const mapStr = localStorage.getItem('phone_roles_map');
       const map = mapStr ? JSON.parse(mapStr) : {};
       const existing = map[clean];
-      const existingName = typeof existing === 'object' ? existing?.name : null;
-      map[clean] = { role, name: name || existingName || null };
+      const existingObj = typeof existing === 'object' && existing !== null ? existing : {};
+      const existingName = existingObj.name || null;
+      const roles = Array.isArray(existingObj.roles) ? [...existingObj.roles] : (existingObj.role ? [existingObj.role] : (typeof existing === 'string' ? [existing] : []));
+      if (!roles.includes(role)) roles.push(role);
+
+      map[clean] = {
+        role,
+        roles,
+        lastUsedRole: role,
+        name: name || existingName || null
+      };
       localStorage.setItem('phone_roles_map', JSON.stringify(map));
     } catch (e) {}
   };
@@ -39,8 +45,12 @@ export default function LoginPage() {
       const map = JSON.parse(mapStr);
       const val = map[clean];
       if (!val) return null;
-      if (typeof val === 'string') return val;
-      if (typeof val === 'object' && val.role) return val.role;
+      if (typeof val === 'string') return { role: val, roles: [val], lastUsedRole: val };
+      if (typeof val === 'object' && val) {
+        const roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
+        const lastUsedRole = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+        return { role: lastUsedRole, roles, lastUsedRole, name: val.name || null };
+      }
       return null;
     } catch (e) {
       return null;
@@ -89,6 +99,65 @@ export default function LoginPage() {
         resolve(null);
       }
     });
+  };
+
+  const syncPhoneRoleMapToSw = async () => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    try {
+      const mapStr = localStorage.getItem('phone_roles_map');
+      if (!mapStr) return;
+      const map = JSON.parse(mapStr);
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        await postSwMessageWithReply(targetSw, { type: 'SYNC_PHONE_ROLE_MAP', map });
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        try {
+          const mapStr = localStorage.getItem('phone_roles_map');
+          if (mapStr) {
+            postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SYNC_PHONE_ROLE_MAP', map: JSON.parse(mapStr) });
+          }
+        } catch (err) {}
+      }
+    }
+  };
+
+  const recordIdentityToSw = async (phoneNum, role, name = null) => {
+    if (typeof window === 'undefined' || !phoneNum || !role) return;
+    const cleanPhone = String(phoneNum).replace(/\D/g, '');
+    if (!cleanPhone || !('serviceWorker' in navigator)) return;
+
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        await postSwMessageWithReply(targetSw, { type: 'RECORD_IDENTITY', phone: cleanPhone, role, name });
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'RECORD_IDENTITY', phone: cleanPhone, role, name });
+      }
+    }
+  };
+
+  const lookupSwRole = async (cleanPhone) => {
+    if (typeof window === 'undefined' || !cleanPhone || !('serviceWorker' in navigator)) return null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        const reply = await postSwMessageWithReply(targetSw, { type: 'LOOKUP_ROLE', phone: cleanPhone });
+        if (reply && reply.success) return reply;
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'LOOKUP_ROLE', phone: cleanPhone });
+        if (reply && reply.success) return reply;
+      }
+    }
+    return null;
   };
 
   const notifySwOfflinePhone = async (phoneNum) => {
@@ -171,26 +240,6 @@ export default function LoginPage() {
     }
   };
 
-  const executeOfflineRoleLogin = async (roleToUse, phoneToUse) => {
-    try {
-      const cleanPhone = String(phoneToUse || '').replace(/\D/g, '');
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('auth_role', roleToUse);
-        if (cleanPhone) {
-          localStorage.setItem('auth_phone', cleanPhone);
-          savePhoneRoleMap(cleanPhone, roleToUse);
-        }
-      }
-      if (cleanPhone) {
-        await notifySwOfflinePhone(cleanPhone);
-      }
-      triggerSwPrecacheRoles();
-      await redirectByRole(roleToUse, true);
-    } catch (e) {
-      console.error('Error in executeOfflineRoleLogin:', e);
-    }
-  };
-
   const handleOfflineLogin = async (targetPhone = null) => {
     try {
       setError('');
@@ -203,38 +252,70 @@ export default function LoginPage() {
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const cleanPhone = String(rawInputPhone).replace(/\D/g, '');
 
-      // 1) phone_roles_map по введённому/выбранному номеру
-      let role = cleanPhone ? getRoleForPhone(cleanPhone) : null;
-
-      // 2) auth_phone+auth_role если номер совпадает
-      if (!role) {
-        if (cleanPhone && storedPhone) {
-          const cleanStored = String(storedPhone).replace(/\D/g, '');
-          if (cleanPhone === cleanStored && storedRole) {
-            role = storedRole;
-          }
-        } else if (!cleanPhone && storedRole) {
-          role = storedRole;
-        }
-      }
-
-      // 3) ответ св-джа GET_OFFLINE_ROLE
-      if (!role) {
-        role = await querySwOfflineRole();
-      }
-
-      if (role && ['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
-        await executeOfflineRoleLogin(role, cleanPhone);
+      if (!cleanPhone) {
+        setError('Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.');
         return;
       }
 
-      // Fallback: показать выбор роли прямо на текущем экране
-      setOfflinePhoneForRole(cleanPhone);
-      setShowRoleSelection(true);
+      let resolvedRole = null;
+      let rolesList = [];
+      let nameVal = null;
+
+      // 1) local map phone_roles_map
+      const localMapData = getRoleForPhone(cleanPhone);
+      if (localMapData) {
+        resolvedRole = localMapData.lastUsedRole || localMapData.role || null;
+        rolesList = localMapData.roles || [];
+        nameVal = localMapData.name || null;
+      }
+
+      // 2) LOOKUP_ROLE message to SW
+      if (!resolvedRole) {
+        const swIdentity = await lookupSwRole(cleanPhone);
+        if (swIdentity && swIdentity.success) {
+          rolesList = swIdentity.roles || [];
+          resolvedRole = swIdentity.lastUsedRole || (rolesList.length > 0 ? rolesList[rolesList.length - 1] : null);
+          nameVal = swIdentity.name || null;
+        }
+      }
+
+      // 3) match auth_phone + auth_role
+      if (!resolvedRole) {
+        if (storedPhone) {
+          const cleanStored = String(storedPhone).replace(/\D/g, '');
+          if (cleanPhone === cleanStored && storedRole) {
+            resolvedRole = storedRole;
+            rolesList = [storedRole];
+          }
+        }
+      }
+
+      // 4) fallback GET_OFFLINE_ROLE
+      if (!resolvedRole) {
+        const swRole = await querySwOfflineRole();
+        if (swRole) {
+          resolvedRole = swRole;
+          rolesList = [swRole];
+        }
+      }
+
+      if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('auth_role', resolvedRole);
+          localStorage.setItem('auth_phone', cleanPhone);
+          savePhoneRoleMap(cleanPhone, resolvedRole, nameVal);
+        }
+        await notifySwOfflinePhone(cleanPhone);
+        await recordIdentityToSw(cleanPhone, resolvedRole, nameVal);
+        triggerSwPrecacheRoles();
+        await redirectByRole(resolvedRole, true);
+        return;
+      }
+
+      setError('Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setOfflinePhoneForRole(targetPhone || phone || savedPhone || '');
-      setShowRoleSelection(true);
+      setError('Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.');
     }
   };
 
@@ -291,7 +372,10 @@ export default function LoginPage() {
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
-        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
+        if (cleanPhone) {
+          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
+          await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
+        }
       }
 
       await redirectByRole(data.role);
@@ -323,6 +407,8 @@ export default function LoginPage() {
 
       if (isManualLogout) {
         sessionStorage.removeItem('manual_logout');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_role');
         notifySwOfflineSession(false, null);
       }
 
@@ -333,6 +419,8 @@ export default function LoginPage() {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
       }
+
+      syncPhoneRoleMapToSw();
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
       const offlineSessionTs = localStorage.getItem('offline_session_ts');
@@ -414,7 +502,11 @@ export default function LoginPage() {
       if (data.token) localStorage.setItem('auth_token', data.token);
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
-        if (cleanPhone) savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
+        if (cleanPhone) {
+          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
+          await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
+          await syncPhoneRoleMapToSw();
+        }
       }
 
       triggerSwPrecacheRoles();
@@ -431,7 +523,8 @@ export default function LoginPage() {
   };
 
   const formattedSavedPhone = savedPhone ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : '';
-  const savedRole = savedPhone ? getRoleForPhone(savedPhone) || (typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null) : null;
+  const savedRoleData = savedPhone ? getRoleForPhone(savedPhone) : null;
+  const savedRole = (typeof savedRoleData === 'object' && savedRoleData ? savedRoleData.lastUsedRole || savedRoleData.role : savedRoleData) || (typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null);
   const roleLabel = savedRole === 'ADMIN' ? 'Администратор' : savedRole === 'LEADER' ? 'Владелец' : savedRole === 'GARDENER' ? 'Садовник' : null;
 
   const isOfflineNow = !isOnline || (typeof window !== 'undefined' && !navigator.onLine);
@@ -457,56 +550,6 @@ export default function LoginPage() {
             </div>
           )}
 
-          {showRoleSelection && (
-            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-3">
-              <p className="text-xs font-semibold text-emerald-900">
-                Выберите роль для офлайн-входа:
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedOfflineRole('ADMIN')}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                    selectedOfflineRole === 'ADMIN'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  Администратор
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedOfflineRole('LEADER')}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                    selectedOfflineRole === 'LEADER'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  Владелец
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedOfflineRole('GARDENER')}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                    selectedOfflineRole === 'GARDENER'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  Садовник
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => executeOfflineRoleLogin(selectedOfflineRole, offlinePhoneForRole || savedPhone)}
-                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow-sm"
-              >
-                Войти офлайн
-              </button>
-            </div>
-          )}
-
           <div className="space-y-3 pt-2">
             <button
               type="button"
@@ -527,7 +570,6 @@ export default function LoginPage() {
               type="button"
               onClick={() => {
                 setError('');
-                setShowRoleSelection(false);
                 setIsSavedPhoneMode(false);
               }}
               disabled={loading}
@@ -572,56 +614,6 @@ export default function LoginPage() {
           {error && (
             <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg border border-red-200">
               {error}
-            </div>
-          )}
-
-          {showRoleSelection && (
-            <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-3">
-              <p className="text-xs font-semibold text-emerald-900">
-                Выберите роль для офлайн-входа:
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedOfflineRole('ADMIN')}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                    selectedOfflineRole === 'ADMIN'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  Администратор
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedOfflineRole('LEADER')}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                    selectedOfflineRole === 'LEADER'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  Владелец
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedOfflineRole('GARDENER')}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                    selectedOfflineRole === 'GARDENER'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  Садовник
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => executeOfflineRoleLogin(selectedOfflineRole, offlinePhoneForRole || phone)}
-                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow-sm"
-              >
-                Войти офлайн
-              </button>
             </div>
           )}
 

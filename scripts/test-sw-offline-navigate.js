@@ -65,7 +65,7 @@ console.log('✅ (f) sw.js falls back to cached /login SPA shell without 503 tex
 const activateIndex = swContent.indexOf("self.addEventListener('activate'");
 assert(activateIndex !== -1, 'sw.js must contain activate event listener');
 const activateBlock = swContent.slice(activateIndex, activateIndex + 600);
-assert(activateBlock.includes("keys.filter((k) => k !== CACHE_NAME)"), 'activate handler must filter keys.filter((k) => k !== CACHE_NAME)');
+assert(activateBlock.includes("k !== CACHE_NAME"), 'activate handler must filter old version caches');
 console.log('✅ (g) activate handler deletes all caches where k !== CACHE_NAME.');
 
 console.log('\n🎉 ALL SW OFFLINE NAVIGATE STATIC TESTS PASSED SUCCESSFULLY!');
