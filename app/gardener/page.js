@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
+import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -562,13 +562,13 @@ export default function GardenerDashboard() {
         }
 
         if (!role) {
-          if (navigator.onLine) window.location.assign('/login');
+        if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
           return;
         }
         if (role !== 'GARDENER') {
           if (role === 'ADMIN' || role === 'LEADER') {
             window.location.assign(role === 'ADMIN' ? '/admin' : '/leader');
-          } else if (navigator.onLine) {
+        } else if (navigator.onLine && !isOfflineSessionValid()) {
             window.location.assign('/login');
           }
           return;

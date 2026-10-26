@@ -364,15 +364,39 @@ async function precacheAllRoles(retryCount = 0) {
     })
   );
 
+  // Warmup offline-cache artifacts load
+  const warmupMapping = [
+    { pagePath: '/login', warmupFile: '/offline-cache/login.html' },
+    { pagePath: '/admin', warmupFile: '/offline-cache/admin.html' },
+    { pagePath: '/leader', warmupFile: '/offline-cache/leader.html' },
+    { pagePath: '/gardener', warmupFile: '/offline-cache/gardener.html' },
+  ];
+
   await Promise.all(
-    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users'].map(async (assetUrl) => {
+    warmupMapping.map(async ({ pagePath, warmupFile }) => {
+      try {
+        const warmupRes = await fetch(warmupFile);
+        if (warmupRes && warmupRes.ok) {
+          const text = await warmupRes.clone().text();
+          if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
+            safeCachePut(CACHE_NAME, new Request(pagePath), warmupRes.clone());
+            safeCachePut(OFFLINE_DATA_CACHE, new Request(pagePath), warmupRes);
+          }
+        }
+      } catch (e) {}
+    })
+  );
+
+  await Promise.all(
+    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users', '/offline-cache/offline-users.json'].map(async (assetUrl) => {
       try {
         const res = await fetch(assetUrl);
         if (res && res.ok) {
-          safeCachePut(CACHE_NAME, new Request(assetUrl), res.clone());
-          safeCachePut(OFFLINE_DATA_CACHE, new Request(assetUrl), res);
+          const targetPath = assetUrl === '/offline-cache/offline-users.json' ? '/api/public/offline-users' : assetUrl;
+          safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+          safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res);
 
-          if (assetUrl === '/api/public/offline-users') {
+          if (assetUrl === '/api/public/offline-users' || assetUrl === '/offline-cache/offline-users.json') {
             try {
               const usersData = await res.clone().json();
               const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
@@ -398,12 +422,8 @@ async function precacheAllRoles(retryCount = 0) {
               await pCache.put('/phone-role-map', mapRes2);
             } catch (err) {}
           }
-        } else {
-          hasError = true;
         }
-      } catch (e) {
-        hasError = true;
-      }
+      } catch (e) {}
     })
   );
 
@@ -1085,7 +1105,10 @@ self.addEventListener('fetch', (event) => {
       try {
         const res = await fetch(request);
         if (res && res.status === 200 && res.ok && !res.redirected && res.type !== 'error') {
-          safeCachePut(CACHE_NAME, request, res);
+          safeCachePut(CACHE_NAME, request, res.clone());
+          if (url.pathname === '/api/public/offline-users') {
+            safeCachePut(OFFLINE_DATA_CACHE, request, res.clone());
+          }
         }
         return res;
       } catch (err) {

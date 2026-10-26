@@ -194,7 +194,7 @@ export default function LoginPage() {
     setLoading(true);
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 4000) : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
 
     try {
       const res = await fetch('/api/auth/auto-login', {

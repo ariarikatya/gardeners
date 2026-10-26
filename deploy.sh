@@ -35,4 +35,7 @@ npm run build
 echo "=== [deploy.sh] Перезапускаю PM2 (zero-downtime reload) ==="
 pm2 reload anemon --update-env
 
+echo "=== [deploy.sh] Выполняю прогрев офлайн-кэша ==="
+npm run warmup-offline-cache || true
+
 echo "=== [deploy.sh] ГОТОВО ==="
