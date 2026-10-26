@@ -257,7 +257,7 @@ async function runOfflineSavedPhoneLoginTest() {
     const mapStr = mockLocalStorage.getItem('phone_roles_map');
     const map = mapStr ? JSON.parse(mapStr) : {};
     if (!map[clean]) {
-      errorState = 'Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.';
+      errorState = 'Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.';
     }
   };
 
@@ -323,7 +323,7 @@ async function runOfflineSavedPhoneLoginTest() {
 
   assert(!loginCode.includes('Войти как'), 'app/login/page.js must NOT contain "Войти как" text');
   assert(!loginCode.includes('<select'), 'app/login/page.js must NOT contain <select> elements for role selection');
-  assert(loginCode.includes('Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.'), 'app/login/page.js must contain neutral error text');
+  assert(loginCode.includes('Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.'), 'app/login/page.js must contain neutral error text');
   console.log('✅ Code inspection verified: Neutral error text present and no role selection UI elements.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN TESTS PASSED SUCCESSFULLY!');

@@ -930,16 +930,20 @@ self.addEventListener('fetch', (event) => {
                     headers: { 'Content-Type': 'application/json' }
                   });
                   if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
-                    cache.put('/login', resClone);
+                    cache.put('/login', resClone.clone());
+                    cache.put(new Request('/login'), resClone.clone());
                     cache.put('/login-meta', metaRes);
                   } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
-                    cache.put('/gardener', resClone);
+                    cache.put('/gardener', resClone.clone());
+                    cache.put(new Request('/gardener'), resClone.clone());
                     cache.put('/gardener-meta', metaRes);
                   } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
-                    cache.put('/admin', resClone);
+                    cache.put('/admin', resClone.clone());
+                    cache.put(new Request('/admin'), resClone.clone());
                     cache.put('/admin-meta', metaRes);
                   } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
-                    cache.put('/leader', resClone);
+                    cache.put('/leader', resClone.clone());
+                    cache.put(new Request('/leader'), resClone.clone());
                     cache.put('/leader-meta', metaRes);
                   }
                 } catch (e) {}
@@ -955,6 +959,7 @@ self.addEventListener('fetch', (event) => {
         try {
           const cache = await caches.open(CACHE_NAME);
           const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          const activeSession = await isOfflineSession();
 
           // 1. Извлекаем роль из /offline-role или /offline-session
           let userRole = null;
