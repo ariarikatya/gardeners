@@ -17,15 +17,22 @@ async function runOfflineLoginRolesTest() {
   assert(pageCode.includes("getRoleForPhone"), 'app/login/page.js must contain getRoleForPhone lookup');
   console.log('✅ Assertion 1 Passed: getRoleForPhone lookup present.');
 
-  // Assertion 2: handleOfflineLogin sets single-line error for unrecorded phones
+  // Assertion 2: handleOfflineLogin sets neutral single-line error or proceeds
   assert(
+    pageCode.includes("Нет сети и этот номер ещё не сохранялся на этом устройстве") ||
     pageCode.includes("Чтобы войти офлайн, сначала один раз войдите с интернетом") ||
-    pageCode.includes("Для этого номера нужен один онлайн-вход для сохранения роли") ||
-    pageCode.includes("Нет интернета, и этот номер ещё не входил на этом устройстве") ||
-    pageCode.includes("Подключитесь к сети для первого входа"),
-    'app/login/page.js must set single-line error for unrecorded phone'
+    pageCode.includes("Нет интернета, и этот номер ещё не входил на этом устройстве"),
+    'app/login/page.js must set neutral error message for unrecorded phone'
   );
-  console.log('✅ Assertion 2 Passed: 1-line error for unrecorded phone present.');
+  console.log('✅ Assertion 2 Passed: 1-line neutral error for unrecorded phone present.');
+
+  // Assertion 4: No UI role switcher elements present in app/login/page.js
+  const hasRoleSelectElements = Boolean(
+    pageCode.match(/<select[^>]*role/i) ||
+    pageCode.match(/button[^>]*>(?:Войти как|Администратор|Садовник|Владелец)<\/button>/i)
+  );
+  assert(!hasRoleSelectElements, 'app/login/page.js MUST NOT contain UI role selection buttons or dropdowns');
+  console.log('✅ Assertion 4 Passed: No UI role switcher elements present in app/login/page.js.');
 
   // Assertion 3: handleOfflineLogin seamlessly proceeds to redirect when role is known
   assert(pageCode.includes("redirectByRole("), 'app/login/page.js must seamlessly redirect when role is resolved offline');

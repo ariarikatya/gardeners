@@ -271,6 +271,23 @@ self.addEventListener('install', (event) => {
 let isOfflineSessionActive = false;
 const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
+async function restoreOfflineDataToNewCache() {
+  try {
+    CACHE_NAME = getCacheName();
+    const cache = await caches.open(CACHE_NAME);
+    const pCache = await caches.open(OFFLINE_DATA_CACHE);
+    const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role'];
+    for (const k of keysToRestore) {
+      try {
+        const item = await pCache.match(k);
+        if (item) {
+          await cache.put(k, item.clone());
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
 // === ACTIVATE: чистим все старые версии кэша anemon-agro-* и протухшие сессии (30 дней) ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
@@ -294,7 +311,9 @@ self.addEventListener('activate', (event) => {
         }
       } catch (e) {}
 
+      await restoreOfflineDataToNewCache();
       await precacheAllRoles();
+      await restoreOfflineDataToNewCache();
     })()
   );
   self.clients.claim();
@@ -681,49 +700,6 @@ self.addEventListener('fetch', (event) => {
         try {
           const netRes = await fetchWithTimeout(request, 5000);
           if (netRes) {
-            const isRedirectToLogin = netRes.redirected && netRes.url.includes('/login');
-            const is3xxRedirectToLogin = (netRes.status >= 300 && netRes.status < 400);
-            const is5xx = netRes.status === 503 || netRes.status >= 500;
-
-            if (is5xx && url.pathname === '/login') {
-              console.warn(`[SW Server Error ${netRes.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
-            }
-
-            if (isRedirectToLogin || is3xxRedirectToLogin || is5xx) {
-              const activeSess = await isOfflineSession();
-              if (activeSess) {
-                const cache = await caches.open(CACHE_NAME);
-                let userRole = null;
-                try {
-                  const roleRes = await cache.match('/offline-role');
-                  if (roleRes) {
-                    const roleData = await roleRes.clone().json();
-                    if (roleData && roleData.role) userRole = roleData.role;
-                  }
-                  if (!userRole) {
-                    const sessionRes = await cache.match('/offline-session');
-                    if (sessionRes) {
-                      const sessionData = await sessionRes.clone().json();
-                      if (sessionData && sessionData.role) userRole = sessionData.role;
-                    }
-                  }
-                } catch (e) {}
-
-                let rolePath = null;
-                if (userRole === 'ADMIN') rolePath = '/admin';
-                else if (userRole === 'LEADER') rolePath = '/leader';
-                else if (userRole === 'GARDENER') rolePath = '/gardener';
-
-                if (rolePath) {
-                  const roleKey = new Request(rolePath, { method: 'GET' });
-                  const cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
-                  if (cachedRolePage) {
-                    return withOfflineHeader(cachedRolePage);
-                  }
-                }
-              }
-            }
-
             if (netRes.redirected || (netRes.status >= 300 && netRes.status < 400)) {
               return netRes;
             }

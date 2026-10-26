@@ -160,6 +160,24 @@ export default function LoginPage() {
     }
   };
 
+  const querySwOfflineRole = async (cleanPhone = null) => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone });
+        return reply?.role || null;
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone });
+        return reply?.role || null;
+      }
+    }
+    return null;
+  };
+
   const notifySwOfflineSession = async (active, roleOverride = null) => {
     if (typeof window !== 'undefined') {
       const role = roleOverride || localStorage.getItem('auth_role');
@@ -241,6 +259,22 @@ export default function LoginPage() {
         }
       }
 
+      // 3) Service Worker: GET_OFFLINE_ROLE query
+      if (!resolvedRole) {
+        const swRole = await querySwOfflineRole(cleanPhone);
+        if (swRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(swRole)) {
+          resolvedRole = swRole;
+        }
+      }
+
+      // 4) Last active offline session fallback
+      if (!resolvedRole) {
+        const swRoleNoPhone = await querySwOfflineRole(null);
+        if (swRoleNoPhone && ['ADMIN', 'LEADER', 'GARDENER'].includes(swRoleNoPhone)) {
+          resolvedRole = swRoleNoPhone;
+        }
+      }
+
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
         const phoneToUse = cleanPhone || cleanStoredPhone || '';
         if (typeof window !== 'undefined') {
@@ -251,7 +285,6 @@ export default function LoginPage() {
           }
         }
 
-        // Fire-and-forget SW updates (no await, non-blocking)
         if (phoneToUse) {
           notifySwOfflinePhone(phoneToUse);
           recordIdentityToSw(phoneToUse, resolvedRole, nameVal);
@@ -262,10 +295,10 @@ export default function LoginPage() {
         return;
       }
 
-      setError('Чтобы войти офлайн, сначала один раз войдите с интернетом.');
+      setError('Нет сети и этот номер ещё не сохранялся на этом устройстве');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Чтобы войти офлайн, сначала один раз войдите с интернетом.');
+      setError('Нет сети и этот номер ещё не сохранялся на этом устройстве');
     }
   };
 
