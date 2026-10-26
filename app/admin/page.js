@@ -692,12 +692,16 @@ export default function AdminDashboard() {
         }
       }
       if (!storedRole) {
-        window.location.assign('/login');
+        if (navigator.onLine) window.location.assign('/login');
+        setLoading(false);
+        setMonthLoading(false);
         return;
       }
       if (storedRole !== 'ADMIN') {
         const correctPath = storedRole === 'LEADER' ? '/leader' : storedRole === 'GARDENER' ? '/gardener' : '/login';
-        window.location.assign(correctPath);
+        if (navigator.onLine || storedRole === 'LEADER' || storedRole === 'GARDENER') {
+          window.location.assign(correctPath);
+        }
         return;
       }
 

@@ -19,10 +19,11 @@ export default function LoginPage() {
     const digits = raw.replace(/\D/g, '');
     if (!digits) return [];
 
-    const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
-    const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
+    const tail10 = digits.length >= 10 ? digits.slice(-10) : digits;
+    const clean7 = tail10 ? '7' + tail10 : '';
+    const clean8 = tail10 ? '8' + tail10 : '';
 
-    return Array.from(new Set([clean7, clean8, digits, raw, '+' + clean7]));
+    return Array.from(new Set([tail10, clean7, clean8, digits, raw, clean7 ? '+' + clean7 : ''].filter(Boolean)));
   };
 
   const normalizeCleanPhone = (phoneNum) => {
@@ -309,60 +310,26 @@ export default function LoginPage() {
       }
 
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
-      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const phoneVariants = getPhoneVariants(rawInputPhone);
       const cleanPhone = phoneVariants[0] || '';
 
-      let resolvedRole = null;
-      let nameVal = null;
+      const localMapData = rawInputPhone ? getRoleForPhone(rawInputPhone) : null;
+      const nameVal = localMapData?.name || null;
 
-      // 1) Synchronous lookup in localStorage.phone_roles_map
-      if (rawInputPhone) {
-        const localMapData = getRoleForPhone(rawInputPhone);
-        if (localMapData) {
-          resolvedRole = localMapData.lastUsedRole || localMapData.role || null;
-          nameVal = localMapData.name || null;
-        }
-      }
+      let resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
 
-      // 2) Fallback to storedRole/storedPhone if phone matches or confirming saved phone
-      if (!resolvedRole && storedRole) {
-        const storedVariants = getPhoneVariants(storedPhone);
-        const matchesStored = phoneVariants.some(v => storedVariants.includes(v));
-        if (matchesStored || targetPhone === savedPhone || isSavedPhoneMode || !rawInputPhone) {
-          resolvedRole = storedRole;
-        }
-      }
-
-      // 3) Single SW query with 800ms max timeout
-      if (!resolvedRole && rawInputPhone && 'serviceWorker' in navigator) {
+      if (!resolvedRole && rawInputPhone && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
         try {
           const reg = await navigator.serviceWorker.ready;
           const targetSw = reg.active || navigator.serviceWorker.controller;
           if (targetSw) {
-            const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone || rawInputPhone }, 800);
+            const reply = await postSwMessageWithReply(targetSw, { type: 'RESOLVE_ROLE', phone: rawInputPhone }, 1000);
             if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
               resolvedRole = reply.role;
             }
           }
         } catch (e) {}
-      }
-
-      // 4) Direct SW cache inspection for /offline-identities, /phone-role-map, /api/public/offline-users
-      if (!resolvedRole && rawInputPhone) {
-        const directRole = await readSwCacheDirect(rawInputPhone);
-        if (directRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(directRole)) {
-          resolvedRole = directRole;
-        }
-      }
-
-      // 5) Global resolveOfflineRoleFromCaches fallback
-      if (!resolvedRole && rawInputPhone) {
-        const fallbackRole = await resolveOfflineRoleFromCaches(rawInputPhone);
-        if (fallbackRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(fallbackRole)) {
-          resolvedRole = fallbackRole;
-        }
       }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
@@ -379,6 +346,7 @@ export default function LoginPage() {
           notifySwOfflinePhone(phoneToUse);
           recordIdentityToSw(phoneToUse, resolvedRole, nameVal);
         }
+        await notifySwOfflineSession(true, resolvedRole);
         triggerSwPrecacheRoles();
 
         await redirectByRole(resolvedRole, true);

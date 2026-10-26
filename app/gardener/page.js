@@ -550,7 +550,9 @@ export default function GardenerDashboard() {
         }
         if (role !== 'GARDENER') {
           const correctPath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/login';
-          window.location.assign(correctPath);
+          if (navigator.onLine || role === 'ADMIN' || role === 'LEADER') {
+            window.location.assign(correctPath);
+          }
           return;
         }
       };

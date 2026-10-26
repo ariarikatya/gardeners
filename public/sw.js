@@ -89,12 +89,13 @@ async function recordIdentity({ phone, role, name }) {
 
 async function lookupRoleForPhone(phone) {
   if (!phone) return { success: false, roles: [], lastUsedRole: null, name: null };
-  const digits = String(phone).replace(/\D/g, '');
-  if (!digits) return { success: false, roles: [], lastUsedRole: null, name: null };
+  const rawStr = String(phone).trim();
+  const digits = rawStr.replace(/\D/g, '');
 
-  const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
-  const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
-  const candidateKeys = Array.from(new Set([clean7, clean8, digits, String(phone).trim()]));
+  const tail10 = digits.length >= 10 ? digits.slice(-10) : digits;
+  const clean7 = tail10 ? '7' + tail10 : '';
+  const clean8 = tail10 ? '8' + tail10 : '';
+  const candidateKeys = Array.from(new Set([tail10, clean7, clean8, digits, rawStr, clean7 ? '+' + clean7 : ''].filter(Boolean)));
 
   // 1. Check /offline-identities
   const map = await getOfflineIdentitiesMap();
@@ -103,7 +104,7 @@ async function lookupRoleForPhone(phone) {
     if (item) {
       const roles = Array.isArray(item.roles) ? item.roles : (item.role ? [item.role] : []);
       const lastUsedRole = item.lastUsedRole || item.role || (roles.length > 0 ? roles[roles.length - 1] : null);
-      if (lastUsedRole) {
+      if (lastUsedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(lastUsedRole)) {
         return {
           success: true,
           phone: k,
@@ -115,11 +116,25 @@ async function lookupRoleForPhone(phone) {
     }
   }
 
+  // Open all anemon-agro-* caches for inspection
+  let cachesToScan = [];
+  try {
+    const allKeys = await caches.keys();
+    const cacheNames = allKeys.filter(k => k.startsWith('anemon-agro-'));
+    if (!cacheNames.includes(CACHE_NAME)) cacheNames.push(CACHE_NAME);
+    if (!cacheNames.includes(OFFLINE_DATA_CACHE)) cacheNames.push(OFFLINE_DATA_CACHE);
+
+    for (const cName of cacheNames) {
+      try {
+        const opened = await caches.open(cName);
+        if (opened) cachesToScan.push(opened);
+      } catch (e) {}
+    }
+  } catch (e) {}
+
   // 2. Check /phone-role-map
   try {
-    const cache = await caches.open(CACHE_NAME);
-    const pCache = await caches.open(OFFLINE_DATA_CACHE);
-    for (const c of [cache, pCache]) {
+    for (const c of cachesToScan) {
       const mapRes = await c.match('/phone-role-map');
       if (mapRes) {
         const pMap = await mapRes.json();
@@ -128,7 +143,7 @@ async function lookupRoleForPhone(phone) {
           if (val) {
             const r = typeof val === 'string' ? val : (val.lastUsedRole || val.role);
             const n = typeof val === 'object' ? val.name : null;
-            if (r) {
+            if (r && ['ADMIN', 'LEADER', 'GARDENER'].includes(r)) {
               await recordIdentity({ phone: k, role: r, name: n });
               return { success: true, phone: k, roles: [r], lastUsedRole: r, name: n };
             }
@@ -140,9 +155,7 @@ async function lookupRoleForPhone(phone) {
 
   // 3. Check /api/public/offline-users pre-cached endpoint
   try {
-    const cache = await caches.open(CACHE_NAME);
-    const pCache = await caches.open(OFFLINE_DATA_CACHE);
-    for (const c of [cache, pCache]) {
+    for (const c of cachesToScan) {
       const usersRes = await c.match('/api/public/offline-users');
       if (usersRes) {
         const usersData = await usersRes.json();
@@ -150,10 +163,11 @@ async function lookupRoleForPhone(phone) {
         for (const u of userList) {
           const uDigits = String(u.phone || '').replace(/\D/g, '');
           if (!uDigits) continue;
-          const u7 = uDigits.length === 11 && uDigits.startsWith('8') ? '7' + uDigits.slice(1) : (uDigits.length === 10 ? '7' + uDigits : uDigits);
-          const u8 = uDigits.length === 11 && uDigits.startsWith('7') ? '8' + uDigits.slice(1) : (uDigits.length === 10 ? '8' + uDigits : uDigits);
-          if (candidateKeys.includes(uDigits) || candidateKeys.includes(u7) || candidateKeys.includes(u8)) {
-            if (u.role) {
+          const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
+          const u7 = '7' + uTail10;
+          const u8 = '8' + uTail10;
+          if (candidateKeys.includes(uDigits) || candidateKeys.includes(uTail10) || candidateKeys.includes(u7) || candidateKeys.includes(u8)) {
+            if (u.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(u.role)) {
               await recordIdentity({ phone: u7, role: u.role, name: u.name });
               return { success: true, phone: u7, roles: [u.role], lastUsedRole: u.role, name: u.name || null };
             }
@@ -303,6 +317,33 @@ async function precacheAllRoles() {
         if (res && res.ok) {
           safeCachePut(CACHE_NAME, new Request(assetUrl), res.clone());
           safeCachePut(OFFLINE_DATA_CACHE, new Request(assetUrl), res);
+
+          if (assetUrl === '/api/public/offline-users') {
+            try {
+              const usersData = await res.clone().json();
+              const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
+              const phoneRoleMap = {};
+              for (const u of userList) {
+                if (!u.phone || !u.role) continue;
+                const uDigits = String(u.phone).replace(/\D/g, '');
+                if (!uDigits) continue;
+                const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
+                const u7 = '7' + uTail10;
+                const u8 = '8' + uTail10;
+                const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
+                for (const k of [uTail10, u7, u8, uDigits]) {
+                  if (k) phoneRoleMap[k] = entry;
+                }
+              }
+              const mapStr = JSON.stringify(phoneRoleMap);
+              const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+              const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put('/phone-role-map', mapRes1);
+              const pCache = await caches.open(OFFLINE_DATA_CACHE);
+              await pCache.put('/phone-role-map', mapRes2);
+            } catch (err) {}
+          }
         }
       } catch (e) {}
     })
@@ -537,55 +578,11 @@ self.addEventListener('message', (event) => {
       let clean = phone ? String(phone).replace(/\D/g, '') : null;
 
       try {
-        const cache = await caches.open(CACHE_NAME);
-        const pCache = await caches.open(OFFLINE_DATA_CACHE);
-
-        if (clean) {
-          const lookupRes = await lookupRoleForPhone(clean);
+        if (clean || phone) {
+          const lookupRes = await lookupRoleForPhone(clean || phone);
           if (lookupRes && lookupRes.success && lookupRes.lastUsedRole) {
             role = lookupRes.lastUsedRole;
             roles = lookupRes.roles || [];
-          }
-        }
-
-        if (!role) {
-          for (const c of [cache, pCache]) {
-            try {
-              const sessionRes = await c.match('/offline-session');
-              if (sessionRes) {
-                const sData = await sessionRes.json();
-                if (sData && sData.role) {
-                  let sPhone = sData.phone ? String(sData.phone).replace(/\D/g, '') : null;
-                  if (sPhone && sPhone.length === 11 && sPhone.startsWith('8')) sPhone = '7' + sPhone.slice(1);
-                  if (!clean || (sPhone && sPhone === clean)) {
-                    role = sData.role;
-                    roles = [sData.role];
-                    if (!clean && sPhone) clean = sPhone;
-                    break;
-                  }
-                }
-              }
-            } catch (e) {}
-          }
-        }
-
-        if (!role) {
-          for (const c of [cache, pCache]) {
-            try {
-              const roleRes = await c.match('/offline-role');
-              if (roleRes) {
-                const rData = await roleRes.json();
-                if (rData && rData.role) {
-                  let rPhone = rData.phone ? String(rData.phone).replace(/\D/g, '') : null;
-                  if (rPhone && rPhone.length === 11 && rPhone.startsWith('8')) rPhone = '7' + rPhone.slice(1);
-                  if (!clean || (rPhone && rPhone === clean)) {
-                    role = rData.role;
-                    roles = [rData.role];
-                    break;
-                  }
-                }
-              }
-            } catch (e) {}
           }
         }
       } catch (e) {}
@@ -603,11 +600,12 @@ self.addEventListener('message', (event) => {
 
   if (event.data.type === 'RESOLVE_ROLE') {
     const promise = (async () => {
-      const phone = event.data.phone ? String(event.data.phone).replace(/\D/g, '') : null;
+      const rawPhone = event.data.phone ? String(event.data.phone).trim() : null;
+      const phone = rawPhone ? rawPhone.replace(/\D/g, '') : null;
       let role = null;
       try {
-        if (phone) {
-          const lookup = await lookupRoleForPhone(phone);
+        if (phone || rawPhone) {
+          const lookup = await lookupRoleForPhone(phone || rawPhone);
           if (lookup && lookup.success && lookup.lastUsedRole) {
             role = lookup.lastUsedRole;
           }
@@ -622,7 +620,16 @@ self.addEventListener('message', (event) => {
               const roleRes = await c.match('/offline-role');
               if (roleRes) {
                 const rData = await roleRes.json();
-                if (rData && rData.role) { role = rData.role; break; }
+                if (rData && rData.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(rData.role)) {
+                  let rPhone = rData.phone ? String(rData.phone).replace(/\D/g, '') : null;
+                  let rClean7 = rPhone && rPhone.length === 11 && rPhone.startsWith('8') ? '7' + rPhone.slice(1) : rPhone;
+                  let rClean8 = rPhone && rPhone.length === 11 && rPhone.startsWith('7') ? '8' + rPhone.slice(1) : rPhone;
+                  if (!phone) {
+                    role = rData.role; break;
+                  } else if (rPhone && (phone === rPhone || phone === rClean7 || phone === rClean8)) {
+                    role = rData.role; break;
+                  }
+                }
               }
             } catch (e) {}
           }
@@ -637,7 +644,16 @@ self.addEventListener('message', (event) => {
               const sessRes = await c.match('/offline-session');
               if (sessRes) {
                 const sData = await sessRes.json();
-                if (sData && sData.role) { role = sData.role; break; }
+                if (sData && sData.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(sData.role)) {
+                  let sPhone = sData.phone ? String(sData.phone).replace(/\D/g, '') : null;
+                  let sClean7 = sPhone && sPhone.length === 11 && sPhone.startsWith('8') ? '7' + sPhone.slice(1) : sPhone;
+                  let sClean8 = sPhone && sPhone.length === 11 && sPhone.startsWith('7') ? '8' + sPhone.slice(1) : sPhone;
+                  if (!phone) {
+                    role = sData.role; break;
+                  } else if (sPhone && (phone === sPhone || phone === sClean7 || phone === sClean8)) {
+                    role = sData.role; break;
+                  }
+                }
               }
             } catch (e) {}
           }
