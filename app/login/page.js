@@ -215,7 +215,7 @@ export default function LoginPage() {
       }
 
       if (!role || !['ADMIN', 'LEADER', 'GARDENER'].includes(role)) {
-        setError('Нужен интернет для первого входа');
+        setError('Для этого номера нужен один онлайн-вход для сохранения роли');
         return;
       }
 
@@ -244,7 +244,7 @@ export default function LoginPage() {
       await redirectByRole(role, true);
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Нужен интернет для первого входа');
+      setError('Для этого номера нужен один онлайн-вход для сохранения роли');
     }
   };
 

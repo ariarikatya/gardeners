@@ -63,6 +63,11 @@ npm ci
 npm run build            # Дождаться успешного завершения сборки!
 pm2 restart anemon --update-env
 sleep 3 && pm2 logs anemon --lines 20   # Убедиться в отсутствии ошибок старта
+
+# Обязательная проверка доступности после каждого деплоя:
+curl -sf https://anemonagro.ru/login > /dev/null && echo "✅ /login OK" || echo "❌ /login FAILED"
+curl -sf https://anemonagro.ru/api/version > /dev/null && echo "✅ /api/version OK" || echo "❌ /api/version FAILED"
+# ВНИМАНИЕ: При ответе 5xx деплой НЕ СЧИТАЕТСЯ успешным!
 ```
 
 ### Диагностика 503 ошибок сервера через PM2

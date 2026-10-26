@@ -84,7 +84,7 @@ async function cacheLoginAndChunks() {
       });
       safeCachePut(CACHE_NAME, new Request('/login-meta'), metaRes);
 
-      const matches = text.matchAll(/<script[^>]+src=["'](\/_next\/static\/chunks\/[^"']+)["']/g);
+      const matches = text.matchAll(/(?:src|href)=["'](\/_next\/static\/chunks\/[^"']+)["']/g);
       const chunkUrls = new Set();
       for (const m of matches) {
         if (m[1]) chunkUrls.add(m[1]);
@@ -106,34 +106,38 @@ async function cacheLoginAndChunks() {
 }
 
 async function precacheAllRoles() {
+  const retryCount = typeof arguments[0] === 'number' ? arguments[0] : 0;
   const cache = await caches.open(CACHE_NAME);
   const now = Date.now();
   const metaRes = () => new Response(JSON.stringify({ ts: now }), { headers: { 'Content-Type': 'application/json' } });
   let has503 = false;
-  const isSessActive = await isOfflineSession();
 
   await Promise.all(
     APP_SHELL.map(async (url) => {
       try {
         if (url === '/login') {
-          if (!isSessActive) await cacheLoginAndChunks().catch(() => {});
+          await cacheLoginAndChunks().catch(() => {});
           return;
         }
         const req = new Request(url, { credentials: 'include', redirect: 'follow' });
         const res = await fetch(req);
-        if (res && res.status === 503) has503 = true;
+        if (!res || !res.ok || res.status === 503) has503 = true;
         if (res && res.ok && res.status === 200 && !res.redirected) {
           safeCachePut(CACHE_NAME, new Request(url), res);
           if (url === '/gardener') safeCachePut(CACHE_NAME, new Request('/gardener-meta'), metaRes());
           else if (url === '/admin') safeCachePut(CACHE_NAME, new Request('/admin-meta'), metaRes());
           else if (url === '/leader') safeCachePut(CACHE_NAME, new Request('/leader-meta'), metaRes());
         }
-      } catch (e) {}
+      } catch (e) {
+        has503 = true;
+      }
     })
   );
 
-  if (has503) {
-    setTimeout(() => { precacheAllRoles().catch(() => {}); }, 60000);
+  if (has503 && retryCount < 3) {
+    const delays = [5000, 15000, 60000];
+    const delay = delays[retryCount] || 60000;
+    setTimeout(() => { precacheAllRoles(retryCount + 1).catch(() => {}); }, delay);
   }
 }
 
@@ -361,7 +365,7 @@ self.addEventListener('message', (event) => {
     return;
   }
 
-  if (event.data.type === 'PRECACHE_ROLES') {
+  if (event.data.type === 'ONLINE' || event.data.type === 'PRECACHE_ROLES') {
     const promise = precacheAllRoles();
     if (event.waitUntil) event.waitUntil(promise);
     promise.then(() => reply(true)).catch(() => reply(false));
@@ -490,10 +494,8 @@ self.addEventListener('fetch', (event) => {
                     headers: { 'Content-Type': 'application/json' }
                   });
                   if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
-                    if (!isSessActive) {
-                      cache.put('/login', resClone);
-                      cache.put('/login-meta', metaRes);
-                    }
+                    cache.put('/login', resClone);
+                    cache.put('/login-meta', metaRes);
                   } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                     cache.put('/gardener', resClone);
                     cache.put('/gardener-meta', metaRes);
@@ -575,10 +577,7 @@ self.addEventListener('fetch', (event) => {
           if (fb) return withOfflineHeader(fb);
         } catch (e) {}
 
-        return new Response('<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.location.reload()</script></head><body></body></html>', {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' }
-        });
+        return new Response('Offline', { status: 200, headers: { 'Content-Type': 'text/plain' } });
       })()
     );
     return;
