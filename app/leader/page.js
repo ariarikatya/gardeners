@@ -394,9 +394,10 @@ export default function LeaderDashboard() {
             new Promise((resolve) => setTimeout(resolve, 2000)),
           ]).catch(() => {});
         } catch (e) {}
+        window.location.replace('/login');
+      } else {
+        window.location.assign('/login');
       }
-
-      window.location.replace('/login');
     } else {
       router.push('/login');
     }

@@ -32,7 +32,7 @@ npm ci
 echo "=== [deploy.sh] Выполняю сборку ==="
 npm run build
 
-echo "=== [deploy.sh] Перезапускаю PM2 ==="
-pm2 restart anemon
+echo "=== [deploy.sh] Перезапускаю PM2 (zero-downtime reload) ==="
+pm2 reload anemon --update-env
 
 echo "=== [deploy.sh] ГОТОВО ==="
