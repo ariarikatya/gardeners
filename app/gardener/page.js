@@ -316,20 +316,25 @@ export default function GardenerDashboard() {
   const fetchOrders = async (silent = false) => {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
+      const authPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       let storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       if (!storedRole) {
-        storedRole = await resolveOfflineRoleFromCaches(typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null);
+        storedRole = await resolveOfflineRoleFromCaches(authPhone);
         if (storedRole) {
-          activateOfflineSession(storedRole, localStorage.getItem('auth_phone'));
+          activateOfflineSession(storedRole, authPhone);
         }
       }
       if (!storedRole) {
-        window.location.assign('/login');
+        if (navigator.onLine) window.location.assign('/login');
+        if (!silent) setLoading(false);
         return;
       }
       if (storedRole !== 'GARDENER') {
-        const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'LEADER' ? '/leader' : '/login';
-        window.location.assign(correctPath);
+        if (storedRole === 'ADMIN' || storedRole === 'LEADER') {
+          window.location.assign(storedRole === 'ADMIN' ? '/admin' : '/leader');
+        } else if (navigator.onLine) {
+          window.location.assign('/login');
+        }
         return;
       }
       if (!silent) setLoading(false);
@@ -535,13 +540,14 @@ export default function GardenerDashboard() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const initRoleCheck = async () => {
+        const authPhone = localStorage.getItem('auth_phone');
         let role = localStorage.getItem('auth_role');
         if (!role) {
-          role = await resolveOfflineRoleFromCaches();
+          role = await resolveOfflineRoleFromCaches(authPhone);
         }
 
         if (role) {
-          activateOfflineSession(role, localStorage.getItem('auth_phone'));
+          activateOfflineSession(role, authPhone);
         }
 
         if (!role) {
@@ -549,15 +555,19 @@ export default function GardenerDashboard() {
           return;
         }
         if (role !== 'GARDENER') {
-          const correctPath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/login';
-          if (navigator.onLine || role === 'ADMIN' || role === 'LEADER') {
-            window.location.assign(correctPath);
+          if (role === 'ADMIN' || role === 'LEADER') {
+            window.location.assign(role === 'ADMIN' ? '/admin' : '/leader');
+          } else if (navigator.onLine) {
+            window.location.assign('/login');
           }
           return;
         }
       };
 
       initRoleCheck();
+
+      const offlineSess = localStorage.getItem('offline_session') === '1';
+      const role = localStorage.getItem('auth_role');
 
       if (offlineSess) {
         localStorage.setItem('offline_session_ts', String(Date.now()));

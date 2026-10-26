@@ -349,7 +349,7 @@ export default function LoginPage() {
         await notifySwOfflineSession(true, resolvedRole);
         triggerSwPrecacheRoles();
 
-        await redirectByRole(resolvedRole, true);
+        await redirectByRole(resolvedRole, true, phoneToUse);
         return;
       }
 
