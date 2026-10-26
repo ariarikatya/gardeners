@@ -124,76 +124,40 @@ export default function LoginPage() {
     }
   };
 
-  const recordIdentityToSw = async (phoneNum, role, name = null) => {
+  const recordIdentityToSw = (phoneNum, role, name = null) => {
     if (typeof window === 'undefined' || !phoneNum || !role) return;
     const cleanPhone = String(phoneNum).replace(/\D/g, '');
     if (!cleanPhone || !('serviceWorker' in navigator)) return;
 
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const targetSw = reg.active || navigator.serviceWorker.controller;
-      if (targetSw) {
-        await postSwMessageWithReply(targetSw, { type: 'RECORD_IDENTITY', phone: cleanPhone, role, name });
-      }
-    } catch (e) {
-      if (navigator.serviceWorker.controller) {
-        await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'RECORD_IDENTITY', phone: cleanPhone, role, name });
-      }
+    if (navigator.serviceWorker.controller) {
+      try {
+        navigator.serviceWorker.controller.postMessage({ type: 'RECORD_IDENTITY', phone: cleanPhone, role, name });
+      } catch (e) {}
+    } else {
+      navigator.serviceWorker.ready.then((reg) => {
+        if (reg && reg.active) {
+          try { reg.active.postMessage({ type: 'RECORD_IDENTITY', phone: cleanPhone, role, name }); } catch (e) {}
+        }
+      }).catch(() => {});
     }
   };
 
-  const lookupSwRole = async (cleanPhone) => {
-    if (typeof window === 'undefined' || !cleanPhone || !('serviceWorker' in navigator)) return null;
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const targetSw = reg.active || navigator.serviceWorker.controller;
-      if (targetSw) {
-        const reply = await postSwMessageWithReply(targetSw, { type: 'LOOKUP_ROLE', phone: cleanPhone });
-        if (reply && reply.success) return reply;
-      }
-    } catch (e) {
-      if (navigator.serviceWorker.controller) {
-        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'LOOKUP_ROLE', phone: cleanPhone });
-        if (reply && reply.success) return reply;
-      }
-    }
-    return null;
-  };
-
-  const notifySwOfflinePhone = async (phoneNum) => {
+  const notifySwOfflinePhone = (phoneNum) => {
     if (typeof window === 'undefined' || !phoneNum) return;
     const cleanPhone = String(phoneNum).replace(/\D/g, '');
     if (!cleanPhone || !('serviceWorker' in navigator)) return;
 
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const targetSw = reg.active || navigator.serviceWorker.controller;
-      if (targetSw) {
-        await postSwMessageWithReply(targetSw, { type: 'SET_OFFLINE_PHONE', phone: cleanPhone });
-      }
-    } catch (e) {
-      if (navigator.serviceWorker.controller) {
-        await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SET_OFFLINE_PHONE', phone: cleanPhone });
-      }
+    if (navigator.serviceWorker.controller) {
+      try {
+        navigator.serviceWorker.controller.postMessage({ type: 'SET_OFFLINE_PHONE', phone: cleanPhone });
+      } catch (e) {}
+    } else {
+      navigator.serviceWorker.ready.then((reg) => {
+        if (reg && reg.active) {
+          try { reg.active.postMessage({ type: 'SET_OFFLINE_PHONE', phone: cleanPhone }); } catch (e) {}
+        }
+      }).catch(() => {});
     }
-  };
-
-  const querySwOfflineRole = async () => {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      const targetSw = reg.active || navigator.serviceWorker.controller;
-      if (targetSw) {
-        const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE' });
-        return reply?.role || null;
-      }
-    } catch (e) {
-      if (navigator.serviceWorker.controller) {
-        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'GET_OFFLINE_ROLE' });
-        return reply?.role || null;
-      }
-    }
-    return null;
   };
 
   const notifySwOfflineSession = async (active, roleOverride = null) => {
@@ -251,71 +215,57 @@ export default function LoginPage() {
       const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const cleanPhone = String(rawInputPhone).replace(/\D/g, '');
-
-      if (!cleanPhone) {
-        setError('Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.');
-        return;
-      }
+      const cleanStoredPhone = storedPhone ? String(storedPhone).replace(/\D/g, '') : null;
 
       let resolvedRole = null;
-      let rolesList = [];
       let nameVal = null;
 
-      // 1) local map phone_roles_map
-      const localMapData = getRoleForPhone(cleanPhone);
-      if (localMapData) {
-        resolvedRole = localMapData.lastUsedRole || localMapData.role || null;
-        rolesList = localMapData.roles || [];
-        nameVal = localMapData.name || null;
-      }
-
-      // 2) LOOKUP_ROLE message to SW
-      if (!resolvedRole) {
-        const swIdentity = await lookupSwRole(cleanPhone);
-        if (swIdentity && swIdentity.success) {
-          rolesList = swIdentity.roles || [];
-          resolvedRole = swIdentity.lastUsedRole || (rolesList.length > 0 ? rolesList[rolesList.length - 1] : null);
-          nameVal = swIdentity.name || null;
+      // 1) Synchronous lookup in localStorage.phone_roles_map
+      if (cleanPhone) {
+        const localMapData = getRoleForPhone(cleanPhone);
+        if (localMapData) {
+          resolvedRole = localMapData.lastUsedRole || localMapData.role || null;
+          nameVal = localMapData.name || null;
         }
       }
 
-      // 3) match auth_phone + auth_role
-      if (!resolvedRole) {
-        if (storedPhone) {
-          const cleanStored = String(storedPhone).replace(/\D/g, '');
-          if (cleanPhone === cleanStored && storedRole) {
-            resolvedRole = storedRole;
-            rolesList = [storedRole];
-          }
-        }
-      }
-
-      // 4) fallback GET_OFFLINE_ROLE
-      if (!resolvedRole) {
-        const swRole = await querySwOfflineRole();
-        if (swRole) {
-          resolvedRole = swRole;
-          rolesList = [swRole];
+      // 2) Fallback to storedRole/storedPhone if not found in phone_roles_map
+      if (!resolvedRole && storedRole) {
+        if (
+          (cleanPhone && cleanPhone === cleanStoredPhone) ||
+          targetPhone === savedPhone ||
+          isSavedPhoneMode ||
+          !cleanPhone
+        ) {
+          resolvedRole = storedRole;
         }
       }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
+        const phoneToUse = cleanPhone || cleanStoredPhone || '';
         if (typeof window !== 'undefined') {
           localStorage.setItem('auth_role', resolvedRole);
-          localStorage.setItem('auth_phone', cleanPhone);
-          savePhoneRoleMap(cleanPhone, resolvedRole, nameVal);
+          if (phoneToUse) {
+            localStorage.setItem('auth_phone', phoneToUse);
+            savePhoneRoleMap(phoneToUse, resolvedRole, nameVal);
+          }
         }
-        await notifySwOfflinePhone(cleanPhone);
-        await recordIdentityToSw(cleanPhone, resolvedRole, nameVal);
+
+        // Fire-and-forget SW updates (no await, non-blocking)
+        if (phoneToUse) {
+          notifySwOfflinePhone(phoneToUse);
+          recordIdentityToSw(phoneToUse, resolvedRole, nameVal);
+        }
         triggerSwPrecacheRoles();
+
         await redirectByRole(resolvedRole, true);
         return;
       }
 
-      setError('Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.');
+      setError('Чтобы войти офлайн, сначала один раз войдите с интернетом.');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.');
+      setError('Чтобы войти офлайн, сначала один раз войдите с интернетом.');
     }
   };
 

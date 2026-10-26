@@ -158,6 +158,7 @@ async function deleteOldCaches() {
 
 async function cacheRolePageAndChunks(path) {
   try {
+    CACHE_NAME = getCacheName();
     const cache = await caches.open(CACHE_NAME);
     const req = new Request(path, { credentials: 'include', redirect: 'manual' });
     const res = await fetch(req);
@@ -193,6 +194,15 @@ async function cacheRolePageAndChunks(path) {
       return true;
     } else if (res && res.status >= 500) {
       console.warn(`[SW Server Error ${res.status}] Path: ${path}, Version: ${CACHE_NAME}`);
+    } else {
+      try {
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        const existingPage = await pCache.match(new Request(path));
+        if (existingPage) {
+          safeCachePut(CACHE_NAME, new Request(path), existingPage.clone());
+          return true;
+        }
+      } catch (e) {}
     }
   } catch (e) {}
   return false;
@@ -203,6 +213,7 @@ async function cacheLoginAndChunks() {
 }
 
 async function precacheAllRoles() {
+  CACHE_NAME = getCacheName();
   const retryCount = typeof arguments[0] === 'number' ? arguments[0] : 0;
   let has503 = false;
   let successCount = 0;
@@ -282,6 +293,8 @@ self.addEventListener('activate', (event) => {
           }
         }
       } catch (e) {}
+
+      await precacheAllRoles();
     })()
   );
   self.clients.claim();

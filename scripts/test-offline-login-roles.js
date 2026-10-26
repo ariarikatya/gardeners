@@ -19,6 +19,7 @@ async function runOfflineLoginRolesTest() {
 
   // Assertion 2: handleOfflineLogin sets single-line error for unrecorded phones
   assert(
+    pageCode.includes("Чтобы войти офлайн, сначала один раз войдите с интернетом") ||
     pageCode.includes("Для этого номера нужен один онлайн-вход для сохранения роли") ||
     pageCode.includes("Нет интернета, и этот номер ещё не входил на этом устройстве") ||
     pageCode.includes("Подключитесь к сети для первого входа"),
