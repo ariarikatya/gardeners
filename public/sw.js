@@ -549,55 +549,11 @@ self.addEventListener('message', (event) => {
       let clean = phone ? String(phone).replace(/\D/g, '') : null;
 
       try {
-        const cache = await caches.open(CACHE_NAME);
-        const pCache = await caches.open(OFFLINE_DATA_CACHE);
-
-        if (clean) {
-          const lookupRes = await lookupRoleForPhone(clean);
+        if (clean || phone) {
+          const lookupRes = await lookupRoleForPhone(clean || phone);
           if (lookupRes && lookupRes.success && lookupRes.lastUsedRole) {
             role = lookupRes.lastUsedRole;
             roles = lookupRes.roles || [];
-          }
-        }
-
-        if (!role) {
-          for (const c of [cache, pCache]) {
-            try {
-              const sessionRes = await c.match('/offline-session');
-              if (sessionRes) {
-                const sData = await sessionRes.json();
-                if (sData && sData.role) {
-                  let sPhone = sData.phone ? String(sData.phone).replace(/\D/g, '') : null;
-                  if (sPhone && sPhone.length === 11 && sPhone.startsWith('8')) sPhone = '7' + sPhone.slice(1);
-                  if (!clean || (sPhone && sPhone === clean)) {
-                    role = sData.role;
-                    roles = [sData.role];
-                    if (!clean && sPhone) clean = sPhone;
-                    break;
-                  }
-                }
-              }
-            } catch (e) {}
-          }
-        }
-
-        if (!role) {
-          for (const c of [cache, pCache]) {
-            try {
-              const roleRes = await c.match('/offline-role');
-              if (roleRes) {
-                const rData = await roleRes.json();
-                if (rData && rData.role) {
-                  let rPhone = rData.phone ? String(rData.phone).replace(/\D/g, '') : null;
-                  if (rPhone && rPhone.length === 11 && rPhone.startsWith('8')) rPhone = '7' + rPhone.slice(1);
-                  if (!clean || (rPhone && rPhone === clean)) {
-                    role = rData.role;
-                    roles = [rData.role];
-                    break;
-                  }
-                }
-              }
-            } catch (e) {}
           }
         }
       } catch (e) {}

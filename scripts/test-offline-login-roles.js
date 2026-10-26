@@ -38,6 +38,21 @@ async function runOfflineLoginRolesTest() {
   assert(pageCode.includes("redirectByRole("), 'app/login/page.js must seamlessly redirect when role is resolved offline');
   console.log('✅ Assertion 3 Passed: Offline login proceeds directly to redirect when role is known.');
 
+  // Assertion 5: Check public/sw.js GET_OFFLINE_ROLE handler does not fall back to unverified /offline-role or /offline-session without phone matching
+  const swPath = path.resolve('public/sw.js');
+  const swCode = fs.readFileSync(swPath, 'utf8');
+
+  const getOfflineRoleMatch = swCode.match(/if\s*\(\s*event\.data\.type\s*===\s*'GET_OFFLINE_ROLE'\s*\)\s*\{([\s\S]*?)\n\s*return;/);
+  assert(getOfflineRoleMatch, 'public/sw.js must contain GET_OFFLINE_ROLE message handler');
+  const getOfflineRoleBody = getOfflineRoleMatch[1];
+
+  const hasUnverifiedFallback = Boolean(
+    getOfflineRoleBody.includes("match('/offline-role')") ||
+    getOfflineRoleBody.includes("match('/offline-session')")
+  );
+  assert(!hasUnverifiedFallback, 'public/sw.js GET_OFFLINE_ROLE handler MUST NOT fall back to /offline-role or /offline-session without phone matching');
+  console.log('✅ Assertion 5 Passed: GET_OFFLINE_ROLE handler in sw.js does not contain unverified session fallback.');
+
   console.log('\n🎉 ALL OFFLINE LOGIN ROLES TESTS PASSED SUCCESSFULLY!');
 }
 
