@@ -193,13 +193,19 @@ export default function LoginPage() {
 
     setLoading(true);
 
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 4000) : null;
+
     try {
       const res = await fetch('/api/auth/auto-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: phoneToUse }),
         credentials: 'include',
+        signal: controller ? controller.signal : undefined,
       });
+
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (res.status === 503 || res.status >= 500) {
         console.warn('[Login Error 5xx]', res.status, 'CLIENT_VERSION:', CLIENT_VERSION);
@@ -238,6 +244,7 @@ export default function LoginPage() {
 
       await redirectByRole(data.role);
     } catch (err) {
+      if (timeoutId) clearTimeout(timeoutId);
       if (err && err.isClientError) {
         setError(err.message || 'Ошибка подключения');
       } else {
