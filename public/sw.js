@@ -411,9 +411,8 @@ self.addEventListener('install', (event) => {
 });
 
 let isOfflineSessionActive = false;
-const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
-// === ACTIVATE: чистим все старые версии кэша anemon-agro-* и протухшие сессии (30 дней) ===
+// === ACTIVATE: чистим все старые версии кэша anemon-agro-* ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
@@ -445,10 +444,7 @@ self.addEventListener('activate', (event) => {
         const sessionRes = await cache.match('/offline-session');
         if (sessionRes) {
           const data = await sessionRes.json();
-          if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_30D)) {
-            await cache.delete('/offline-session');
-            isOfflineSessionActive = false;
-          } else if (data && data.active) {
+          if (data && data.active) {
             isOfflineSessionActive = true;
           }
         }
@@ -469,13 +465,10 @@ async function isOfflineSession() {
     }
     if (sessionRes) {
       const data = await sessionRes.clone().json();
-      if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_30D)) {
-        await cache.delete('/offline-session');
-        isOfflineSessionActive = false;
-        return false;
+      if (data && data.active) {
+        isOfflineSessionActive = true;
+        return true;
       }
-      isOfflineSessionActive = true;
-      return true;
     }
   } catch (e) {}
   return false;

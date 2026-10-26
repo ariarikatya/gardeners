@@ -257,10 +257,10 @@ export default function LoginPage() {
         return;
       }
 
-      setError('Нет сети и этот номер ещё не сохранялся на этом устройстве');
+      setError('Нет сети. Этот номер ещё не открывался на этом устройстве с интернетом — откройте сайт при появлении сети один раз.');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Нет сети и этот номер ещё не сохранялся на этом устройстве');
+      setError('Нет сети. Этот номер ещё не открывался на этом устройстве с интернетом — откройте сайт при появлении сети один раз.');
     }
   };
 
@@ -404,28 +404,10 @@ export default function LoginPage() {
       syncPhoneRoleMapToSw();
 
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
-      const offlineSessionTs = localStorage.getItem('offline_session_ts');
-      const MAX_OFFLINE_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
       if (offlineSessionActive) {
-        const tsNum = Number(offlineSessionTs);
-
-        if (offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum < MAX_OFFLINE_AGE_30D)) {
-          localStorage.setItem('offline_session_ts', String(Date.now()));
-          notifySwOfflineSession(true, role);
-        } else if (isOffline) {
-          (async () => {
-            const resRole = await resolveOfflineRoleFromCaches(saved || role);
-            if (resRole) {
-              localStorage.setItem('offline_session_ts', String(Date.now()));
-              notifySwOfflineSession(true, resRole);
-            }
-          })();
-        } else if (!isOffline && offlineSessionTs && !isNaN(tsNum) && (Date.now() - tsNum >= MAX_OFFLINE_AGE_30D)) {
-          localStorage.removeItem('offline_session');
-          localStorage.removeItem('offline_session_ts');
-          notifySwOfflineSession(false, null);
-        }
+        localStorage.setItem('offline_session_ts', String(Date.now()));
+        notifySwOfflineSession(true, role);
       }
     } catch (e) {
       // localStorage error fallback

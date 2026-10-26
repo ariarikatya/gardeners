@@ -75,12 +75,12 @@ export async function middleware(request) {
 
   const response = redirectUrl ? NextResponse.redirect(redirectUrl) : NextResponse.next();
 
-  // Sliding session: if token remaining TTL is < 15 days, generate a fresh token
+  // Sliding session: if token remaining TTL is < 30 days, generate a fresh token
   const nowSec = Math.floor(Date.now() / 1000);
   const expSec = payload.exp || 0;
   const remainingDays = (expSec - nowSec) / (60 * 60 * 24);
 
-  if (remainingDays < 15) {
+  if (remainingDays < 30) {
     try {
       const freshToken = await signToken({
         userId: payload.userId,

@@ -19,6 +19,7 @@ async function runOfflineLoginRolesTest() {
 
   // Assertion 2: handleOfflineLogin sets neutral single-line error or proceeds
   assert(
+    pageCode.includes("Нет сети. Этот номер ещё не открывался на этом устройстве с интернетом — откройте сайт при появлении сети один раз.") ||
     pageCode.includes("Нет сети и этот номер ещё не сохранялся на этом устройстве") ||
     pageCode.includes("Чтобы войти офлайн, сначала один раз войдите с интернетом") ||
     pageCode.includes("Нет интернета, и этот номер ещё не входил на этом устройстве"),
