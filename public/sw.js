@@ -27,9 +27,76 @@ async function fetchWithTimeout(request, timeoutMs = 5000) {
   }
 }
 
+// Helpers for offline identity management
+async function getOfflineIdentitiesMap() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const res = await cache.match('/offline-identities');
+    if (res) {
+      const data = await res.json();
+      if (data && typeof data === 'object') return data;
+    }
+  } catch (e) {}
+  return {};
+}
+
+async function saveOfflineIdentitiesMap(map) {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put('/offline-identities', new Response(JSON.stringify(map), {
+      headers: { 'Content-Type': 'application/json' }
+    }));
+  } catch (e) {}
+}
+
+async function recordIdentity({ phone, role, name }) {
+  if (!phone || !role) return;
+  const cleanPhone = String(phone).replace(/\D/g, '');
+  if (!cleanPhone) return;
+
+  const map = await getOfflineIdentitiesMap();
+  const existing = map[cleanPhone] || { phone: cleanPhone, roles: [], name: null, lastUsedRole: null };
+
+  const roles = Array.isArray(existing.roles) ? [...existing.roles] : (existing.role ? [existing.role] : []);
+  if (!roles.includes(role)) {
+    roles.push(role);
+  }
+
+  map[cleanPhone] = {
+    phone: cleanPhone,
+    roles,
+    name: name || existing.name || null,
+    lastUsedRole: role,
+    ts: Date.now(),
+  };
+
+  await saveOfflineIdentitiesMap(map);
+}
+
+async function lookupRoleForPhone(phone) {
+  if (!phone) return { success: false, roles: [], lastUsedRole: null, name: null };
+  const cleanPhone = String(phone).replace(/\D/g, '');
+  if (!cleanPhone) return { success: false, roles: [], lastUsedRole: null, name: null };
+
+  const map = await getOfflineIdentitiesMap();
+  const item = map[cleanPhone];
+  if (item) {
+    const roles = Array.isArray(item.roles) ? item.roles : (item.role ? [item.role] : []);
+    const lastUsedRole = item.lastUsedRole || (roles.length > 0 ? roles[roles.length - 1] : null);
+    return {
+      success: true,
+      phone: cleanPhone,
+      roles,
+      lastUsedRole,
+      name: item.name || null,
+    };
+  }
+  return { success: false, roles: [], lastUsedRole: null, name: null };
+}
+
 // Helper for checking valid cached response
 async function normalizeCachedResponse(res) {
-  if (res && res.ok && res.status === 200 && !res.redirected && res.type !== 'opaque') {
+  if (res && res.ok && res.status === 200 && !res.redirected && res.type !== 'opaque' && res.type !== 'opaqueredirect') {
     try {
       const text = await res.clone().text();
       if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
@@ -42,7 +109,7 @@ async function normalizeCachedResponse(res) {
 
 // Helper for caching valid responses only
 function safeCachePut(cacheName, request, response) {
-  if (!response || !response.ok || response.status >= 300 || response.redirected || response.type === 'opaque') {
+  if (!response || !response.ok || response.status >= 300 || response.redirected || response.type === 'opaque' || response.type === 'opaqueredirect') {
     return;
   }
   caches.open(cacheName).then((cache) => {
@@ -84,10 +151,13 @@ async function deleteOldCaches() {
 async function cacheRolePageAndChunks(path) {
   try {
     const cache = await caches.open(CACHE_NAME);
-    const req = new Request(path, { credentials: 'include', redirect: 'follow' });
+    const req = new Request(path, { credentials: 'include', redirect: 'manual' });
     const res = await fetch(req);
-    if (res && res.ok && res.status === 200 && !res.redirected) {
+    if (res && res.ok && res.status === 200 && !res.redirected && res.type !== 'opaqueredirect') {
       const text = await res.clone().text();
+      if (!text.includes('<!DOCTYPE html>') && !text.includes('<html')) {
+        return false;
+      }
       safeCachePut(CACHE_NAME, new Request(path), res);
       const metaKey = path === '/' ? '/login-meta' : `${path}-meta`;
       const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
@@ -376,6 +446,28 @@ self.addEventListener('message', (event) => {
     return;
   }
 
+  if (event.data.type === 'RECORD_IDENTITY') {
+    const promise = recordIdentity({
+      phone: event.data.phone,
+      role: event.data.role,
+      name: event.data.name,
+    });
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'LOOKUP_ROLE') {
+    const promise = lookupRoleForPhone(event.data.phone);
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then((resData) => {
+      if (port) {
+        try { port.postMessage({ success: true, ...resData }); } catch (e) {}
+      }
+    }).catch(() => reply(false));
+    return;
+  }
+
   if (event.data.type === 'OFFLINE_ROLE') {
     const promise = (async () => {
       try {
@@ -410,6 +502,28 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   const url = new URL(request.url);
+
+  // === /emergency.js : Network-First с поддержкой офлайн-кэша без 503 ===
+  if (url.pathname === '/emergency.js') {
+    event.respondWith(
+      (async () => {
+        try {
+          const netRes = await fetch(request);
+          if (netRes && netRes.ok && netRes.status === 200) {
+            safeCachePut(CACHE_NAME, '/emergency.js', netRes.clone());
+            return netRes;
+          }
+        } catch (e) {}
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          const cached = await cache.match('/emergency.js') || await cache.match(request);
+          if (cached) return cached;
+        } catch (e) {}
+        return new Response('/* emergency.js fallback */', { status: 200, headers: { 'Content-Type': 'application/javascript' } });
+      })()
+    );
+    return;
+  }
 
   // === ФАЙЛЫ / ИЗОБРАЖЕНИЯ GET /api/files/* : Network-First с гарантией сохранения MIME для iOS Safari ===
   if (request.method === 'GET' && url.pathname.startsWith('/api/files/')) {

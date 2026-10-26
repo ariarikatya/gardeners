@@ -18,7 +18,7 @@ export default function RootLayout({ children }) {
     <html lang="ru">
       <head>
         <link rel="apple-touch-icon" href="/icon-192.png" />
-        <script src={`/emergency.js?v=${CLIENT_VERSION}`}></script>
+        <script src={`/emergency.js?v=${CLIENT_VERSION}`} defer></script>
       </head>
       <body>
         {children}

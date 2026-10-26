@@ -104,11 +104,11 @@ console.log('✅ (3) public/sw.js confirmed free of dashboard role guessing.');
 assert(swContent.includes("type === 'GET_OFFLINE_ROLE'"), 'public/sw.js must contain GET_OFFLINE_ROLE message handler');
 console.log('✅ (4) public/sw.js contains GET_OFFLINE_ROLE message handler.');
 
-// Verify precacheAllRoles checks !res.redirected
-const precacheStartIndex = swContent.indexOf('async function precacheAllRoles()');
-assert(precacheStartIndex !== -1, 'public/sw.js must contain precacheAllRoles function');
-const precacheBlock = swContent.slice(precacheStartIndex, precacheStartIndex + 800);
-assert(precacheBlock.includes('!res.redirected'), 'precacheAllRoles must check !res.redirected');
-console.log('✅ (5) precacheAllRoles strictly checks !res.redirected.');
+// Verify cacheRolePageAndChunks and precacheAllRoles check !res.redirected
+const cacheRoleStartIndex = swContent.indexOf('async function cacheRolePageAndChunks(');
+assert(cacheRoleStartIndex !== -1, 'public/sw.js must contain cacheRolePageAndChunks function');
+const cacheRoleBlock = swContent.slice(cacheRoleStartIndex, cacheRoleStartIndex + 800);
+assert(cacheRoleBlock.includes('!res.redirected'), 'cacheRolePageAndChunks must check !res.redirected');
+console.log('✅ (5) cacheRolePageAndChunks strictly checks !res.redirected.');
 
 console.log('\n🎉 ALL OFFLINE ROLE ROUTING UNIT & STATIC TESTS PASSED SUCCESSFULLY!');
