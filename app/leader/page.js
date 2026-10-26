@@ -296,12 +296,15 @@ export default function LeaderDashboard() {
         }
       }
       if (!storedRole) {
-        window.location.assign('/login');
+        if (navigator.onLine) window.location.assign('/login');
+        setLoading(false);
         return;
       }
       if (storedRole !== 'LEADER') {
         const correctPath = storedRole === 'ADMIN' ? '/admin' : storedRole === 'GARDENER' ? '/gardener' : '/login';
-        window.location.assign(correctPath);
+        if (navigator.onLine || storedRole === 'ADMIN' || storedRole === 'GARDENER') {
+          window.location.assign(correctPath);
+        }
         return;
       }
 

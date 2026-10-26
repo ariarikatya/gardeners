@@ -19,10 +19,11 @@ export default function LoginPage() {
     const digits = raw.replace(/\D/g, '');
     if (!digits) return [];
 
-    const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
-    const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
+    const tail10 = digits.length >= 10 ? digits.slice(-10) : digits;
+    const clean7 = tail10 ? '7' + tail10 : '';
+    const clean8 = tail10 ? '8' + tail10 : '';
 
-    return Array.from(new Set([clean7, clean8, digits, raw, '+' + clean7]));
+    return Array.from(new Set([tail10, clean7, clean8, digits, raw, clean7 ? '+' + clean7 : ''].filter(Boolean)));
   };
 
   const normalizeCleanPhone = (phoneNum) => {
@@ -316,7 +317,20 @@ export default function LoginPage() {
       const localMapData = rawInputPhone ? getRoleForPhone(rawInputPhone) : null;
       const nameVal = localMapData?.name || null;
 
-      const resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+      let resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+
+      if (!resolvedRole && rawInputPhone && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            const reply = await postSwMessageWithReply(targetSw, { type: 'RESOLVE_ROLE', phone: rawInputPhone }, 1000);
+            if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
+              resolvedRole = reply.role;
+            }
+          }
+        } catch (e) {}
+      }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
         const phoneToUse = cleanPhone || storedPhone || rawInputPhone;

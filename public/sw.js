@@ -92,9 +92,10 @@ async function lookupRoleForPhone(phone) {
   const rawStr = String(phone).trim();
   const digits = rawStr.replace(/\D/g, '');
 
-  const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
-  const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
-  const candidateKeys = Array.from(new Set([clean7, clean8, digits, rawStr, '+' + clean7].filter(Boolean)));
+  const tail10 = digits.length >= 10 ? digits.slice(-10) : digits;
+  const clean7 = tail10 ? '7' + tail10 : '';
+  const clean8 = tail10 ? '8' + tail10 : '';
+  const candidateKeys = Array.from(new Set([tail10, clean7, clean8, digits, rawStr, clean7 ? '+' + clean7 : ''].filter(Boolean)));
 
   // 1. Check /offline-identities
   const map = await getOfflineIdentitiesMap();
@@ -162,9 +163,10 @@ async function lookupRoleForPhone(phone) {
         for (const u of userList) {
           const uDigits = String(u.phone || '').replace(/\D/g, '');
           if (!uDigits) continue;
-          const u7 = uDigits.length === 11 && uDigits.startsWith('8') ? '7' + uDigits.slice(1) : (uDigits.length === 10 ? '7' + uDigits : uDigits);
-          const u8 = uDigits.length === 11 && uDigits.startsWith('7') ? '8' + uDigits.slice(1) : (uDigits.length === 10 ? '8' + uDigits : uDigits);
-          if (candidateKeys.includes(uDigits) || candidateKeys.includes(u7) || candidateKeys.includes(u8)) {
+          const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
+          const u7 = '7' + uTail10;
+          const u8 = '8' + uTail10;
+          if (candidateKeys.includes(uDigits) || candidateKeys.includes(uTail10) || candidateKeys.includes(u7) || candidateKeys.includes(u8)) {
             if (u.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(u.role)) {
               await recordIdentity({ phone: u7, role: u.role, name: u.name });
               return { success: true, phone: u7, roles: [u.role], lastUsedRole: u.role, name: u.name || null };
@@ -315,6 +317,33 @@ async function precacheAllRoles() {
         if (res && res.ok) {
           safeCachePut(CACHE_NAME, new Request(assetUrl), res.clone());
           safeCachePut(OFFLINE_DATA_CACHE, new Request(assetUrl), res);
+
+          if (assetUrl === '/api/public/offline-users') {
+            try {
+              const usersData = await res.clone().json();
+              const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
+              const phoneRoleMap = {};
+              for (const u of userList) {
+                if (!u.phone || !u.role) continue;
+                const uDigits = String(u.phone).replace(/\D/g, '');
+                if (!uDigits) continue;
+                const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
+                const u7 = '7' + uTail10;
+                const u8 = '8' + uTail10;
+                const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
+                for (const k of [uTail10, u7, u8, uDigits]) {
+                  if (k) phoneRoleMap[k] = entry;
+                }
+              }
+              const mapStr = JSON.stringify(phoneRoleMap);
+              const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+              const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put('/phone-role-map', mapRes1);
+              const pCache = await caches.open(OFFLINE_DATA_CACHE);
+              await pCache.put('/phone-role-map', mapRes2);
+            } catch (err) {}
+          }
         }
       } catch (e) {}
     })
