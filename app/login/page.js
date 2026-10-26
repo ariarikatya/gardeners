@@ -79,13 +79,13 @@ export default function LoginPage() {
       const timer = setTimeout(() => {
         try {
           const retryChannel = new MessageChannel();
-          const retryTimer = setTimeout(() => resolve(null), 1000);
+          const retryTimer = setTimeout(() => resolve(null), 1500);
           retryChannel.port1.onmessage = (e) => { clearTimeout(retryTimer); resolve(e.data || null); };
           targetSw.postMessage(msg, [retryChannel.port2]);
         } catch (e) {
           resolve(null);
         }
-      }, 2500);
+      }, 3000);
 
       channel.port1.onmessage = (e) => {
         clearTimeout(timer);
@@ -99,6 +99,57 @@ export default function LoginPage() {
         resolve(null);
       }
     });
+  };
+
+  const readSwCacheDirect = async (cleanPhone) => {
+    if (typeof window === 'undefined' || !('caches' in window)) return null;
+    try {
+      const cacheNames = ['anemon-agro-offline-data'];
+      const keys = await caches.keys();
+      for (const k of keys) {
+        if (!cacheNames.includes(k)) cacheNames.push(k);
+      }
+
+      for (const cacheName of cacheNames) {
+        try {
+          const cache = await caches.open(cacheName);
+          if (cleanPhone) {
+            const idRes = await cache.match('/offline-identities');
+            if (idRes) {
+              const idMap = await idRes.clone().json();
+              if (idMap && idMap[cleanPhone]) {
+                const item = idMap[cleanPhone];
+                const r = item.lastUsedRole || item.role || (Array.isArray(item.roles) ? item.roles[item.roles.length - 1] : null);
+                if (r) return r;
+              }
+            }
+
+            const mapRes = await cache.match('/phone-role-map');
+            if (mapRes) {
+              const pMap = await mapRes.clone().json();
+              if (pMap && pMap[cleanPhone]) {
+                const item = pMap[cleanPhone];
+                const r = typeof item === 'string' ? item : (item.lastUsedRole || item.role);
+                if (r) return r;
+              }
+            }
+          }
+
+          const roleRes = await cache.match('/offline-role');
+          if (roleRes) {
+            const rData = await roleRes.clone().json();
+            if (rData && rData.role) return rData.role;
+          }
+
+          const sessRes = await cache.match('/offline-session');
+          if (sessRes) {
+            const sData = await sessRes.clone().json();
+            if (sData && sData.role) return sData.role;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return null;
   };
 
   const syncPhoneRoleMapToSw = async () => {
@@ -267,7 +318,29 @@ export default function LoginPage() {
         }
       }
 
-      // 4) Last active offline session fallback
+      // 4) Service Worker RESOLVE_ROLE message fallback
+      if (!resolvedRole) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const targetSw = reg.active || navigator.serviceWorker.controller;
+          if (targetSw) {
+            const reply = await postSwMessageWithReply(targetSw, { type: 'RESOLVE_ROLE', phone: cleanPhone });
+            if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
+              resolvedRole = reply.role;
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 5) Direct SW Cache inspection (offline-identities, phone-role-map, offline-role, offline-session)
+      if (!resolvedRole) {
+        const directRole = await readSwCacheDirect(cleanPhone);
+        if (directRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(directRole)) {
+          resolvedRole = directRole;
+        }
+      }
+
+      // 6) Last active offline session fallback
       if (!resolvedRole) {
         const swRoleNoPhone = await querySwOfflineRole(null);
         if (swRoleNoPhone && ['ADMIN', 'LEADER', 'GARDENER'].includes(swRoleNoPhone)) {

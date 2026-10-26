@@ -534,6 +534,72 @@ self.addEventListener('message', (event) => {
     return;
   }
 
+  if (event.data.type === 'RESOLVE_ROLE') {
+    const promise = (async () => {
+      const phone = event.data.phone ? String(event.data.phone).replace(/\D/g, '') : null;
+      let role = null;
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+
+        if (phone) {
+          const lookup = await lookupRoleForPhone(phone);
+          if (lookup && lookup.success && lookup.lastUsedRole) {
+            role = lookup.lastUsedRole;
+          }
+          if (!role) {
+            for (const c of [cache, pCache]) {
+              try {
+                const mapRes = await c.match('/phone-role-map');
+                if (mapRes) {
+                  const pMap = await mapRes.json();
+                  if (pMap && pMap[phone]) {
+                    const item = pMap[phone];
+                    role = typeof item === 'string' ? item : (item.lastUsedRole || item.role);
+                    if (role) break;
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        if (!role) {
+          for (const c of [cache, pCache]) {
+            try {
+              const roleRes = await c.match('/offline-role');
+              if (roleRes) {
+                const rData = await roleRes.json();
+                if (rData && rData.role) { role = rData.role; break; }
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (!role) {
+          for (const c of [cache, pCache]) {
+            try {
+              const sessRes = await c.match('/offline-session');
+              if (sessRes) {
+                const sData = await sessRes.json();
+                if (sData && sData.role) { role = sData.role; break; }
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      return { success: true, role };
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then((resData) => {
+      if (port) {
+        try { port.postMessage(resData); } catch (e) {}
+      }
+    }).catch(() => reply(false));
+    return;
+  }
+
   if (event.data.type === 'SET_OFFLINE_PHONE') {
     const promise = (async () => {
       try {
