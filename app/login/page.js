@@ -127,14 +127,14 @@ export default function LoginPage() {
       const reg = await navigator.serviceWorker.ready;
       const targetSw = reg.active || navigator.serviceWorker.controller;
       if (targetSw) {
-        await postSwMessageWithReply(targetSw, { type: 'SYNC_PHONE_ROLE_MAP', map }, 2500);
+        await postSwMessageWithReply(targetSw, { type: 'SYNC_PHONE_ROLE_MAP', map }, 300);
       }
     } catch (e) {
       if (navigator.serviceWorker.controller) {
         try {
           const mapStr = localStorage.getItem('phone_roles_map');
           if (mapStr) {
-            postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SYNC_PHONE_ROLE_MAP', map: JSON.parse(mapStr) }, 2500);
+            postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SYNC_PHONE_ROLE_MAP', map: JSON.parse(mapStr) }, 300);
           }
         } catch (err) {}
       }
@@ -351,11 +351,25 @@ export default function LoginPage() {
         clearTimeout(timer);
 
         if (res.status === 401) {
-          localStorage.removeItem('offline_session');
-          localStorage.removeItem('offline_session_ts');
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('auth_role');
-          notifySwOfflineSession(false, null);
+          const storedPhone = localStorage.getItem('auth_phone');
+          if (storedPhone) {
+            try {
+              const loginRes = await fetch('/api/auth/auto-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: storedPhone }),
+                credentials: 'include',
+              });
+              if (loginRes.ok) {
+                const data = await loginRes.json();
+                if (data.token) localStorage.setItem('auth_token', data.token);
+                if (data.role) localStorage.setItem('auth_role', data.role);
+                triggerSwPrecacheRoles();
+              }
+            } catch (autoErr) {
+              // Silent retry failure - preserve offline session and offline cache
+            }
+          }
         } else if (res.ok) {
           triggerSwPrecacheRoles();
         }
@@ -394,6 +408,14 @@ export default function LoginPage() {
 
       if (isOffline) {
         (async () => {
+          if ('serviceWorker' in navigator) {
+            try {
+              await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((resolve) => setTimeout(resolve, 1500)),
+              ]);
+            } catch (e) {}
+          }
           const resolved = await resolveOfflineRoleFromCaches(saved || role);
           if (resolved) {
             await redirectByRole(resolved, true, saved);
