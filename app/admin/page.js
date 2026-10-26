@@ -841,7 +841,10 @@ export default function AdminDashboard() {
 
       if (navigator.onLine) {
         try {
-          await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+          await Promise.race([
+            apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {}),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ]).catch(() => {});
         } catch (e) {}
       }
 
