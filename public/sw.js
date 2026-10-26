@@ -71,6 +71,16 @@ function withOfflineHeader(response, extraHeaders = {}) {
   }
 }
 
+async function deleteOldCaches() {
+  try {
+    CACHE_NAME = getCacheName();
+    const keys = await caches.keys();
+    await Promise.all(
+      keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+    );
+  } catch (e) {}
+}
+
 async function cacheRolePageAndChunks(path) {
   try {
     const cache = await caches.open(CACHE_NAME);
@@ -115,6 +125,7 @@ async function cacheLoginAndChunks() {
 async function precacheAllRoles() {
   const retryCount = typeof arguments[0] === 'number' ? arguments[0] : 0;
   let has503 = false;
+  let successCount = 0;
 
   const rolePages = ['/login', '/admin', '/leader', '/gardener'];
 
@@ -122,7 +133,8 @@ async function precacheAllRoles() {
     rolePages.map(async (pagePath) => {
       try {
         const ok = await cacheRolePageAndChunks(pagePath);
-        if (!ok) has503 = true;
+        if (ok) successCount++;
+        else has503 = true;
       } catch (e) {
         has503 = true;
       }
@@ -140,17 +152,29 @@ async function precacheAllRoles() {
     })
   );
 
+  if (successCount > 0) {
+    await deleteOldCaches();
+  }
+
   if (has503 && retryCount < 3) {
     const delays = [5000, 15000, 60000];
     const delay = delays[retryCount] || 60000;
     setTimeout(() => { precacheAllRoles(retryCount + 1).catch(() => {}); }, delay);
   }
+
+  return successCount > 0;
 }
 
 // === INSTALL: сразу берём контроль и безопасно кэшируем APP_SHELL без addAll ===
 self.addEventListener('install', (event) => {
   self.skipWaiting();
-  event.waitUntil(precacheAllRoles());
+  event.waitUntil(
+    precacheAllRoles().then((success) => {
+      if (success) {
+        return deleteOldCaches();
+      }
+    })
+  );
 });
 
 let isOfflineSessionActive = false;

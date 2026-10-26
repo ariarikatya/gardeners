@@ -323,6 +323,7 @@ export default function LoginPage() {
 
       if (isManualLogout) {
         sessionStorage.removeItem('manual_logout');
+        notifySwOfflineSession(false, null);
       }
 
       const saved = localStorage.getItem('auth_phone');

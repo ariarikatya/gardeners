@@ -1,4 +1,16 @@
 (function() {
+  function handleChunkError() {
+    if (typeof window === 'undefined') return false;
+    try {
+      if (!sessionStorage.getItem('chunk_reload_done')) {
+        sessionStorage.setItem('chunk_reload_done', '1');
+        window.location.reload();
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function showFatalError(msg) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     if (document.getElementById('fatal-error-fallback')) return;
@@ -18,6 +30,12 @@
   window.addEventListener('error', function(e) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     if (e && (
+      (e.message && (e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) ||
+      (e.name && e.name.indexOf('ChunkLoadError') !== -1)
+    )) {
+      if (handleChunkError()) return;
+    }
+    if (e && (
       (e.message && (e.message.indexOf('Hydration') !== -1 || e.message.indexOf('Minified React error') !== -1 || e.message.indexOf('SyntaxError') !== -1 || e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) ||
       (e.name && e.name.indexOf('ChunkLoadError') !== -1)
     )) {
@@ -31,6 +49,7 @@
       (e.reason.name && e.reason.name.indexOf('ChunkLoadError') !== -1) ||
       (e.reason.message && (e.reason.message.indexOf('Loading chunk') !== -1 || e.reason.message.indexOf('ChunkLoadError') !== -1))
     )) {
+      if (handleChunkError()) return;
       showFatalError('ошибка загрузки чанка');
       return;
     }
@@ -47,17 +66,8 @@
       var hasFatal = document.getElementById('fatal-error-fallback');
       if ((!hasChildren || text.length === 0) && !hasFatal) {
         showFatalError('пустая страница');
-        try {
-          fetch('/api/client-error', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: 'Blank screen detected by 3s watchdog',
-              pathname: window.location.pathname,
-              userAgent: navigator.userAgent
-            })
-          }).catch(function() {});
-        } catch (e) {}
+      } else {
+        try { sessionStorage.removeItem('chunk_reload_done'); } catch(e) {}
       }
     }
   }, 3000);
