@@ -5,7 +5,7 @@ import Link from 'next/link';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const emptyOrderForm = {
@@ -461,26 +461,13 @@ export default function AdminDashboard() {
     if (typeof window === 'undefined') return;
 
     const initRoleCheck = async () => {
-      const offlineSess = localStorage.getItem('offline_session') === '1';
       let role = localStorage.getItem('auth_role');
+      if (!role) {
+        role = await resolveOfflineRoleFromCaches();
+      }
 
-      if (!role && !navigator.onLine && 'serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const targetSw = reg.active || navigator.serviceWorker.controller;
-          if (targetSw && typeof MessageChannel !== 'undefined') {
-            const channel = new MessageChannel();
-            const reply = await new Promise((resolve) => {
-              const timer = setTimeout(() => resolve(null), 1000);
-              channel.port1.onmessage = (e) => { clearTimeout(timer); resolve(e.data); };
-              try { targetSw.postMessage({ type: 'GET_OFFLINE_ROLE' }, [channel.port2]); } catch (e) { resolve(null); }
-            });
-            if (reply && reply.role) {
-              role = reply.role;
-              localStorage.setItem('auth_role', role);
-            }
-          }
-        } catch (e) {}
+      if (role) {
+        activateOfflineSession(role, localStorage.getItem('auth_phone'));
       }
 
       if (!role) {
@@ -492,15 +479,9 @@ export default function AdminDashboard() {
         window.location.assign(correctPath);
         return;
       }
-
-      localStorage.setItem('offline_session_ts', String(Date.now()));
     };
 
     initRoleCheck();
-
-    const offlineSess = localStorage.getItem('offline_session') === '1';
-    const role = localStorage.getItem('auth_role');
-    if (!role && navigator.onLine) return;
 
     if (offlineSess) {
       localStorage.setItem('offline_session_ts', String(Date.now()));

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
+import { activateOfflineSession } from '@/lib/offlineStore';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -242,9 +243,10 @@ export default function LoginPage() {
     }
   };
 
-  const redirectByRole = async (role, isOffline = false) => {
+  const redirectByRole = async (role, isOffline = false, targetPhone = null) => {
     if (!role) return;
-    await notifySwOfflineSession(isOffline, role);
+    const phoneToUse = targetPhone || savedPhone || phone;
+    activateOfflineSession(role, phoneToUse);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
     if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
       if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
@@ -563,7 +565,6 @@ export default function LoginPage() {
             </h2>
             <p className="mt-2 text-center text-base text-slate-600 font-medium">
               Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>
-              {roleLabel ? <span className="block text-xs font-semibold text-emerald-700 mt-1">Роль: {roleLabel}</span> : null}
               <br />Это ваш номер?
             </p>
           </div>
