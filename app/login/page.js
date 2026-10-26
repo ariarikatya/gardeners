@@ -101,6 +101,29 @@ export default function LoginPage() {
     });
   };
 
+  const syncPhoneRoleMapToSw = async () => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    try {
+      const mapStr = localStorage.getItem('phone_roles_map');
+      if (!mapStr) return;
+      const map = JSON.parse(mapStr);
+      const reg = await navigator.serviceWorker.ready;
+      const targetSw = reg.active || navigator.serviceWorker.controller;
+      if (targetSw) {
+        await postSwMessageWithReply(targetSw, { type: 'SYNC_PHONE_ROLE_MAP', map });
+      }
+    } catch (e) {
+      if (navigator.serviceWorker.controller) {
+        try {
+          const mapStr = localStorage.getItem('phone_roles_map');
+          if (mapStr) {
+            postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'SYNC_PHONE_ROLE_MAP', map: JSON.parse(mapStr) });
+          }
+        } catch (err) {}
+      }
+    }
+  };
+
   const recordIdentityToSw = async (phoneNum, role, name = null) => {
     if (typeof window === 'undefined' || !phoneNum || !role) return;
     const cleanPhone = String(phoneNum).replace(/\D/g, '');
@@ -397,6 +420,8 @@ export default function LoginPage() {
         setIsSavedPhoneMode(true);
       }
 
+      syncPhoneRoleMapToSw();
+
       const offlineSessionActive = localStorage.getItem('offline_session') === '1';
       const offlineSessionTs = localStorage.getItem('offline_session_ts');
       const MAX_OFFLINE_AGE_30D = 30 * 24 * 60 * 60 * 1000;
@@ -480,6 +505,7 @@ export default function LoginPage() {
         if (cleanPhone) {
           savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
           await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
+          await syncPhoneRoleMapToSw();
         }
       }
 

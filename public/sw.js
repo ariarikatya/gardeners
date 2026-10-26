@@ -390,27 +390,86 @@ self.addEventListener('message', (event) => {
     return;
   }
 
-  if (event.data.type === 'GET_OFFLINE_ROLE') {
+  if (event.data.type === 'SYNC_PHONE_ROLE_MAP' && event.data.map) {
     const promise = (async () => {
-      let role = null;
-      let phone = null;
       try {
         const cache = await caches.open(CACHE_NAME);
-        const roleRes = await cache.match('/offline-role');
-        if (roleRes) {
-          const rData = await roleRes.json();
-          if (rData && rData.role) role = rData.role;
-        }
-        const sessionRes = await cache.match('/offline-session');
-        if (sessionRes) {
-          const sData = await sessionRes.clone().json();
-          if (sData) {
-            if (!role && sData.role) role = sData.role;
-            if (sData.phone) phone = sData.phone;
+        await cache.put('/phone-role-map', new Response(JSON.stringify(event.data.map), {
+          headers: { 'Content-Type': 'application/json' }
+        }));
+        for (const [p, val] of Object.entries(event.data.map)) {
+          if (val) {
+            const role = typeof val === 'string' ? val : (val.lastUsedRole || val.role);
+            const name = typeof val === 'object' ? val.name : null;
+            if (role) await recordIdentity({ phone: p, role, name });
           }
         }
       } catch (e) {}
-      return { role, phone };
+    })();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'GET_OFFLINE_ROLE') {
+    const promise = (async () => {
+      let role = null;
+      let roles = [];
+      let phone = event.data.phone || null;
+
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        if (phone) {
+          const clean = String(phone).replace(/\D/g, '');
+          const lookupRes = await lookupRoleForPhone(clean);
+          if (lookupRes && lookupRes.success) {
+            role = lookupRes.lastUsedRole;
+            roles = lookupRes.roles || [];
+          }
+          if (!role) {
+            const mapRes = await cache.match('/phone-role-map');
+            if (mapRes) {
+              const mapData = await mapRes.json();
+              if (mapData && mapData[clean]) {
+                const val = mapData[clean];
+                if (typeof val === 'string') {
+                  role = val;
+                  roles = [val];
+                } else if (typeof val === 'object') {
+                  roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
+                  role = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+                }
+              }
+            }
+          }
+        }
+
+        if (!role) {
+          const roleRes = await cache.match('/offline-role');
+          if (roleRes) {
+            const rData = await roleRes.json();
+            if (rData && rData.role) {
+              role = rData.role;
+              roles = [rData.role];
+            }
+          }
+        }
+
+        if (!role) {
+          const sessionRes = await cache.match('/offline-session');
+          if (sessionRes) {
+            const sData = await sessionRes.clone().json();
+            if (sData) {
+              if (!role && sData.role) {
+                role = sData.role;
+                roles = [sData.role];
+              }
+              if (!phone && sData.phone) phone = sData.phone;
+            }
+          }
+        }
+      } catch (e) {}
+      return { role, roles, phone };
     })();
 
     if (event.waitUntil) event.waitUntil(promise);
