@@ -236,26 +236,35 @@ async function runOfflineSavedPhoneLoginTest() {
   console.log('✅ Assertion 6 & 7 Passed: Offline handleLogout preserved auth_phone in localStorage while clearing token/role.');
 
   // 7. Testing phone_roles_map & unknown phone offline error handling (No Role Selection Modal)
-  console.log('\nTesting Phone Role Map & Unknown Phone Offline Error Handling...');
+  console.log('\nTesting Phone Role Map & Dual Key (7... and 8...) Normalization...');
 
   const savePhoneRoleMap = (phoneNum, roleVal, nameVal = null) => {
-    const clean = String(phoneNum).replace(/\D/g, '');
-    if (!clean) return;
+    const raw = String(phoneNum).trim();
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return;
+    const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
+    const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
+
     try {
       const mapStr = mockLocalStorage.getItem('phone_roles_map');
       const map = mapStr ? JSON.parse(mapStr) : {};
-      const existing = map[clean];
-      const existingObj = typeof existing === 'object' && existing !== null ? existing : {};
-      const roles = Array.isArray(existingObj.roles) ? [...existingObj.roles] : (existingObj.role ? [existingObj.role] : []);
-      if (!roles.includes(roleVal)) roles.push(roleVal);
-      map[clean] = { role: roleVal, roles, lastUsedRole: roleVal, name: nameVal };
+      for (const k of [clean7, clean8, digits]) {
+        if (!k) continue;
+        const existing = map[k] || {};
+        const existingObj = typeof existing === 'object' && existing !== null ? existing : {};
+        const roles = Array.isArray(existingObj.roles) ? [...existingObj.roles] : (existingObj.role ? [existingObj.role] : []);
+        if (!roles.includes(roleVal)) roles.push(roleVal);
+        map[k] = { role: roleVal, roles, lastUsedRole: roleVal, name: nameVal };
+      }
       mockLocalStorage.setItem('phone_roles_map', JSON.stringify(map));
     } catch (e) {}
   };
 
-  savePhoneRoleMap('79001112233', 'ADMIN', 'Админ');
+  savePhoneRoleMap('89001112233', 'ADMIN', 'Админ');
   const savedMap = JSON.parse(mockLocalStorage.getItem('phone_roles_map'));
-  assert(savedMap['79001112233'].role === 'ADMIN', 'phone_roles_map must store role for 79001112233');
+  assert(savedMap['89001112233'].role === 'ADMIN', 'phone_roles_map must store role for 89001112233');
+  assert(savedMap['79001112233'].role === 'ADMIN', 'phone_roles_map must also store role under 79001112233 key');
+  console.log('✅ Assertion 8 Passed: Dual key saving (7... and 8...) verified.');
 
   // Verify unknown phone offline error logic
   let errorState = '';
@@ -271,7 +280,7 @@ async function runOfflineSavedPhoneLoginTest() {
 
   await testUnknownPhoneOffline('79990000000');
   assert(errorState.includes('Нет сети и этот номер ещё не сохранялся'), 'Unknown phone offline must display text error message');
-  console.log('✅ Assertion 8 Passed: Unknown phone offline returns text error message without role selection modal.');
+  console.log('✅ Assertion 9 Passed: Unknown phone offline returns text error message without role selection modal.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN & LOGOUT TESTS PASSED SUCCESSFULLY!');
 }
