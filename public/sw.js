@@ -83,14 +83,17 @@ async function recordIdentity({ phone, role, name }) {
 
 async function lookupRoleForPhone(phone) {
   if (!phone) return { success: false, roles: [], lastUsedRole: null, name: null };
-  const cleanPhone = String(phone).replace(/\D/g, '');
+  let cleanPhone = String(phone).replace(/\D/g, '');
   if (!cleanPhone) return { success: false, roles: [], lastUsedRole: null, name: null };
+  if (cleanPhone.length === 11 && cleanPhone.startsWith('8')) {
+    cleanPhone = '7' + cleanPhone.slice(1);
+  }
 
   const map = await getOfflineIdentitiesMap();
-  const item = map[cleanPhone];
+  const item = map[cleanPhone] || (cleanPhone.startsWith('7') ? map['8' + cleanPhone.slice(1)] : null);
   if (item) {
     const roles = Array.isArray(item.roles) ? item.roles : (item.role ? [item.role] : []);
-    const lastUsedRole = item.lastUsedRole || (roles.length > 0 ? roles[roles.length - 1] : null);
+    const lastUsedRole = item.lastUsedRole || item.role || (roles.length > 0 ? roles[roles.length - 1] : null);
     return {
       success: true,
       phone: cleanPhone,
@@ -158,6 +161,7 @@ async function deleteOldCaches() {
 
 async function cacheRolePageAndChunks(path) {
   try {
+    CACHE_NAME = getCacheName();
     const cache = await caches.open(CACHE_NAME);
     const req = new Request(path, { credentials: 'include', redirect: 'manual' });
     const res = await fetch(req);
@@ -193,6 +197,15 @@ async function cacheRolePageAndChunks(path) {
       return true;
     } else if (res && res.status >= 500) {
       console.warn(`[SW Server Error ${res.status}] Path: ${path}, Version: ${CACHE_NAME}`);
+    } else {
+      try {
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        const existingPage = await pCache.match(new Request(path));
+        if (existingPage) {
+          safeCachePut(CACHE_NAME, new Request(path), existingPage.clone());
+          return true;
+        }
+      } catch (e) {}
     }
   } catch (e) {}
   return false;
@@ -203,6 +216,7 @@ async function cacheLoginAndChunks() {
 }
 
 async function precacheAllRoles() {
+  CACHE_NAME = getCacheName();
   const retryCount = typeof arguments[0] === 'number' ? arguments[0] : 0;
   let has503 = false;
   let successCount = 0;
@@ -260,6 +274,23 @@ self.addEventListener('install', (event) => {
 let isOfflineSessionActive = false;
 const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
+async function restoreOfflineDataToNewCache() {
+  try {
+    CACHE_NAME = getCacheName();
+    const cache = await caches.open(CACHE_NAME);
+    const pCache = await caches.open(OFFLINE_DATA_CACHE);
+    const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role'];
+    for (const k of keysToRestore) {
+      try {
+        const item = await pCache.match(k);
+        if (item) {
+          await cache.put(k, item.clone());
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
 // === ACTIVATE: чистим все старые версии кэша anemon-agro-* и протухшие сессии (30 дней) ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
@@ -282,6 +313,10 @@ self.addEventListener('activate', (event) => {
           }
         }
       } catch (e) {}
+
+      await restoreOfflineDataToNewCache();
+      await precacheAllRoles();
+      await restoreOfflineDataToNewCache();
     })()
   );
   self.clients.claim();
@@ -437,66 +472,158 @@ self.addEventListener('message', (event) => {
       let role = null;
       let roles = [];
       let phone = event.data.phone || null;
+      let clean = phone ? String(phone).replace(/\D/g, '') : null;
+      if (clean && clean.length === 11 && clean.startsWith('8')) {
+        clean = '7' + clean.slice(1);
+      }
 
       try {
         const cache = await caches.open(CACHE_NAME);
-        if (phone) {
-          const clean = String(phone).replace(/\D/g, '');
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+
+        if (clean) {
           const lookupRes = await lookupRoleForPhone(clean);
-          if (lookupRes && lookupRes.success) {
+          if (lookupRes && lookupRes.success && lookupRes.lastUsedRole) {
             role = lookupRes.lastUsedRole;
             roles = lookupRes.roles || [];
           }
           if (!role) {
-            const mapRes = await cache.match('/phone-role-map');
-            if (mapRes) {
-              const mapData = await mapRes.json();
-              if (mapData && mapData[clean]) {
-                const val = mapData[clean];
-                if (typeof val === 'string') {
-                  role = val;
-                  roles = [val];
-                } else if (typeof val === 'object') {
-                  roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
-                  role = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+            for (const c of [cache, pCache]) {
+              try {
+                const mapRes = await c.match('/phone-role-map');
+                if (mapRes) {
+                  const mapData = await mapRes.json();
+                  const val = mapData?.[clean] || (clean.startsWith('7') ? mapData?.['8' + clean.slice(1)] : null);
+                  if (val) {
+                    if (typeof val === 'string') {
+                      role = val;
+                      roles = [val];
+                    } else if (typeof val === 'object') {
+                      roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
+                      role = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+                    }
+                    if (role) break;
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        if (!role) {
+          for (const c of [cache, pCache]) {
+            try {
+              const sessionRes = await c.match('/offline-session');
+              if (sessionRes) {
+                const sData = await sessionRes.json();
+                if (sData && sData.role) {
+                  let sPhone = sData.phone ? String(sData.phone).replace(/\D/g, '') : null;
+                  if (sPhone && sPhone.length === 11 && sPhone.startsWith('8')) sPhone = '7' + sPhone.slice(1);
+                  if (!clean || (sPhone && sPhone === clean)) {
+                    role = sData.role;
+                    roles = [sData.role];
+                    if (!clean && sPhone) clean = sPhone;
+                    break;
+                  }
                 }
               }
-            }
+            } catch (e) {}
           }
         }
 
         if (!role) {
-          const roleRes = await cache.match('/offline-role');
-          if (roleRes) {
-            const rData = await roleRes.json();
-            if (rData && rData.role) {
-              role = rData.role;
-              roles = [rData.role];
-            }
-          }
-        }
-
-        if (!role) {
-          const sessionRes = await cache.match('/offline-session');
-          if (sessionRes) {
-            const sData = await sessionRes.clone().json();
-            if (sData) {
-              if (!role && sData.role) {
-                role = sData.role;
-                roles = [sData.role];
+          for (const c of [cache, pCache]) {
+            try {
+              const roleRes = await c.match('/offline-role');
+              if (roleRes) {
+                const rData = await roleRes.json();
+                if (rData && rData.role) {
+                  let rPhone = rData.phone ? String(rData.phone).replace(/\D/g, '') : null;
+                  if (rPhone && rPhone.length === 11 && rPhone.startsWith('8')) rPhone = '7' + rPhone.slice(1);
+                  if (!clean || (rPhone && rPhone === clean)) {
+                    role = rData.role;
+                    roles = [rData.role];
+                    break;
+                  }
+                }
               }
-              if (!phone && sData.phone) phone = sData.phone;
-            }
+            } catch (e) {}
           }
         }
       } catch (e) {}
-      return { role, roles, phone };
+      return { role, roles, phone: clean };
     })();
 
     if (event.waitUntil) event.waitUntil(promise);
     promise.then((resData) => {
       if (port) {
         try { port.postMessage({ success: true, ...resData }); } catch (e) {}
+      }
+    }).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'RESOLVE_ROLE') {
+    const promise = (async () => {
+      const phone = event.data.phone ? String(event.data.phone).replace(/\D/g, '') : null;
+      let role = null;
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+
+        if (phone) {
+          const lookup = await lookupRoleForPhone(phone);
+          if (lookup && lookup.success && lookup.lastUsedRole) {
+            role = lookup.lastUsedRole;
+          }
+          if (!role) {
+            for (const c of [cache, pCache]) {
+              try {
+                const mapRes = await c.match('/phone-role-map');
+                if (mapRes) {
+                  const pMap = await mapRes.json();
+                  if (pMap && pMap[phone]) {
+                    const item = pMap[phone];
+                    role = typeof item === 'string' ? item : (item.lastUsedRole || item.role);
+                    if (role) break;
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        if (!role) {
+          for (const c of [cache, pCache]) {
+            try {
+              const roleRes = await c.match('/offline-role');
+              if (roleRes) {
+                const rData = await roleRes.json();
+                if (rData && rData.role) { role = rData.role; break; }
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (!role) {
+          for (const c of [cache, pCache]) {
+            try {
+              const sessRes = await c.match('/offline-session');
+              if (sessRes) {
+                const sData = await sessRes.json();
+                if (sData && sData.role) { role = sData.role; break; }
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      return { success: true, role };
+    })();
+
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then((resData) => {
+      if (port) {
+        try { port.postMessage(resData); } catch (e) {}
       }
     }).catch(() => reply(false));
     return;
@@ -554,7 +681,11 @@ self.addEventListener('message', (event) => {
         const cache = await caches.open(CACHE_NAME);
         const pCache = await caches.open(OFFLINE_DATA_CACHE);
         if (event.data.role) {
-          const payload = JSON.stringify({ role: event.data.role, ts: Date.now() });
+          let phone = event.data.phone ? String(event.data.phone).replace(/\D/g, '') : null;
+          if (phone && phone.length === 11 && phone.startsWith('8')) phone = '7' + phone.slice(1);
+          const payloadObj = { role: event.data.role, ts: Date.now() };
+          if (phone) payloadObj.phone = phone;
+          const payload = JSON.stringify(payloadObj);
           await cache.put('/offline-role', new Response(payload, { headers: { 'Content-Type': 'application/json' } }));
           await pCache.put('/offline-role', new Response(payload, { headers: { 'Content-Type': 'application/json' } }));
         } else {
@@ -668,49 +799,6 @@ self.addEventListener('fetch', (event) => {
         try {
           const netRes = await fetchWithTimeout(request, 5000);
           if (netRes) {
-            const isRedirectToLogin = netRes.redirected && netRes.url.includes('/login');
-            const is3xxRedirectToLogin = (netRes.status >= 300 && netRes.status < 400);
-            const is5xx = netRes.status === 503 || netRes.status >= 500;
-
-            if (is5xx && url.pathname === '/login') {
-              console.warn(`[SW Server Error ${netRes.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
-            }
-
-            if (isRedirectToLogin || is3xxRedirectToLogin || is5xx) {
-              const activeSess = await isOfflineSession();
-              if (activeSess) {
-                const cache = await caches.open(CACHE_NAME);
-                let userRole = null;
-                try {
-                  const roleRes = await cache.match('/offline-role');
-                  if (roleRes) {
-                    const roleData = await roleRes.clone().json();
-                    if (roleData && roleData.role) userRole = roleData.role;
-                  }
-                  if (!userRole) {
-                    const sessionRes = await cache.match('/offline-session');
-                    if (sessionRes) {
-                      const sessionData = await sessionRes.clone().json();
-                      if (sessionData && sessionData.role) userRole = sessionData.role;
-                    }
-                  }
-                } catch (e) {}
-
-                let rolePath = null;
-                if (userRole === 'ADMIN') rolePath = '/admin';
-                else if (userRole === 'LEADER') rolePath = '/leader';
-                else if (userRole === 'GARDENER') rolePath = '/gardener';
-
-                if (rolePath) {
-                  const roleKey = new Request(rolePath, { method: 'GET' });
-                  const cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
-                  if (cachedRolePage) {
-                    return withOfflineHeader(cachedRolePage);
-                  }
-                }
-              }
-            }
-
             if (netRes.redirected || (netRes.status >= 300 && netRes.status < 400)) {
               return netRes;
             }

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, filterOrdersForOffline } from '@/lib/offlineStore';
+import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -528,17 +528,28 @@ export default function GardenerDashboard() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const offlineSess = localStorage.getItem('offline_session') === '1';
-      const role = localStorage.getItem('auth_role');
-      if (!role) {
-        window.location.assign('/login');
-        return;
-      }
-      if (role !== 'GARDENER') {
-        const correctPath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/login';
-        window.location.assign(correctPath);
-        return;
-      }
+      const initRoleCheck = async () => {
+        let role = localStorage.getItem('auth_role');
+        if (!role) {
+          role = await resolveOfflineRoleFromCaches();
+        }
+
+        if (role) {
+          activateOfflineSession(role, localStorage.getItem('auth_phone'));
+        }
+
+        if (!role) {
+          if (navigator.onLine) window.location.assign('/login');
+          return;
+        }
+        if (role !== 'GARDENER') {
+          const correctPath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/login';
+          window.location.assign(correctPath);
+          return;
+        }
+      };
+
+      initRoleCheck();
 
       if (offlineSess) {
         localStorage.setItem('offline_session_ts', String(Date.now()));

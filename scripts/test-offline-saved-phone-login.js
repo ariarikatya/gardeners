@@ -265,12 +265,12 @@ async function runOfflineSavedPhoneLoginTest() {
     const mapStr = mockLocalStorage.getItem('phone_roles_map');
     const map = mapStr ? JSON.parse(mapStr) : {};
     if (!map[clean]) {
-      errorState = 'Нет интернета, и этот номер ещё не входил на этом устройстве. Подключитесь к сети для первого входа.';
+      errorState = 'Нет сети и этот номер ещё не сохранялся на этом устройстве';
     }
   };
 
   await testUnknownPhoneOffline('79990000000');
-  assert(errorState.includes('Нет интернета, и этот номер ещё не входил на этом устройстве'), 'Unknown phone offline must display text error message');
+  assert(errorState.includes('Нет сети и этот номер ещё не сохранялся'), 'Unknown phone offline must display text error message');
   console.log('✅ Assertion 8 Passed: Unknown phone offline returns text error message without role selection modal.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN & LOGOUT TESTS PASSED SUCCESSFULLY!');

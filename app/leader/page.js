@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
-import { saveCache, getCache } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
@@ -172,17 +172,28 @@ export default function LeaderDashboard() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const offlineSess = localStorage.getItem('offline_session') === '1';
-    const role = localStorage.getItem('auth_role');
-    if (!role) {
-      window.location.assign('/login');
-      return;
-    }
-    if (role !== 'LEADER') {
-      const correctPath = role === 'ADMIN' ? '/admin' : role === 'GARDENER' ? '/gardener' : '/login';
-      window.location.assign(correctPath);
-      return;
-    }
+    const initRoleCheck = async () => {
+      let role = localStorage.getItem('auth_role');
+      if (!role) {
+        role = await resolveOfflineRoleFromCaches();
+      }
+
+      if (role) {
+        activateOfflineSession(role, localStorage.getItem('auth_phone'));
+      }
+
+      if (!role) {
+        if (navigator.onLine) window.location.assign('/login');
+        return;
+      }
+      if (role !== 'LEADER') {
+        const correctPath = role === 'ADMIN' ? '/admin' : role === 'GARDENER' ? '/gardener' : '/login';
+        window.location.assign(correctPath);
+        return;
+      }
+    };
+
+    initRoleCheck();
 
     if (offlineSess) {
       localStorage.setItem('offline_session_ts', String(Date.now()));
