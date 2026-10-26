@@ -983,13 +983,18 @@ self.addEventListener('fetch', (event) => {
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
 
-          // A1: При активной офлайн-сессии или если по номеру/сессии определена роль — ВСЕГДА отдавать закэшированную страницу роли БЕЗ проверки getPageCacheAge
+          // A1: При активной офлайн-сессии или если по номеру/сессии определена роль — ВСЕГДА отдавать закэшированную страницу роли
           if (activeSession || rolePath) {
             if (rolePath) {
               const roleKey = new Request(rolePath, { method: 'GET' });
               let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey)) || await normalizeCachedResponse(await pCache.match(roleKey));
               if (cachedRolePage) {
-                return withOfflineHeader(cachedRolePage);
+                const cacheAge = await getPageCacheAge(rolePath);
+                const extraHeaders = {};
+                if (cacheAge > MAX_AGE_24H) {
+                  extraHeaders['X-Offline-Stale'] = '1';
+                }
+                return withOfflineHeader(cachedRolePage, extraHeaders);
               }
             }
           }

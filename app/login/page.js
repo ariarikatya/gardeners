@@ -2,7 +2,17 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
-import { activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
+import {
+  activateOfflineSession,
+  resolveOfflineRoleFromCaches,
+  getPhoneVariants,
+  normalizeCleanPhone,
+  savePhoneRoleMap,
+  recordIdentityToSw,
+  notifySwOfflinePhone,
+  notifySwOfflineSession,
+  syncUsersToPhoneRoleMap,
+} from '@/lib/offlineStore';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -12,19 +22,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-
-  const getPhoneVariants = (phoneNum) => {
-    if (!phoneNum) return [];
-    const raw = String(phoneNum).trim();
-    const digits = raw.replace(/\D/g, '');
-    if (!digits) return [];
-
-    const tail10 = digits.length >= 10 ? digits.slice(-10) : digits;
-    const clean7 = tail10 ? '7' + tail10 : '';
-    const clean8 = tail10 ? '8' + tail10 : '';
-
-    return Array.from(new Set([tail10, clean7, clean8, digits, raw, clean7 ? '+' + clean7 : ''].filter(Boolean)));
-  };
 
   const getRoleForPhone = (phoneNum) => {
     if (!phoneNum || typeof window === 'undefined') return null;
@@ -47,38 +44,6 @@ export default function LoginPage() {
     } catch (e) {
       return null;
     }
-  };
-
-  const normalizeCleanPhone = (phoneNum) => {
-    const variants = getPhoneVariants(phoneNum);
-    return variants[0] || '';
-  };
-
-  const savePhoneRoleMap = (phoneNum, role, name = null) => {
-    if (!phoneNum || !role || typeof window === 'undefined') return;
-    const variants = getPhoneVariants(phoneNum);
-    if (variants.length === 0) return;
-    try {
-      const mapStr = localStorage.getItem('phone_roles_map');
-      const map = mapStr ? JSON.parse(mapStr) : {};
-
-      for (const k of variants) {
-        const existing = map[k] || {};
-        const existingObj = typeof existing === 'object' && existing !== null ? existing : {};
-        const existingName = existingObj.name || null;
-        const roles = Array.isArray(existingObj.roles) ? [...existingObj.roles] : (existingObj.role ? [existingObj.role] : (typeof existing === 'string' ? [existing] : []));
-        if (!roles.includes(role)) roles.push(role);
-
-        map[k] = {
-          role,
-          roles,
-          lastUsedRole: role,
-          name: name || existingName || null
-        };
-      }
-
-      localStorage.setItem('phone_roles_map', JSON.stringify(map));
-    } catch (e) {}
   };
 
   const triggerSwPrecacheRoles = () => {
@@ -141,71 +106,6 @@ export default function LoginPage() {
     }
   };
 
-  const recordIdentityToSw = (phoneNum, role, name = null) => {
-    if (typeof window === 'undefined' || !phoneNum || !role) return;
-    const cleanPhone = normalizeCleanPhone(phoneNum);
-    if (!cleanPhone || !('serviceWorker' in navigator)) return;
-
-    if (navigator.serviceWorker.controller) {
-      try {
-        navigator.serviceWorker.controller.postMessage({ type: 'RECORD_IDENTITY', phone: cleanPhone, role, name });
-      } catch (e) {}
-    } else {
-      navigator.serviceWorker.ready.then((reg) => {
-        if (reg && reg.active) {
-          try { reg.active.postMessage({ type: 'RECORD_IDENTITY', phone: cleanPhone, role, name }); } catch (e) {}
-        }
-      }).catch(() => {});
-    }
-  };
-
-  const notifySwOfflinePhone = (phoneNum) => {
-    if (typeof window === 'undefined' || !phoneNum) return;
-    const cleanPhone = normalizeCleanPhone(phoneNum);
-    if (!cleanPhone || !('serviceWorker' in navigator)) return;
-
-    if (navigator.serviceWorker.controller) {
-      try {
-        navigator.serviceWorker.controller.postMessage({ type: 'SET_OFFLINE_PHONE', phone: cleanPhone });
-      } catch (e) {}
-    } else {
-      navigator.serviceWorker.ready.then((reg) => {
-        if (reg && reg.active) {
-          try { reg.active.postMessage({ type: 'SET_OFFLINE_PHONE', phone: cleanPhone }); } catch (e) {}
-        }
-      }).catch(() => {});
-    }
-  };
-
-  const notifySwOfflineSession = async (active, roleOverride = null) => {
-    if (typeof window !== 'undefined') {
-      const role = roleOverride || localStorage.getItem('auth_role');
-      const storedPhone = localStorage.getItem('auth_phone');
-      if (active) {
-        localStorage.setItem('offline_session', '1');
-        localStorage.setItem('offline_session_ts', String(Date.now()));
-      } else {
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
-      }
-
-      if ('serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const targetSw = reg.active || navigator.serviceWorker.controller;
-          if (targetSw) {
-            await postSwMessageWithReply(targetSw, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, phone: storedPhone || null, ts: Date.now() }, 2500);
-            await postSwMessageWithReply(targetSw, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null, phone: storedPhone || null }, 2500);
-          }
-        } catch (e) {
-          if (navigator.serviceWorker.controller) {
-            await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_SESSION', active: Boolean(active), role: role || null, phone: storedPhone || null, ts: Date.now() }, 2500);
-            await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'OFFLINE_ROLE', role: active ? (role || null) : null, phone: storedPhone || null }, 2500);
-          }
-        }
-      }
-    }
-  };
 
   const redirectByRole = async (role, isOffline = false, targetPhone = null) => {
     if (!role) return;
@@ -353,12 +253,7 @@ export default function LoginPage() {
       if (res.ok) {
         const data = await res.json();
         const userList = Array.isArray(data) ? data : (Array.isArray(data?.users) ? data.users : []);
-        for (const u of userList) {
-          if (u && u.phone && u.role) {
-            savePhoneRoleMap(u.phone, u.role, u.name || null);
-            recordIdentityToSw(u.phone, u.role, u.name || null);
-          }
-        }
+        syncUsersToPhoneRoleMap(userList);
       }
     } catch (e) {}
   };
@@ -433,25 +328,6 @@ export default function LoginPage() {
       if (saved) {
         setSavedPhone(saved);
         setIsSavedPhoneMode(true);
-      }
-
-      const isOffline = typeof window !== 'undefined' && !navigator.onLine;
-
-      if (isOffline) {
-        (async () => {
-          if ('serviceWorker' in navigator) {
-            try {
-              await Promise.race([
-                navigator.serviceWorker.ready,
-                new Promise((resolve) => setTimeout(resolve, 1500)),
-              ]);
-            } catch (e) {}
-          }
-          const resolved = await resolveOfflineRoleFromCaches(saved || role);
-          if (resolved) {
-            await redirectByRole(resolved, true, saved);
-          }
-        })();
       }
 
       syncPhoneRoleMapToSw();
