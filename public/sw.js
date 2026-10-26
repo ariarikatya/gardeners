@@ -571,11 +571,12 @@ self.addEventListener('message', (event) => {
 
   if (event.data.type === 'RESOLVE_ROLE') {
     const promise = (async () => {
-      const phone = event.data.phone ? String(event.data.phone).replace(/\D/g, '') : null;
+      const rawPhone = event.data.phone ? String(event.data.phone).trim() : null;
+      const phone = rawPhone ? rawPhone.replace(/\D/g, '') : null;
       let role = null;
       try {
-        if (phone) {
-          const lookup = await lookupRoleForPhone(phone);
+        if (phone || rawPhone) {
+          const lookup = await lookupRoleForPhone(phone || rawPhone);
           if (lookup && lookup.success && lookup.lastUsedRole) {
             role = lookup.lastUsedRole;
           }
@@ -590,7 +591,16 @@ self.addEventListener('message', (event) => {
               const roleRes = await c.match('/offline-role');
               if (roleRes) {
                 const rData = await roleRes.json();
-                if (rData && rData.role) { role = rData.role; break; }
+                if (rData && rData.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(rData.role)) {
+                  let rPhone = rData.phone ? String(rData.phone).replace(/\D/g, '') : null;
+                  let rClean7 = rPhone && rPhone.length === 11 && rPhone.startsWith('8') ? '7' + rPhone.slice(1) : rPhone;
+                  let rClean8 = rPhone && rPhone.length === 11 && rPhone.startsWith('7') ? '8' + rPhone.slice(1) : rPhone;
+                  if (!phone) {
+                    role = rData.role; break;
+                  } else if (rPhone && (phone === rPhone || phone === rClean7 || phone === rClean8)) {
+                    role = rData.role; break;
+                  }
+                }
               }
             } catch (e) {}
           }
@@ -605,7 +615,16 @@ self.addEventListener('message', (event) => {
               const sessRes = await c.match('/offline-session');
               if (sessRes) {
                 const sData = await sessRes.json();
-                if (sData && sData.role) { role = sData.role; break; }
+                if (sData && sData.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(sData.role)) {
+                  let sPhone = sData.phone ? String(sData.phone).replace(/\D/g, '') : null;
+                  let sClean7 = sPhone && sPhone.length === 11 && sPhone.startsWith('8') ? '7' + sPhone.slice(1) : sPhone;
+                  let sClean8 = sPhone && sPhone.length === 11 && sPhone.startsWith('7') ? '8' + sPhone.slice(1) : sPhone;
+                  if (!phone) {
+                    role = sData.role; break;
+                  } else if (sPhone && (phone === sPhone || phone === sClean7 || phone === sClean8)) {
+                    role = sData.role; break;
+                  }
+                }
               }
             } catch (e) {}
           }
