@@ -288,7 +288,13 @@ export default function LeaderDashboard() {
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
-      const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      let storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      if (!storedRole) {
+        storedRole = await resolveOfflineRoleFromCaches(typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null);
+        if (storedRole) {
+          activateOfflineSession(storedRole, localStorage.getItem('auth_phone'));
+        }
+      }
       if (!storedRole) {
         window.location.assign('/login');
         return;

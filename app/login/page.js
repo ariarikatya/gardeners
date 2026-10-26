@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
-import { activateOfflineSession } from '@/lib/offlineStore';
+import { activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
@@ -13,56 +13,68 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  const getPhoneVariants = (phoneNum) => {
+    if (!phoneNum) return [];
+    const raw = String(phoneNum).trim();
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return [];
+
+    const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
+    const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
+
+    return Array.from(new Set([clean7, clean8, digits, raw, '+' + clean7]));
+  };
+
   const normalizeCleanPhone = (phoneNum) => {
-    if (!phoneNum) return '';
-    let clean = String(phoneNum).replace(/\D/g, '');
-    if (clean.length === 11 && clean.startsWith('8')) {
-      clean = '7' + clean.slice(1);
-    }
-    return clean;
+    const variants = getPhoneVariants(phoneNum);
+    return variants[0] || '';
   };
 
   const savePhoneRoleMap = (phoneNum, role, name = null) => {
     if (!phoneNum || !role || typeof window === 'undefined') return;
-    const clean = normalizeCleanPhone(phoneNum);
-    if (!clean) return;
+    const variants = getPhoneVariants(phoneNum);
+    if (variants.length === 0) return;
     try {
       const mapStr = localStorage.getItem('phone_roles_map');
       const map = mapStr ? JSON.parse(mapStr) : {};
-      const existing = map[clean] || (clean.startsWith('7') ? map['8' + clean.slice(1)] : null);
-      const existingObj = typeof existing === 'object' && existing !== null ? existing : {};
-      const existingName = existingObj.name || null;
-      const roles = Array.isArray(existingObj.roles) ? [...existingObj.roles] : (existingObj.role ? [existingObj.role] : (typeof existing === 'string' ? [existing] : []));
-      if (!roles.includes(role)) roles.push(role);
 
-      map[clean] = {
-        role,
-        roles,
-        lastUsedRole: role,
-        name: name || existingName || null
-      };
+      for (const k of variants) {
+        const existing = map[k] || {};
+        const existingObj = typeof existing === 'object' && existing !== null ? existing : {};
+        const existingName = existingObj.name || null;
+        const roles = Array.isArray(existingObj.roles) ? [...existingObj.roles] : (existingObj.role ? [existingObj.role] : (typeof existing === 'string' ? [existing] : []));
+        if (!roles.includes(role)) roles.push(role);
+
+        map[k] = {
+          role,
+          roles,
+          lastUsedRole: role,
+          name: name || existingName || null
+        };
+      }
+
       localStorage.setItem('phone_roles_map', JSON.stringify(map));
     } catch (e) {}
   };
 
   const getRoleForPhone = (phoneNum) => {
     if (!phoneNum || typeof window === 'undefined') return null;
-    const clean = normalizeCleanPhone(phoneNum);
-    if (!clean) return null;
+    const variants = getPhoneVariants(phoneNum);
+    if (variants.length === 0) return null;
     try {
       const mapStr = localStorage.getItem('phone_roles_map');
       if (!mapStr) return null;
       const map = JSON.parse(mapStr);
-      let val = map[clean];
-      if (!val && clean.startsWith('7')) {
-        val = map['8' + clean.slice(1)];
-      }
-      if (!val) return null;
-      if (typeof val === 'string') return { role: val, roles: [val], lastUsedRole: val };
-      if (typeof val === 'object' && val) {
-        const roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
-        const lastUsedRole = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
-        return { role: lastUsedRole, roles, lastUsedRole, name: val.name || null };
+
+      for (const k of variants) {
+        const val = map[k];
+        if (!val) continue;
+        if (typeof val === 'string') return { role: val, roles: [val], lastUsedRole: val };
+        if (typeof val === 'object' && val) {
+          const roles = Array.isArray(val.roles) ? val.roles : (val.role ? [val.role] : []);
+          const lastUsedRole = val.lastUsedRole || val.role || (roles.length > 0 ? roles[roles.length - 1] : null);
+          return { role: lastUsedRole, roles, lastUsedRole, name: val.name || null };
+        }
       }
       return null;
     } catch (e) {
@@ -107,30 +119,59 @@ export default function LoginPage() {
     });
   };
 
-  const readSwCacheDirect = async (cleanPhone) => {
-    if (!cleanPhone || typeof window === 'undefined' || !('caches' in window)) return null;
-    try {
-      const pCache = await caches.open('anemon-agro-offline-data');
-      if (pCache) {
-        const idRes = await pCache.match('/offline-identities');
-        if (idRes) {
-          const idMap = await idRes.clone().json();
-          const item = idMap?.[cleanPhone] || (cleanPhone.startsWith('7') ? idMap?.['8' + cleanPhone.slice(1)] : null);
-          if (item) {
-            const r = item.lastUsedRole || item.role || (Array.isArray(item.roles) ? item.roles[item.roles.length - 1] : null);
-            if (r) return r;
-          }
-        }
+  const readSwCacheDirect = async (phoneNum) => {
+    if (!phoneNum || typeof window === 'undefined' || !('caches' in window)) return null;
+    const variants = getPhoneVariants(phoneNum);
+    if (variants.length === 0) return null;
 
-        const mapRes = await pCache.match('/phone-role-map');
-        if (mapRes) {
-          const pMap = await mapRes.clone().json();
-          const item = pMap?.[cleanPhone] || (cleanPhone.startsWith('7') ? pMap?.['8' + cleanPhone.slice(1)] : null);
-          if (item) {
-            const r = typeof item === 'string' ? item : (item.lastUsedRole || item.role);
-            if (r) return r;
+    try {
+      const cacheNames = ['anemon-agro-offline-data'];
+      const keys = await caches.keys();
+      for (const k of keys) {
+        if (!cacheNames.includes(k)) cacheNames.push(k);
+      }
+
+      for (const cacheName of cacheNames) {
+        try {
+          const cache = await caches.open(cacheName);
+
+          const idRes = await cache.match('/offline-identities');
+          if (idRes) {
+            const idMap = await idRes.clone().json();
+            for (const k of variants) {
+              const item = idMap?.[k];
+              if (item) {
+                const r = item.lastUsedRole || item.role || (Array.isArray(item.roles) ? item.roles[item.roles.length - 1] : null);
+                if (r) return r;
+              }
+            }
           }
-        }
+
+          const mapRes = await cache.match('/phone-role-map');
+          if (mapRes) {
+            const pMap = await mapRes.clone().json();
+            for (const k of variants) {
+              const item = pMap?.[k];
+              if (item) {
+                const r = typeof item === 'string' ? item : (item.lastUsedRole || item.role);
+                if (r) return r;
+              }
+            }
+          }
+
+          const usersRes = await cache.match('/api/public/offline-users');
+          if (usersRes) {
+            const usersData = await usersRes.clone().json();
+            const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
+            for (const u of userList) {
+              const uDigits = String(u.phone || '').replace(/\D/g, '');
+              const uVariants = getPhoneVariants(u.phone || uDigits);
+              if (variants.some(v => uVariants.includes(v) || v === uDigits)) {
+                if (u.role) return u.role;
+              }
+            }
+          }
+        } catch (e) {}
       }
     } catch (e) {}
     return null;
@@ -195,18 +236,19 @@ export default function LoginPage() {
     }
   };
 
-  const querySwOfflineRole = async (cleanPhone = null) => {
+  const querySwOfflineRole = async (phoneNum = null) => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
+    const cleanPhone = normalizeCleanPhone(phoneNum);
     try {
       const reg = await navigator.serviceWorker.ready;
       const targetSw = reg.active || navigator.serviceWorker.controller;
       if (targetSw) {
-        const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone });
+        const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone }, 800);
         return reply?.role || null;
       }
     } catch (e) {
       if (navigator.serviceWorker.controller) {
-        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone });
+        const reply = await postSwMessageWithReply(navigator.serviceWorker.controller, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone }, 800);
         return reply?.role || null;
       }
     }
@@ -269,15 +311,15 @@ export default function LoginPage() {
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       const storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
-      const cleanPhone = normalizeCleanPhone(rawInputPhone);
-      const cleanStoredPhone = normalizeCleanPhone(storedPhone);
+      const phoneVariants = getPhoneVariants(rawInputPhone);
+      const cleanPhone = phoneVariants[0] || '';
 
       let resolvedRole = null;
       let nameVal = null;
 
-      // 1) Synchronous lookup in localStorage.phone_roles_map by cleanPhone
-      if (cleanPhone) {
-        const localMapData = getRoleForPhone(cleanPhone);
+      // 1) Synchronous lookup in localStorage.phone_roles_map
+      if (rawInputPhone) {
+        const localMapData = getRoleForPhone(rawInputPhone);
         if (localMapData) {
           resolvedRole = localMapData.lastUsedRole || localMapData.role || null;
           nameVal = localMapData.name || null;
@@ -286,23 +328,20 @@ export default function LoginPage() {
 
       // 2) Fallback to storedRole/storedPhone if phone matches or confirming saved phone
       if (!resolvedRole && storedRole) {
-        if (
-          (cleanPhone && cleanPhone === cleanStoredPhone) ||
-          targetPhone === savedPhone ||
-          isSavedPhoneMode ||
-          !cleanPhone
-        ) {
+        const storedVariants = getPhoneVariants(storedPhone);
+        const matchesStored = phoneVariants.some(v => storedVariants.includes(v));
+        if (matchesStored || targetPhone === savedPhone || isSavedPhoneMode || !rawInputPhone) {
           resolvedRole = storedRole;
         }
       }
 
       // 3) Single SW query with 800ms max timeout
-      if (!resolvedRole && cleanPhone && 'serviceWorker' in navigator) {
+      if (!resolvedRole && rawInputPhone && 'serviceWorker' in navigator) {
         try {
           const reg = await navigator.serviceWorker.ready;
           const targetSw = reg.active || navigator.serviceWorker.controller;
           if (targetSw) {
-            const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone }, 800);
+            const reply = await postSwMessageWithReply(targetSw, { type: 'GET_OFFLINE_ROLE', phone: cleanPhone || rawInputPhone }, 800);
             if (reply?.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(reply.role)) {
               resolvedRole = reply.role;
             }
@@ -310,16 +349,24 @@ export default function LoginPage() {
         } catch (e) {}
       }
 
-      // 4) Direct SW cache inspection for /offline-identities or /phone-role-map
-      if (!resolvedRole && cleanPhone) {
-        const directRole = await readSwCacheDirect(cleanPhone);
+      // 4) Direct SW cache inspection for /offline-identities, /phone-role-map, /api/public/offline-users
+      if (!resolvedRole && rawInputPhone) {
+        const directRole = await readSwCacheDirect(rawInputPhone);
         if (directRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(directRole)) {
           resolvedRole = directRole;
         }
       }
 
+      // 5) Global resolveOfflineRoleFromCaches fallback
+      if (!resolvedRole && rawInputPhone) {
+        const fallbackRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+        if (fallbackRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(fallbackRole)) {
+          resolvedRole = fallbackRole;
+        }
+      }
+
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
-        const phoneToUse = cleanPhone || cleanStoredPhone || '';
+        const phoneToUse = cleanPhone || storedPhone || rawInputPhone;
         if (typeof window !== 'undefined') {
           localStorage.setItem('auth_role', resolvedRole);
           if (phoneToUse) {
@@ -390,7 +437,7 @@ export default function LoginPage() {
         throw clientErr;
       }
 
-      const cleanPhone = String(phoneToUse).replace(/\D/g, '');
+      const cleanPhone = normalizeCleanPhone(phoneToUse);
       if (cleanPhone) {
         localStorage.setItem('auth_phone', cleanPhone);
         await notifySwOfflinePhone(cleanPhone);
@@ -419,9 +466,34 @@ export default function LoginPage() {
   const handleAutoLogin = () => handleAutoLoginWithPhone(savedPhone);
 
   useEffect(() => {
-    const updateOnlineStatus = () => {
+    const handleOnlineCheck = async () => {
       const online = typeof window !== 'undefined' ? navigator.onLine : true;
       setIsOnline(online);
+
+      if (!online) return;
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch('/api/version', { signal: controller.signal });
+        clearTimeout(timer);
+
+        if (res.status === 401) {
+          localStorage.removeItem('offline_session');
+          localStorage.removeItem('offline_session_ts');
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_role');
+          notifySwOfflineSession(false, null);
+        } else if (res.ok) {
+          triggerSwPrecacheRoles();
+        }
+      } catch (err) {
+        // Network error / timeout: assume offline / server issue, preserve session
+      }
+    };
+
+    const updateOnlineStatus = () => {
+      handleOnlineCheck();
     };
 
     updateOnlineStatus();
@@ -486,11 +558,11 @@ export default function LoginPage() {
       sessionStorage.removeItem('manual_logout');
     }
 
-    const cleanPhone = phone.replace(/\D/g, '');
+    const cleanPhone = normalizeCleanPhone(phone);
     const isNetworkOffline = typeof window !== 'undefined' && !navigator.onLine;
 
     if (isNetworkOffline) {
-      await handleOfflineLogin(cleanPhone);
+      await handleOfflineLogin(cleanPhone || phone);
       return;
     }
 
@@ -506,7 +578,7 @@ export default function LoginPage() {
 
       if (res.status === 503 || res.status >= 500) {
         console.warn('[Login Error 5xx]', res.status, 'CLIENT_VERSION:', CLIENT_VERSION);
-        await handleOfflineLogin(cleanPhone);
+        await handleOfflineLogin(cleanPhone || phone);
         return;
       }
 
@@ -514,7 +586,7 @@ export default function LoginPage() {
       try {
         data = await res.json();
       } catch (jsonErr) {
-        await handleOfflineLogin(cleanPhone);
+        await handleOfflineLogin(cleanPhone || phone);
         return;
       }
 
@@ -541,7 +613,7 @@ export default function LoginPage() {
       if (err && err.isClientError) {
         setError(err.message || 'Ошибка при входе');
       } else {
-        await handleOfflineLogin(cleanPhone);
+        await handleOfflineLogin(cleanPhone || phone);
       }
     } finally {
       setLoading(false);
@@ -551,7 +623,6 @@ export default function LoginPage() {
   const formattedSavedPhone = savedPhone ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : '';
   const savedRoleData = savedPhone ? getRoleForPhone(savedPhone) : null;
   const savedRole = (typeof savedRoleData === 'object' && savedRoleData ? savedRoleData.lastUsedRole || savedRoleData.role : savedRoleData) || (typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null);
-  const roleLabel = savedRole === 'ADMIN' ? 'Администратор' : savedRole === 'LEADER' ? 'Владелец' : savedRole === 'GARDENER' ? 'Садовник' : null;
 
   const isOfflineNow = !isOnline || (typeof window !== 'undefined' && !navigator.onLine);
 
