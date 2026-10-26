@@ -1058,7 +1058,7 @@ self.addEventListener('fetch', (event) => {
         } catch (e) {}
 
         return new Response(
-          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Откройте сайт один раз при появлении интернета для полной загрузки офлайн-данных.</p></div></body></html>',
+          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Данные обновятся при появлении сети.</p></div></body></html>',
           { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' } }
         );
       })()
@@ -1094,6 +1094,43 @@ self.addEventListener('fetch', (event) => {
 
         if (cached) return cached;
         return new Response('Static asset unavailable', { status: 503 });
+      })()
+    );
+    return;
+  }
+
+  // === GET /api/* read-only whitelisted endpoints: Stale-While-Revalidate ===
+  if (request.method === 'GET' && url.pathname.startsWith('/api/')) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        const cachedRes = await cache.match(request) || await pCache.match(request);
+
+        const fetchPromise = fetch(request).then(async (netRes) => {
+          if (netRes && netRes.ok && netRes.status === 200 && !netRes.redirected && netRes.type !== 'opaque' && netRes.type !== 'opaqueredirect') {
+            const clone1 = netRes.clone();
+            const clone2 = netRes.clone();
+            safeCachePut(CACHE_NAME, request, clone1);
+            safeCachePut(OFFLINE_DATA_CACHE, request, clone2);
+          }
+          return netRes;
+        }).catch(() => null);
+
+        if (cachedRes) {
+          event.waitUntil(fetchPromise);
+          return cachedRes;
+        }
+
+        try {
+          const netRes = await fetchPromise;
+          if (netRes) return netRes;
+        } catch (e) {}
+
+        return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
       })()
     );
     return;

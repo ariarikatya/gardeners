@@ -19,14 +19,7 @@ async function runOfflineLoginRolesTest() {
 
   // Assertion 2: handleOfflineLogin sets neutral single-line error or proceeds
   assert(
-    pageCode.includes("Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.") ||
-    pageCode.includes("Данные для этого номера ещё не сохранены. Откройте сайт один раз с интернетом.") ||
-    pageCode.includes("Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.") ||
-    pageCode.includes("Нет сети. Откройте сайт с интернетом, чтобы скачать данные.") ||
-    pageCode.includes("Нет сети. Этот номер ещё не открывался на этом устройстве с интернетом — откройте сайт при появлении сети один раз.") ||
-    pageCode.includes("Нет сети и этот номер ещё не сохранялся на этом устройстве") ||
-    pageCode.includes("Чтобы войти офлайн, сначала один раз войдите с интернетом") ||
-    pageCode.includes("Нет интернета, и этот номер ещё не входил на этом устройстве"),
+    pageCode.includes("Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города."),
     'app/login/page.js must set neutral error message for unrecorded phone'
   );
   console.log('✅ Assertion 2 Passed: 1-line neutral error for unrecorded phone present.');
