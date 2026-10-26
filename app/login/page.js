@@ -124,6 +124,8 @@ export default function LoginPage() {
   };
 
   const handleOfflineLogin = async (targetPhone = null) => {
+    if (loading) return;
+    setLoading(true);
     try {
       setError('');
       if (typeof window !== 'undefined') {
@@ -170,6 +172,8 @@ export default function LoginPage() {
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
       setError('Номер не найден в сохранённых данных. Проверьте, что вводите телефон полностью, включая код страны/города.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -227,7 +231,7 @@ export default function LoginPage() {
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
         if (cleanPhone) {
-          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
+          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null, 'login');
           await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
         }
       }
@@ -399,7 +403,7 @@ export default function LoginPage() {
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
         if (cleanPhone) {
-          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null);
+          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null, 'login');
           await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
           await syncPhoneRoleMapToSw();
         }

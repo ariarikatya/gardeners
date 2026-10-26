@@ -488,6 +488,12 @@ async function isOfflineSession() {
     if (sessionRes) {
       const data = await sessionRes.clone().json();
       if (data && data.active) {
+        const isOnline = typeof self !== 'undefined' && self.navigator && self.navigator.onLine;
+        const ts = data.ts || 0;
+        const sessionAge = Date.now() - ts;
+        if (sessionAge > MAX_AGE_30D && isOnline) {
+          return false;
+        }
         isOfflineSessionActive = true;
         return true;
       }
@@ -999,14 +1005,16 @@ self.addEventListener('fetch', (event) => {
             }
           }
 
-          // Запрошенный конкретный путь если роль не определена или роли в кэше нет: проверяем свежесть кэша
+          // Запрошенный конкретный путь если роль не определена или роли в кэше нет
           const directKey = new Request(url.pathname, { method: 'GET' });
           let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
           if (cachedDirect) {
             const cacheAge = await getPageCacheAge(url.pathname);
-            if (cacheAge <= MAX_AGE_24H) {
-              return withOfflineHeader(cachedDirect);
+            const extraHeaders = {};
+            if (cacheAge > MAX_AGE_24H) {
+              extraHeaders['X-Offline-Stale'] = '1';
             }
+            return withOfflineHeader(cachedDirect, extraHeaders);
           }
 
           // Если роль вообще нигде не найдена — остаёмся на /login
@@ -1048,7 +1056,8 @@ self.addEventListener('fetch', (event) => {
             console.warn(`[SW Server Error ${res.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
           }
           if (res && res.ok && res.status === 200 && !res.redirected) {
-            safeCachePut(CACHE_NAME, request, res);
+            safeCachePut(CACHE_NAME, request, res.clone());
+            safeCachePut(OFFLINE_DATA_CACHE, request, res.clone());
           }
           return res;
         }).catch(() => null);
