@@ -224,9 +224,45 @@ function withOfflineHeader(response, extraHeaders = {}) {
   }
 }
 
+async function restoreOfflineDataToNewCache() {
+  CACHE_NAME = getCacheName();
+  const cache = await caches.open(CACHE_NAME);
+  const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
+
+  const allCacheKeys = await caches.keys();
+  for (const k of keysToRestore) {
+    try {
+      let matchedRes = null;
+      try {
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        matchedRes = await pCache.match(k);
+      } catch (e) {}
+
+      if (!matchedRes) {
+        for (const cName of allCacheKeys) {
+          try {
+            const oldC = await caches.open(cName);
+            matchedRes = await oldC.match(k);
+            if (matchedRes) break;
+          } catch (e) {}
+        }
+      }
+
+      if (matchedRes) {
+        await cache.put(k, matchedRes.clone());
+        try {
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          await pCache.put(k, matchedRes.clone());
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+}
+
 async function deleteOldCaches() {
   try {
     CACHE_NAME = getCacheName();
+    await restoreOfflineDataToNewCache();
     const keys = await caches.keys();
     await Promise.all(
       keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
@@ -375,51 +411,44 @@ self.addEventListener('install', (event) => {
 });
 
 let isOfflineSessionActive = false;
-const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
 
-async function restoreOfflineDataToNewCache() {
-  try {
-    CACHE_NAME = getCacheName();
-    const cache = await caches.open(CACHE_NAME);
-    const pCache = await caches.open(OFFLINE_DATA_CACHE);
-    const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
-    for (const k of keysToRestore) {
-      try {
-        const item = await pCache.match(k);
-        if (item) {
-          await cache.put(k, item.clone());
-        }
-      } catch (e) {}
-    }
-  } catch (e) {}
-}
-
-// === ACTIVATE: чистим все старые версии кэша anemon-agro-* и протухшие сессии (30 дней) ===
+// === ACTIVATE: чистим все старые версии кэша anemon-agro-* ===
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       CACHE_NAME = getCacheName();
-      const keys = await caches.keys();
-      await Promise.all(
-        keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
-      );
+
+      let restoredOk = false;
+      try {
+        await restoreOfflineDataToNewCache();
+        restoredOk = true;
+      } catch (e) {
+        restoredOk = false;
+      }
+
+      await precacheAllRoles();
+
+      try {
+        await restoreOfflineDataToNewCache();
+      } catch (e) {}
+
+      if (restoredOk) {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
+        );
+      }
+
       try {
         const cache = await caches.open(CACHE_NAME);
         const sessionRes = await cache.match('/offline-session');
         if (sessionRes) {
           const data = await sessionRes.json();
-          if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_30D)) {
-            await cache.delete('/offline-session');
-            isOfflineSessionActive = false;
-          } else if (data && data.active) {
+          if (data && data.active) {
             isOfflineSessionActive = true;
           }
         }
       } catch (e) {}
-
-      await restoreOfflineDataToNewCache();
-      await precacheAllRoles();
-      await restoreOfflineDataToNewCache();
     })()
   );
   self.clients.claim();
@@ -436,13 +465,10 @@ async function isOfflineSession() {
     }
     if (sessionRes) {
       const data = await sessionRes.clone().json();
-      if (data && data.ts && (Date.now() - data.ts >= MAX_AGE_30D)) {
-        await cache.delete('/offline-session');
-        isOfflineSessionActive = false;
-        return false;
+      if (data && data.active) {
+        isOfflineSessionActive = true;
+        return true;
       }
-      isOfflineSessionActive = true;
-      return true;
     }
   } catch (e) {}
   return false;
@@ -877,28 +903,28 @@ self.addEventListener('fetch', (event) => {
         // Кэш-фоллбэки ТОЛЬКО при сбое сети (оффлайн):
         try {
           const cache = await caches.open(CACHE_NAME);
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
 
-          // Priority 1: Если запрошенный маршрут напрямую есть в кэше — отдавать ЕГО
-          const directKey = new Request(url.pathname, { method: 'GET' });
-          let cachedDirect = await normalizeCachedResponse(await cache.match(directKey));
-          if (!cachedDirect) {
-            const pCache = await caches.open(OFFLINE_DATA_CACHE);
-            cachedDirect = await normalizeCachedResponse(await pCache.match(directKey));
-          }
-          if (cachedDirect) {
-            return withOfflineHeader(cachedDirect);
+          // Priority 1: Если запрошен конкретный роль-маршрут (/admin, /leader, /gardener), отдавать его напрямую если он есть
+          const isRolePathRequest = ['/admin', '/leader', '/gardener'].some(p => url.pathname === p || url.pathname.startsWith(p + '/'));
+          if (isRolePathRequest) {
+            const directKey = new Request(url.pathname, { method: 'GET' });
+            let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
+            if (cachedDirect) {
+              return withOfflineHeader(cachedDirect);
+            }
           }
 
-          // Priority 2: Если запрошенный маршрут отсутствует, но известна роль — попробовать страницу роли
+          // Priority 2: Если известна роль (/offline-role или /offline-session), то запросы к "/", "/login*" обслуживать роль-страницей
           let userRole = null;
           try {
-            const roleRes = await cache.match('/offline-role');
+            const roleRes = await cache.match('/offline-role') || await pCache.match('/offline-role');
             if (roleRes) {
               const roleData = await roleRes.clone().json();
               if (roleData && roleData.role) userRole = roleData.role;
             }
             if (!userRole) {
-              const sessionRes = await cache.match('/offline-session');
+              const sessionRes = await cache.match('/offline-session') || await pCache.match('/offline-session');
               if (sessionRes) {
                 const sessionData = await sessionRes.clone().json();
                 if (sessionData && sessionData.role) userRole = sessionData.role;
@@ -913,26 +939,29 @@ self.addEventListener('fetch', (event) => {
 
           if (rolePath) {
             const roleKey = new Request(rolePath, { method: 'GET' });
-            let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey));
-            if (!cachedRolePage) {
-              const pCache = await caches.open(OFFLINE_DATA_CACHE);
-              cachedRolePage = await normalizeCachedResponse(await pCache.match(roleKey));
-            }
+            let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey)) || await normalizeCachedResponse(await pCache.match(roleKey));
             if (cachedRolePage) {
               return withOfflineHeader(cachedRolePage);
             }
           }
 
-          // Priority 3: Стандартный экран логина / подтверждения номера из кэша SPA (/login)
+          // Priority 3: Запрошенный путь для не-ролевых маршрутов
+          const directKey = new Request(url.pathname, { method: 'GET' });
+          let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
+          if (cachedDirect) {
+            return withOfflineHeader(cachedDirect);
+          }
+
+          // Priority 4: Стандартный экран логина / подтверждения номера из кэша SPA (/login)
           const loginKey = new Request('/login', { method: 'GET' });
-          const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey)) || await cache.match('/login');
+          const cachedLogin = await normalizeCachedResponse(await cache.match(loginKey)) || await normalizeCachedResponse(await pCache.match(loginKey));
           if (cachedLogin) {
             return withOfflineHeader(cachedLogin);
           }
 
-          // Priority 4: Корень SPA (/)
+          // Priority 5: Корень SPA (/)
           const rootKey = new Request('/', { method: 'GET' });
-          const cachedRoot = await normalizeCachedResponse(await cache.match(rootKey)) || await cache.match('/');
+          const cachedRoot = await normalizeCachedResponse(await cache.match(rootKey)) || await normalizeCachedResponse(await pCache.match(rootKey));
           if (cachedRoot) {
             return withOfflineHeader(cachedRoot);
           }

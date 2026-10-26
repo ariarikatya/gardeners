@@ -71,8 +71,8 @@ async function runJwtTests() {
     gardenerId: 'gardener_123'
   };
 
-  // Test 1: signToken sets 30-day expiration
-  console.log('Test 1: Verifying signToken issues 30-day expiration...');
+  // Test 1: signToken sets 365-day expiration
+  console.log('Test 1: Verifying signToken issues 365-day expiration...');
   const token = await signToken(samplePayload);
   assert(typeof token === 'string' && token.length > 0, 'Expected non-empty token string');
 
@@ -84,11 +84,11 @@ async function runJwtTests() {
   const nowSec = Math.floor(Date.now() / 1000);
   const ttlSec = verified.exp - nowSec;
   const ttlDays = ttlSec / (60 * 60 * 24);
-  assert(ttlDays > 29 && ttlDays <= 30, `Expected TTL ~30 days, got ${ttlDays.toFixed(1)} days`);
+  assert(ttlDays > 360 && ttlDays <= 365, `Expected TTL ~365 days, got ${ttlDays.toFixed(1)} days`);
   console.log(`✅ Test 1 Passed! Token TTL is ${ttlDays.toFixed(1)} days.`);
 
-  // Test 2: Middleware sliding session with fresh token (>15 days remaining)
-  console.log('Test 2: Verifying middleware does NOT refresh token if >15 days remain...');
+  // Test 2: Middleware sliding session with fresh token (>30 days remaining)
+  console.log('Test 2: Verifying middleware does NOT refresh token if >30 days remain...');
   const reqFresh = createMockRequest('/gardener', token);
 
   const resFresh = await middleware(reqFresh);
@@ -96,10 +96,10 @@ async function runJwtTests() {
   assert(!resFresh.cookiesMap.has('token'), 'Fresh token should NOT trigger sliding Set-Cookie');
   console.log('✅ Test 2 Passed! Fresh token retained without reissue.');
 
-  // Test 3: Middleware sliding session with aging token (<15 days remaining)
-  console.log('Test 3: Verifying middleware REFRESHES token if <15 days remain...');
-  const tenDaysSec = Math.floor(Date.now() / 1000) + (10 * 24 * 60 * 60);
-  const agedPayload = { ...samplePayload, exp: tenDaysSec };
+  // Test 3: Middleware sliding session with aging token (<30 days remaining)
+  console.log('Test 3: Verifying middleware REFRESHES token if <30 days remain...');
+  const twentyDaysSec = Math.floor(Date.now() / 1000) + (20 * 24 * 60 * 60);
+  const agedPayload = { ...samplePayload, exp: twentyDaysSec };
 
   const mockVerifyAged = async () => agedPayload;
   const middlewareAged = createMiddlewareHandler(MockNextResponse, mockVerifyAged, signToken);
@@ -116,11 +116,11 @@ async function runJwtTests() {
   assert(newVerified !== null, 'Expected renewed token to be valid');
 
   const newTtlDays = (newVerified.exp - Math.floor(Date.now() / 1000)) / (60 * 60 * 24);
-  assert(newTtlDays > 29, `Expected renewed token TTL ~30 days, got ${newTtlDays.toFixed(1)} days`);
+  assert(newTtlDays > 360, `Expected renewed token TTL ~365 days, got ${newTtlDays.toFixed(1)} days`);
   console.log(`✅ Test 3 Passed! Token auto-renewed to ${newTtlDays.toFixed(1)} days via sliding session.`);
 
-  // Test 4: Time Travel Validation (0 days, 1 day, 6 days, 31 days)
-  console.log('Test 4: Verifying token validity across time travel offsets (0d, +1d, +6d, +31d)...');
+  // Test 4: Time Travel Validation (0 days, 30 days, 100 days, 366 days)
+  console.log('Test 4: Verifying token validity across time travel offsets (0d, +30d, +100d, +366d)...');
   const baseNow = Date.now();
   const RealDate = global.Date;
 
@@ -147,22 +147,22 @@ async function runJwtTests() {
     const vNow = await verifyToken(token);
     assert(vNow !== null, 'Token should be valid now (0 days)');
 
-    // +1 Day
-    mockCurrentTime = baseNow + 1 * 24 * 60 * 60 * 1000;
-    const v1d = await verifyToken(token);
-    assert(v1d !== null, 'Token should be valid after 1 day');
+    // +30 Days
+    mockCurrentTime = baseNow + 30 * 24 * 60 * 60 * 1000;
+    const v30d = await verifyToken(token);
+    assert(v30d !== null, 'Token should be valid after 30 days');
 
-    // +6 Days
-    mockCurrentTime = baseNow + 6 * 24 * 60 * 60 * 1000;
-    const v6d = await verifyToken(token);
-    assert(v6d !== null, 'Token should be valid after 6 days');
+    // +100 Days
+    mockCurrentTime = baseNow + 100 * 24 * 60 * 60 * 1000;
+    const v100d = await verifyToken(token);
+    assert(v100d !== null, 'Token should be valid after 100 days');
 
-    // +31 Days (Expired)
-    mockCurrentTime = baseNow + 31 * 24 * 60 * 60 * 1000;
-    const v31d = await verifyToken(token);
-    assert(v31d === null, 'Token MUST be invalid / expired after 31 days');
+    // +366 Days (Expired)
+    mockCurrentTime = baseNow + 366 * 24 * 60 * 60 * 1000;
+    const v366d = await verifyToken(token);
+    assert(v366d === null, 'Token MUST be invalid / expired after 366 days');
 
-    console.log('✅ Test 4 Passed! Time-travel verification: valid at 0d, +1d, +6d, and correctly expired at +31d.');
+    console.log('✅ Test 4 Passed! Time-travel verification: valid at 0d, +30d, +100d, and correctly expired at +366d.');
   } finally {
     global.Date = RealDate;
   }

@@ -13,15 +13,14 @@ export default function ServiceWorkerRegister() {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
     let autoReloadTimer = null;
-
     let refreshing = false;
 
     const handleControllerChange = () => {
       if (refreshing) return;
       if (sessionStorage.getItem('push_flow_active') === '1') return;
       refreshing = true;
-      clientLog('sw_controller_change_reload');
-      window.location.reload();
+      setShowUpdateBanner(true);
+      clientLog('sw_controller_change_update_banner');
     };
 
     navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
@@ -81,21 +80,6 @@ export default function ServiceWorkerRegister() {
                   clientLog('sw_auto_reload_deferred', { pendingOfflineOps: pendingOps });
                 } else {
                   setShowUpdateBanner(true);
-
-                  const triggerAutoReload = () => {
-                    if (sessionStorage.getItem('push_flow_active') === '1') return;
-                    clientLog('sw_auto_reload', { pendingOfflineOps: 0 });
-                    window.location.reload();
-                  };
-
-                  const handleVisibility = () => {
-                    if (document.visibilityState === 'visible') {
-                      triggerAutoReload();
-                    }
-                  };
-
-                  document.addEventListener('visibilitychange', handleVisibility);
-                  autoReloadTimer = setTimeout(triggerAutoReload, 60000);
                 }
               }
             });
