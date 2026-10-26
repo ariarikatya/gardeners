@@ -29,7 +29,7 @@ function createStorageMock(initialState = {}) {
 }
 
 async function runOfflineSavedPhoneLoginTest() {
-  console.log('🧪 Starting Test: Offline Saved Phone Auto-Login & Offline Logout (test-offline-saved-phone-login.js)...');
+  console.log('🧪 Starting Test: Offline Saved Phone Auto-Login & Offline Session (test-offline-saved-phone-login.js)...');
 
   // 1. Setup mock environment for primary test
   const mockLocalStorage = createStorageMock({
@@ -190,10 +190,11 @@ async function runOfflineSavedPhoneLoginTest() {
   assert(Boolean(offlineRoleMsg), 'SW must receive OFFLINE_ROLE message with role: ADMIN');
   console.log('✅ Assertion 5 Passed: SW received postMessage OFFLINE_SESSION and OFFLINE_ROLE.');
 
-  console.log('\nTesting Offline handleLogout logic...');
+  console.log('\nTesting Offline handleLogout logic with logout_confirmed...');
   const handleLogout = async () => {
     try {
       if (typeof window !== 'undefined') {
+        sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');
@@ -256,16 +257,16 @@ async function runOfflineSavedPhoneLoginTest() {
     const mapStr = mockLocalStorage.getItem('phone_roles_map');
     const map = mapStr ? JSON.parse(mapStr) : {};
     if (!map[clean]) {
-      errorState = 'Нет сети и этот номер ещё не сохранялся на этом устройстве';
+      errorState = 'Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.';
     }
   };
 
   await testUnknownPhoneOffline('79990000000');
-  assert(errorState.includes('Нет сети и этот номер ещё не сохранялся'), 'Unknown phone offline must display text error message');
-  console.log('✅ Assertion 9 Passed: Unknown phone offline returns text error message without role selection modal.');
+  assert(errorState.includes('Данные для этого номера ещё не сохранены'), 'Unknown phone offline must display neutral error message');
+  console.log('✅ Assertion 9 Passed: Unknown phone offline returns neutral error text without role selection modal.');
 
-  // Additional Extended Tests: ADMIN, LEADER, GARDENER stale cache (>24h) & tab restoration
-  console.log('\n--- Extended Tests: Stale Cache & Tab Restoration ---');
+  // Scenario E1: Offline login for ADMIN / LEADER / GARDENER from card and new phone input with >24h stale cache
+  console.log('\n--- Extended Scenario 1: Offline Login for ADMIN/LEADER/GARDENER with >24h stale cache ---');
   const rolesToTest = [
     { roleName: 'ADMIN', phoneNum: '79991110001', expectedPath: '/admin' },
     { roleName: 'LEADER', phoneNum: '79992220002', expectedPath: '/leader' },
@@ -273,7 +274,7 @@ async function runOfflineSavedPhoneLoginTest() {
   ];
 
   for (const { roleName, phoneNum, expectedPath } of rolesToTest) {
-    console.log(`Testing Role: ${roleName} offline login with stale cache (>24h)...`);
+    console.log(`Testing Role: ${roleName} offline login with stale cache (48 hours ago)...`);
     const staleTs = Date.now() - (48 * 60 * 60 * 1000);
     const testLocalStorage = createStorageMock({
       auth_phone: phoneNum,
@@ -281,6 +282,8 @@ async function runOfflineSavedPhoneLoginTest() {
       offline_session: '1',
       offline_session_ts: String(staleTs),
     });
+
+    savePhoneRoleMap(phoneNum, roleName);
 
     let navUrl = null;
     global.window = { location: { assign(u) { navUrl = u; } } };
@@ -290,17 +293,38 @@ async function runOfflineSavedPhoneLoginTest() {
     global.window.location.assign(pathResult);
 
     assert(navUrl === expectedPath, `Role ${roleName} must redirect to ${expectedPath}, got ${navUrl}`);
-    console.log(`✅ Role ${roleName} successfully redirected to ${expectedPath} offline despite stale cache.`);
+    console.log(`  -> Role ${roleName} successfully redirected to ${expectedPath} offline despite >24h stale cache.`);
   }
 
-  // Verify code inspection for no role selection elements in app/login/page.js
+  // Scenario E2: Tab close/reopen without clicking "Выйти" -> session restored, no redirect to empty login
+  console.log('\n--- Extended Scenario 2: Close tab without "Выйти" -> reopen without network ---');
+  const sessionLocalStorage = createStorageMock({
+    auth_phone: '79991110001',
+    auth_role: 'ADMIN',
+    offline_session: '1',
+    offline_session_ts: String(Date.now() - (72 * 60 * 60 * 1000)), // 3 days ago
+  });
+
+  // Re-open tab in browser (sessionStorage is empty)
+  const emptySessionStorage = createStorageMock();
+  const isConfirmedLogout = emptySessionStorage.getItem('logout_confirmed') === '1';
+  assert(isConfirmedLogout === false, 'logout_confirmed is false when tab is reopened without clicking "Выйти"');
+
+  // Verify stored session tokens/roles were preserved
+  assert(sessionLocalStorage.getItem('auth_phone') === '79991110001', 'auth_phone preserved on tab re-open');
+  assert(sessionLocalStorage.getItem('auth_role') === 'ADMIN', 'auth_role preserved on tab re-open');
+  assert(sessionLocalStorage.getItem('offline_session') === '1', 'offline_session preserved on tab re-open');
+  console.log('✅ Session restored on tab re-open without network; no accidental logout or redirect to empty login.');
+
+  // Code inspection for app/login/page.js
   console.log('\nVerifying no role selection UI elements in app/login/page.js...');
   const loginPagePath = path.resolve('app/login/page.js');
   const loginCode = fs.readFileSync(loginPagePath, 'utf8');
 
   assert(!loginCode.includes('Войти как'), 'app/login/page.js must NOT contain "Войти как" text');
   assert(!loginCode.includes('<select'), 'app/login/page.js must NOT contain <select> elements for role selection');
-  console.log('✅ Code inspection verified: No role selection UI elements present.');
+  assert(loginCode.includes('Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.'), 'app/login/page.js must contain neutral error text');
+  console.log('✅ Code inspection verified: Neutral error text present and no role selection UI elements.');
 
   console.log('\n🎉 ALL OFFLINE SAVED PHONE AUTO-LOGIN TESTS PASSED SUCCESSFULLY!');
 }

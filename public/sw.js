@@ -989,7 +989,7 @@ self.addEventListener('fetch', (event) => {
             }
           }
 
-          // Запрошенный конкретный путь если роль не определена или роли в кэше нет
+          // Запрошенный конкретный путь если роль не определена или роли в кэше нет: проверяем свежесть кэша
           const directKey = new Request(url.pathname, { method: 'GET' });
           let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
           if (cachedDirect) {

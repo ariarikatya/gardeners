@@ -227,14 +227,23 @@ export default function LoginPage() {
     try {
       setError('');
       if (typeof window !== 'undefined') {
-        sessionStorage.setItem('manual_logout', '0');
+        sessionStorage.removeItem('manual_logout');
       }
 
       const storedPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const cleanPhone = normalizeCleanPhone(rawInputPhone);
 
-      let resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+      let resolvedRole = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+        if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
+          break;
+        }
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+      }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
         const phoneToUse = cleanPhone || storedPhone || rawInputPhone;
@@ -257,10 +266,10 @@ export default function LoginPage() {
         return;
       }
 
-      setError('Нет сети. Откройте сайт с интернетом, чтобы скачать данные.');
+      setError('Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.');
     } catch (e) {
       console.error('Error in handleOfflineLogin:', e);
-      setError('Нет сети. Откройте сайт с интернетом, чтобы скачать данные.');
+      setError('Данные для этого номера ещё не сохранены. Зайдите один раз с интернетом.');
     }
   };
 
@@ -398,6 +407,10 @@ export default function LoginPage() {
 
     const updateOnlineStatus = () => {
       handleOnlineCheck();
+      if (typeof window !== 'undefined' && navigator.onLine) {
+        triggerSwPrecacheRoles();
+        ensureFreshUsersList();
+      }
     };
 
     updateOnlineStatus();
@@ -405,9 +418,10 @@ export default function LoginPage() {
     window.addEventListener('offline', updateOnlineStatus);
 
     try {
-      const isManualLogout = typeof window !== 'undefined' && sessionStorage.getItem('manual_logout') === '1';
+      const isLogoutConfirmed = typeof window !== 'undefined' && (sessionStorage.getItem('logout_confirmed') === '1' || sessionStorage.getItem('manual_logout') === '1');
 
-      if (isManualLogout) {
+      if (isLogoutConfirmed) {
+        sessionStorage.removeItem('logout_confirmed');
         sessionStorage.removeItem('manual_logout');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_role');

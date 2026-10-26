@@ -405,6 +405,7 @@ export default function LeaderDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
+        sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_token');
