@@ -416,7 +416,7 @@ export default function AdminDashboard() {
 
   const logClientError = (message, err, pathname = '/admin') => {
     try {
-      fetch('/api/client-error', {
+      apiFetch('/api/client-error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -791,13 +791,14 @@ export default function AdminDashboard() {
     if (typeof window !== 'undefined') {
       try {
         sessionStorage.setItem('manual_logout', '1');
+        localStorage.removeItem('auth_role');
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_session_cached');
         localStorage.removeItem('offline_session');
         localStorage.removeItem('offline_session_ts');
 
         if ('serviceWorker' in navigator) {
-          const postWithReply = (targetSw, msg) => {
+          const postWithReply = (targetSw, msg, timeoutMs = 500) => {
             return new Promise((resolve) => {
               if (!targetSw) return resolve();
               if (typeof MessageChannel === 'undefined') {
@@ -805,7 +806,7 @@ export default function AdminDashboard() {
                 return resolve();
               }
               const channel = new MessageChannel();
-              const timer = setTimeout(() => resolve(), 500);
+              const timer = setTimeout(() => resolve(), timeoutMs);
               channel.port1.onmessage = () => { clearTimeout(timer); resolve(); };
               try { targetSw.postMessage(msg, [channel.port2]); } catch (e) { clearTimeout(timer); resolve(); }
             });
@@ -817,27 +818,32 @@ export default function AdminDashboard() {
             if (targetSw) {
               await postWithReply(targetSw, { type: 'OFFLINE_SESSION', active: false, role: null });
               await postWithReply(targetSw, { type: 'OFFLINE_ROLE', role: null });
+              await Promise.race([
+                postWithReply(targetSw, { type: 'ENSURE_LOGIN_CACHED' }, 3000),
+                new Promise((resolve) => setTimeout(resolve, 3000)),
+              ]);
             }
           } catch (e) {}
         }
 
         if ('PushManager' in window && 'serviceWorker' in navigator) {
           navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
-            if (sub) {
-              fetch('/api/push/unsubscribe', {
+            if (sub && navigator.onLine) {
+              apiFetch('/api/push/unsubscribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ endpoint: sub.endpoint }),
-                credentials: 'include'
               }).catch(() => {});
             }
           }).catch(() => {});
         }
       } catch (e) {}
 
-      try {
-        fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
-      } catch (e) {}
+      if (navigator.onLine) {
+        try {
+          await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+        } catch (e) {}
+      }
 
       window.location.replace('/login');
     } else {
@@ -881,7 +887,7 @@ export default function AdminDashboard() {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
-        const res = await fetch('/api/admin/sync-sheets', {
+        const res = await apiFetch('/api/admin/sync-sheets', {
           method: 'POST',
           signal: controller.signal
         });
@@ -953,7 +959,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/orders', {
+      const res = await apiFetch('/api/admin/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -961,7 +967,7 @@ export default function AdminDashboard() {
 
       if (res.ok) {
         const data = await res.json();
-        await fetch('/api/admin/webleads', {
+        await apiFetch('/api/admin/webleads', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1049,7 +1055,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    await fetch('/api/admin/webleads', {
+    await apiFetch('/api/admin/webleads', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, status: 'Обработана' })
@@ -1069,7 +1075,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    await fetch('/api/admin/webleads', {
+    await apiFetch('/api/admin/webleads', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
@@ -1101,7 +1107,7 @@ export default function AdminDashboard() {
     setShowOrderModal(true);
 
     if (order && order.id) {
-      fetch('/api/admin/orders?id=' + encodeURIComponent(order.id))
+      apiFetch('/api/admin/orders?id=' + encodeURIComponent(order.id))
         .then(res => res.ok ? res.json() : null)
         .then(data => {
           if (data && data.order) {
@@ -1229,7 +1235,7 @@ export default function AdminDashboard() {
           if (!selectedOrder && data.order) {
             leadUpdate.createdOrderId = data.order.id;
           }
-          await fetch('/api/admin/webleads', {
+          await apiFetch('/api/admin/webleads', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(leadUpdate)
@@ -1308,7 +1314,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/gardeners', {
+      const res = await apiFetch('/api/admin/gardeners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newGardener)
@@ -1388,7 +1394,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/gardeners', {
+      const res = await apiFetch('/api/admin/gardeners', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingGardener)
@@ -1423,7 +1429,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    const res = await fetch('/api/admin/gardeners', {
+    const res = await apiFetch('/api/admin/gardeners', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
@@ -1448,7 +1454,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/orders', {
+      const res = await apiFetch('/api/admin/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: orderId, status: 'Новый заказ', refusalReason: null })
@@ -1503,7 +1509,7 @@ export default function AdminDashboard() {
     }
 
     if (selectedOrder) {
-      const res = await fetch('/api/admin/orders', {
+      const res = await apiFetch('/api/admin/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: selectedOrder.id, ...updatedForm })
@@ -1515,7 +1521,7 @@ export default function AdminDashboard() {
         alert((await res.json()).error || 'Ошибка при переносе в отказы');
       }
     } else {
-      const res = await fetch('/api/admin/orders', {
+      const res = await apiFetch('/api/admin/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedForm)
@@ -1551,7 +1557,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/blockday', {
+      const res = await apiFetch('/api/admin/blockday', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: dateStr, gardenerId })
@@ -1590,7 +1596,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/gardeners/bulk-bind', {
+      const res = await apiFetch('/api/admin/gardeners/bulk-bind', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: vkBulkText })
@@ -1630,7 +1636,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/admin/services', {
+      const res = await apiFetch('/api/admin/services', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newServiceName.trim() })
@@ -1665,7 +1671,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    const res = await fetch('/api/admin/services', {
+    const res = await apiFetch('/api/admin/services', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
@@ -1690,7 +1696,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    const res = await fetch('/api/admin/dayoff', {
+    const res = await apiFetch('/api/admin/dayoff', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: dateStr, gardenerId })
@@ -1719,7 +1725,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    const res = await fetch('/api/admin/dayoff', {
+    const res = await apiFetch('/api/admin/dayoff', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id })
@@ -1910,7 +1916,7 @@ export default function AdminDashboard() {
           <button
             onClick={async () => {
               try {
-                const res = await fetch('/api/sync-amo');
+                const res = await apiFetch('/api/sync-amo');
                 const data = await res.json();
                 alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
                 window.location.reload();
@@ -3125,7 +3131,7 @@ export default function AdminDashboard() {
                                       });
                                       await refreshQueueCount();
                                     } else {
-                                      await fetch('/api/admin/webleads', {
+                                      await apiFetch('/api/admin/webleads', {
                                         method: 'PUT',
                                         headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify(payload)
