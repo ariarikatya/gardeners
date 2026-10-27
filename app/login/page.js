@@ -8,6 +8,8 @@ import {
   getPhoneVariants,
   normalizeCleanPhone,
   savePhoneRoleMap,
+  savePhoneTokenMap,
+  getPhoneToken,
   recordIdentityToSw,
   notifySwOfflinePhone,
   notifySwOfflineSession,
@@ -110,7 +112,7 @@ export default function LoginPage() {
   const redirectByRole = async (role, isOffline = false, targetPhone = null) => {
     if (!role) return;
     const phoneToUse = targetPhone || savedPhone || phone;
-    activateOfflineSession(role, phoneToUse);
+    await activateOfflineSession(role, phoneToUse);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
     if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
       if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
@@ -233,7 +235,10 @@ export default function LoginPage() {
         localStorage.setItem('auth_phone', cleanPhone);
         await notifySwOfflinePhone(cleanPhone);
       }
-      if (data.token) localStorage.setItem('auth_token', data.token);
+      if (data.token) {
+        localStorage.setItem('auth_token', data.token);
+        if (cleanPhone) savePhoneTokenMap(cleanPhone, data.token);
+      }
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
         if (cleanPhone) {
@@ -406,7 +411,10 @@ export default function LoginPage() {
       }
 
       if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
-      if (data.token) localStorage.setItem('auth_token', data.token);
+      if (data.token) {
+        localStorage.setItem('auth_token', data.token);
+        if (cleanPhone) savePhoneTokenMap(cleanPhone, data.token);
+      }
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
         if (cleanPhone) {
@@ -429,7 +437,9 @@ export default function LoginPage() {
     }
   };
 
-  const formattedSavedPhone = savedPhone ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : '';
+  const formattedSavedPhone = savedPhone
+    ? (savedPhone.length >= 10 ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : savedPhone)
+    : '';
   const isOfflineNow = !isOnline || (typeof window !== 'undefined' && !navigator.onLine);
 
   if (isSavedPhoneMode && savedPhone) {
