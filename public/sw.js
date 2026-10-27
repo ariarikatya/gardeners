@@ -230,49 +230,51 @@ function withOfflineHeader(response, extraHeaders = {}) {
 async function restoreOfflineDataToNewCache() {
   CACHE_NAME = getCacheName();
   const cache = await caches.open(CACHE_NAME);
-  const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
+  const pCache = await caches.open(OFFLINE_DATA_CACHE);
+  const keysToRestore = ['/offline-profiles', '/offline-sessions', '/offline-active-account', '/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
 
   const allCacheKeys = await caches.keys();
   for (const k of keysToRestore) {
     try {
+      let mergedObj = null;
       let matchedRes = null;
-      try {
-        const pCache = await caches.open(OFFLINE_DATA_CACHE);
-        matchedRes = await pCache.match(k);
-      } catch (e) {}
 
-      if (!matchedRes) {
-        for (const cName of allCacheKeys) {
-          try {
-            const oldC = await caches.open(cName);
-            matchedRes = await oldC.match(k);
-            if (matchedRes) break;
-          } catch (e) {}
-        }
-      }
-
-      if (matchedRes) {
-        let shouldPut = true;
+      for (const cName of [OFFLINE_DATA_CACHE, CACHE_NAME, ...allCacheKeys]) {
         try {
-          const existingTargetRes = await cache.match(k);
-          if (existingTargetRes) {
-            const existingTargetData = await existingTargetRes.clone().json();
-            const sourceData = await matchedRes.clone().json();
-            const isSourceEmpty = !sourceData || (typeof sourceData === 'object' && Object.keys(sourceData).length === 0) || (k === '/offline-role' && !sourceData.role) || (k === '/offline-session' && !sourceData.role);
-            const isTargetNonEmpty = existingTargetData && (typeof existingTargetData === 'object' && Object.keys(existingTargetData).length > 0) && (k !== '/offline-role' || existingTargetData.role) && (k !== '/offline-session' || existingTargetData.role);
-            if (isSourceEmpty && isTargetNonEmpty) {
-              shouldPut = false;
-            }
+          const c = await caches.open(cName);
+          const r = await c.match(k);
+          if (r) {
+            matchedRes = r;
+            try {
+              const data = await r.clone().json();
+              if (data && typeof data === 'object') {
+                if (k.endsWith('-users') || Array.isArray(data)) {
+                  if (!mergedObj) mergedObj = data;
+                } else {
+                  if (!mergedObj) mergedObj = {};
+                  for (const [subKey, subVal] of Object.entries(data)) {
+                    if (!subVal) continue;
+                    const existingSub = mergedObj[subKey];
+                    if (!existingSub || (subVal.ts || 0) >= (existingSub.ts || 0)) {
+                      mergedObj[subKey] = subVal;
+                    }
+                  }
+                }
+              }
+            } catch (e) {}
           }
         } catch (e) {}
+      }
 
-        if (shouldPut) {
-          await cache.put(k, matchedRes.clone());
-          try {
-            const pCache = await caches.open(OFFLINE_DATA_CACHE);
-            await pCache.put(k, matchedRes.clone());
-          } catch (e) {}
-        }
+      if (mergedObj) {
+        const bodyStr = JSON.stringify(mergedObj);
+        const res1 = new Response(bodyStr, { headers: { 'Content-Type': 'application/json' } });
+        const res2 = new Response(bodyStr, { headers: { 'Content-Type': 'application/json' } });
+        await cache.put(k, res1);
+        await pCache.put(k, res2);
+      } else if (matchedRes) {
+        await cache.put(k, matchedRes.clone());
+        await pCache.put(k, matchedRes.clone());
       }
     } catch (e) {}
   }
@@ -281,12 +283,24 @@ async function restoreOfflineDataToNewCache() {
 async function deleteOldCaches() {
   try {
     CACHE_NAME = getCacheName();
-    await restoreOfflineDataToNewCache();
-    const keys = await caches.keys();
-    await Promise.all(
-      keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
-    );
-  } catch (e) {}
+    let restoreSuccess = false;
+    try {
+      await restoreOfflineDataToNewCache();
+      restoreSuccess = true;
+    } catch (err) {
+      console.warn('[sw_migration] Data restoration failed, preserving old caches:', err);
+      restoreSuccess = false;
+    }
+
+    if (restoreSuccess) {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
+      );
+    }
+  } catch (e) {
+    console.warn('[sw_migration] Error in deleteOldCaches:', e);
+  }
 }
 
 async function cacheRolePageAndChunks(path) {
@@ -416,7 +430,17 @@ async function precacheAllRoles(retryCount = 0) {
                 safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
                 safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res.clone());
 
-                const phoneRoleMap = {};
+                const cache = await caches.open(CACHE_NAME);
+                const pCache = await caches.open(OFFLINE_DATA_CACHE);
+
+                let phoneRoleMap = {};
+                try {
+                  const existingMapRes = await cache.match('/phone-role-map') || await pCache.match('/phone-role-map');
+                  if (existingMapRes) {
+                    phoneRoleMap = await existingMapRes.json() || {};
+                  }
+                } catch (e) {}
+
                 for (const u of userList) {
                   if (!u.phone || !u.role) continue;
                   const uDigits = String(u.phone).replace(/\D/g, '');
@@ -425,16 +449,16 @@ async function precacheAllRoles(retryCount = 0) {
                   const u7 = '7' + uTail10;
                   const u8 = '8' + uTail10;
                   const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
-                  for (const k of [uTail10, u7, u8, uDigits]) {
-                    if (k) phoneRoleMap[k] = entry;
+                  for (const k of [uDigits, uTail10, u7, u8]) {
+                    if (k && (!phoneRoleMap[k] || phoneRoleMap[k].source !== 'login')) {
+                      phoneRoleMap[k] = entry;
+                    }
                   }
                 }
                 const mapStr = JSON.stringify(phoneRoleMap);
                 const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
                 const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
-                const cache = await caches.open(CACHE_NAME);
                 await cache.put('/phone-role-map', mapRes1);
-                const pCache = await caches.open(OFFLINE_DATA_CACHE);
                 await pCache.put('/phone-role-map', mapRes2);
               }
             } catch (err) {}

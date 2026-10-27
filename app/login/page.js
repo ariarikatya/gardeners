@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
 import {
@@ -20,10 +20,22 @@ export default function LoginPage() {
   const [phone, setPhone] = useState('');
   const [savedPhone, setSavedPhone] = useState(null);
   const [isSavedPhoneMode, setIsSavedPhoneMode] = useState(false);
+  const [accountsList, setAccountsList] = useState([]);
+  const [candidatesList, setCandidatesList] = useState([]);
   const [isOnline, setIsOnline] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+
+  const sessionSeqRef = useRef(0);
+  const inflightRef = useRef(false);
+
+  const finishLoading = (seq) => {
+    if (seq === sessionSeqRef.current) {
+      setLoading(false);
+      inflightRef.current = false;
+    }
+  };
 
   const getRoleForPhone = (phoneNum) => {
     if (!phoneNum || typeof window === 'undefined') return null;
@@ -114,20 +126,15 @@ export default function LoginPage() {
     const phoneToUse = targetPhone || savedPhone || phone;
     await activateOfflineSession(role, phoneToUse);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';
-    if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
-      if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
-        window.location.assign(rolePath);
-      } else {
-        router.push(rolePath);
-      }
+    setLoading(false);
+    if (typeof window !== 'undefined' && window.location && typeof window.location.assign === 'function') {
+      window.location.assign(rolePath);
     } else {
       router.push(rolePath);
     }
   };
 
-  const handleOfflineLogin = async (targetPhone = null) => {
-    if (loading) return;
-    setLoading(true);
+  const handleOfflineLogin = async (targetPhone = null, targetRole = null, seq = sessionSeqRef.current) => {
     try {
       setError('');
       if (typeof window !== 'undefined') {
@@ -138,14 +145,16 @@ export default function LoginPage() {
       const rawInputPhone = targetPhone || phone || savedPhone || storedPhone || '';
       const cleanPhone = normalizeCleanPhone(rawInputPhone);
 
-      let resolvedRole = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
-        if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
-          break;
-        }
-        if (attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
+      let resolvedRole = targetRole || null;
+      if (!resolvedRole) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          resolvedRole = await resolveOfflineRoleFromCaches(rawInputPhone);
+          if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
+            break;
+          }
+          if (attempt < 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
         }
       }
 
@@ -175,13 +184,17 @@ export default function LoginPage() {
       console.error('Error in handleOfflineLogin:', e);
       setError('Для первого входа нужен интернет один раз. Подключитесь к сети, войдите, и дальше всё будет работать офлайн.');
     } finally {
-      setLoading(false);
+      finishLoading(seq);
     }
   };
 
-  const handleAutoLoginWithPhone = async (targetPhone) => {
+  const handleAutoLoginWithPhone = async (targetPhone, targetRole = null) => {
     const phoneToUse = targetPhone || savedPhone;
-    if (!phoneToUse) return;
+    if (!phoneToUse || inflightRef.current) return;
+    inflightRef.current = true;
+    setLoading(true);
+
+    const seq = ++sessionSeqRef.current;
     setError('');
 
     if (typeof window !== 'undefined') {
@@ -189,11 +202,9 @@ export default function LoginPage() {
     }
 
     if (typeof window !== 'undefined' && !navigator.onLine) {
-      await handleOfflineLogin(phoneToUse);
+      await handleOfflineLogin(phoneToUse, targetRole, seq);
       return;
     }
-
-    setLoading(true);
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
@@ -202,7 +213,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/auto-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneToUse }),
+        body: JSON.stringify({ phone: phoneToUse, role: targetRole }),
         credentials: 'include',
         signal: controller ? controller.signal : undefined,
       });
@@ -211,7 +222,7 @@ export default function LoginPage() {
 
       if (res.status === 503 || res.status >= 500) {
         console.warn('[Login Error 5xx]', res.status, 'CLIENT_VERSION:', CLIENT_VERSION);
-        await handleOfflineLogin(phoneToUse);
+        await handleOfflineLogin(phoneToUse, targetRole, seq);
         return;
       }
 
@@ -219,7 +230,7 @@ export default function LoginPage() {
       try {
         data = await res.json();
       } catch (jsonErr) {
-        await handleOfflineLogin(phoneToUse);
+        await handleOfflineLogin(phoneToUse, targetRole, seq);
         return;
       }
 
@@ -247,16 +258,15 @@ export default function LoginPage() {
         }
       }
 
-      await redirectByRole(data.role);
+      await redirectByRole(data.role, false, phoneToUse);
     } catch (err) {
       if (timeoutId) clearTimeout(timeoutId);
       if (err && err.isClientError) {
         setError(err.message || 'Ошибка подключения');
+        finishLoading(seq);
       } else {
-        await handleOfflineLogin(phoneToUse);
+        await handleOfflineLogin(phoneToUse, targetRole, seq);
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -338,6 +348,10 @@ export default function LoginPage() {
         notifySwOfflineSession(false, null);
       }
 
+      const { listAccounts } = require('@/lib/offlineStore');
+      const accounts = listAccounts();
+      setAccountsList(accounts);
+
       const saved = localStorage.getItem('auth_phone');
       const role = localStorage.getItem('auth_role');
 
@@ -364,8 +378,13 @@ export default function LoginPage() {
     };
   }, []);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+  const handleLogin = async (e, selectedRole = null) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (inflightRef.current) return;
+    inflightRef.current = true;
+    setLoading(true);
+
+    const seq = ++sessionSeqRef.current;
     setError('');
 
     if (typeof window !== 'undefined') {
@@ -376,23 +395,30 @@ export default function LoginPage() {
     const isNetworkOffline = typeof window !== 'undefined' && !navigator.onLine;
 
     if (isNetworkOffline) {
-      await handleOfflineLogin(cleanPhone || phone);
+      await handleOfflineLogin(cleanPhone || phone, selectedRole, seq);
       return;
     }
 
-    setLoading(true);
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 10000) : null;
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-        credentials: 'include',
-      });
+      const res = await Promise.race([
+        fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, role: selectedRole }),
+          credentials: 'include',
+          signal: controller ? controller.signal : undefined,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 10s')), 10000)),
+      ]);
+
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (res.status === 503 || res.status >= 500) {
         console.warn('[Login Error 5xx]', res.status, 'CLIENT_VERSION:', CLIENT_VERSION);
-        await handleOfflineLogin(cleanPhone || phone);
+        await handleOfflineLogin(cleanPhone || phone, selectedRole, seq);
         return;
       }
 
@@ -400,7 +426,13 @@ export default function LoginPage() {
       try {
         data = await res.json();
       } catch (jsonErr) {
-        await handleOfflineLogin(cleanPhone || phone);
+        await handleOfflineLogin(cleanPhone || phone, selectedRole, seq);
+        return;
+      }
+
+      if (data.multiple && Array.isArray(data.candidates)) {
+        setCandidatesList(data.candidates);
+        finishLoading(seq);
         return;
       }
 
@@ -410,30 +442,31 @@ export default function LoginPage() {
         throw clientErr;
       }
 
-      if (cleanPhone) localStorage.setItem('auth_phone', cleanPhone);
+      const phoneToStore = data.echoPhone || cleanPhone || phone;
+      if (phoneToStore) localStorage.setItem('auth_phone', phoneToStore);
       if (data.token) {
         localStorage.setItem('auth_token', data.token);
-        if (cleanPhone) savePhoneTokenMap(cleanPhone, data.token);
+        if (phoneToStore) savePhoneTokenMap(phoneToStore, data.token);
       }
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
-        if (cleanPhone) {
-          savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null, 'login');
-          await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
+        if (phoneToStore) {
+          savePhoneRoleMap(phoneToStore, data.role, data.name || data.userName || null, 'login');
+          await recordIdentityToSw(phoneToStore, data.role, data.name || data.userName || null);
           await syncPhoneRoleMapToSw();
         }
       }
 
       triggerSwPrecacheRoles();
-      await redirectByRole(data.role);
+      await redirectByRole(data.role, false, phoneToStore);
     } catch (err) {
+      if (timeoutId) clearTimeout(timeoutId);
       if (err && err.isClientError) {
         setError(err.message || 'Ошибка при входе');
+        finishLoading(seq);
       } else {
-        await handleOfflineLogin(cleanPhone || phone);
+        await handleOfflineLogin(cleanPhone || phone, selectedRole, seq);
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -441,6 +474,120 @@ export default function LoginPage() {
     ? (savedPhone.length >= 10 ? (savedPhone.startsWith('+') ? savedPhone : `+${savedPhone}`) : savedPhone)
     : '';
   const isOfflineNow = !isOnline || (typeof window !== 'undefined' && !navigator.onLine);
+
+  if (candidatesList.length > 1) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+          <div>
+            <h2 className="mt-2 text-center text-2xl font-extrabold text-emerald-900">
+              Выберите профиль для входа
+            </h2>
+            <p className="mt-1 text-center text-sm text-slate-500">
+              Найдено несколько учетных записей по данному номеру
+            </p>
+          </div>
+
+          {error && (
+            <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg border border-red-200">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {candidatesList.map((c, idx) => (
+              <button
+                key={idx}
+                type="button"
+                disabled={loading}
+                onClick={() => handleLogin(null, c.role)}
+                className="w-full flex items-center justify-between p-4 border border-emerald-200 rounded-xl hover:bg-emerald-50/50 transition-all text-left"
+              >
+                <div>
+                  <div className="font-bold text-slate-800">{c.name || 'Пользователь'}</div>
+                  <div className="text-xs text-emerald-700 font-semibold mt-0.5">
+                    {c.role === 'ADMIN' ? 'Администратор' : c.role === 'LEADER' ? 'Руководитель' : 'Садовник'}
+                  </div>
+                </div>
+                <span className="text-emerald-600 font-bold text-lg">→</span>
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => {
+                setCandidatesList([]);
+                setError('');
+              }}
+              disabled={loading}
+              className="w-full flex justify-center py-2.5 px-4 border border-slate-300 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 mt-4"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (accountsList.length >= 2 && !isSavedPhoneMode) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12 sm:px-6 lg:px-8">
+        <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
+          <div>
+            <h2 className="mt-2 text-center text-2xl font-extrabold text-emerald-900">
+              Выберите аккаунт
+            </h2>
+            <p className="mt-1 text-center text-sm text-slate-500">
+              Ранее сохранённые профили на этом устройстве
+            </p>
+          </div>
+
+          {error && (
+            <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg border border-red-200">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {accountsList.map((acc) => (
+              <button
+                key={acc.accountKey}
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setSavedPhone(acc.phoneRaw || acc.phoneDigits);
+                  if (isOfflineNow) {
+                    handleOfflineLogin(acc.phoneRaw || acc.phoneDigits, acc.role);
+                  } else {
+                    handleAutoLoginWithPhone(acc.phoneRaw || acc.phoneDigits, acc.role);
+                  }
+                }}
+                className="w-full flex items-center justify-between p-4 border border-slate-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50/30 transition-all text-left"
+              >
+                <div>
+                  <div className="font-bold text-slate-900">{acc.phoneRaw || acc.phoneDigits}</div>
+                  <div className="text-xs text-emerald-700 font-semibold mt-0.5">
+                    {acc.role === 'ADMIN' ? 'Администратор' : acc.role === 'LEADER' ? 'Руководитель' : 'Садовник'}
+                    {acc.name ? ` (${acc.name})` : ''}
+                  </div>
+                </div>
+                <span className="text-slate-400 font-bold text-lg">→</span>
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setIsSavedPhoneMode(true)}
+              className="w-full flex justify-center py-3 px-4 border border-dashed border-emerald-300 rounded-xl text-sm font-semibold text-emerald-700 hover:bg-emerald-50 transition-all mt-2"
+            >
+              + Ввести другой номер
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isSavedPhoneMode && savedPhone) {
     return (
@@ -451,7 +598,7 @@ export default function LoginPage() {
               Вход в систему
             </h2>
             <p className="mt-2 text-center text-base text-slate-600 font-medium">
-              Вы входите с телефона <span className="font-bold text-slate-900">{formattedSavedPhone}</span>
+              Вы входите с телефона <span className="font-bold text-slate-900">{savedPhone}</span>
               <br />Это ваш номер?
             </p>
           </div>
@@ -515,7 +662,6 @@ export default function LoginPage() {
               id="phone"
               name="phone"
               type="text"
-              required
               placeholder="79991234567"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}

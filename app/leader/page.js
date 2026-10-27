@@ -405,13 +405,22 @@ export default function LeaderDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
+        const activePhone = localStorage.getItem('auth_phone');
+        const activeKey = activePhone ? String(activePhone).replace(/\D/g, '') : null;
+
         sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
-        localStorage.removeItem('auth_role');
-        localStorage.removeItem('auth_token');
+
+        if (activeKey) {
+          const { deactivateAccount } = await import('@/lib/offlineStore');
+          deactivateAccount(activeKey);
+        } else {
+          localStorage.removeItem('auth_role');
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('offline_session');
+          localStorage.removeItem('offline_session_ts');
+        }
         localStorage.removeItem('auth_session_cached');
-        localStorage.removeItem('offline_session');
-        localStorage.removeItem('offline_session_ts');
 
         if ('serviceWorker' in navigator) {
           const postWithReply = (targetSw, msg, timeoutMs = 500) => {
