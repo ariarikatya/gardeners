@@ -62,30 +62,23 @@ async function saveOfflineIdentitiesMap(map) {
 
 async function recordIdentity({ phone, role, name }) {
   if (!phone || !role) return;
-  const digits = String(phone).replace(/\D/g, '');
-  if (!digits) return;
-
-  const clean7 = digits.length === 11 && digits.startsWith('8') ? '7' + digits.slice(1) : (digits.length === 10 ? '7' + digits : digits);
-  const clean8 = digits.length === 11 && digits.startsWith('7') ? '8' + digits.slice(1) : (digits.length === 10 ? '8' + digits : digits);
+  const rawStr = String(phone).trim();
+  if (!rawStr) return;
 
   const map = await getOfflineIdentitiesMap();
-
-  for (const k of [clean7, clean8, digits]) {
-    if (!k) continue;
-    const existing = map[k] || { phone: k, roles: [], name: null, lastUsedRole: null };
-    const roles = Array.isArray(existing.roles) ? [...existing.roles] : (existing.role ? [existing.role] : []);
-    if (!roles.includes(role)) {
-      roles.push(role);
-    }
-
-    map[k] = {
-      phone: k,
-      roles,
-      name: name || existing.name || null,
-      lastUsedRole: role,
-      ts: Date.now(),
-    };
+  const existing = map[rawStr] || { phone: rawStr, roles: [], name: null, lastUsedRole: null };
+  const roles = Array.isArray(existing.roles) ? [...existing.roles] : (existing.role ? [existing.role] : []);
+  if (!roles.includes(role)) {
+    roles.push(role);
   }
+
+  map[rawStr] = {
+    phone: rawStr,
+    roles,
+    name: name || existing.name || null,
+    lastUsedRole: role,
+    ts: Date.now(),
+  };
 
   await saveOfflineIdentitiesMap(map);
 }
@@ -98,7 +91,7 @@ async function lookupRoleForPhone(phone) {
   const tail10 = digits.length >= 10 ? digits.slice(-10) : digits;
   const clean7 = tail10 ? '7' + tail10 : '';
   const clean8 = tail10 ? '8' + tail10 : '';
-  const candidateKeys = Array.from(new Set([tail10, clean7, clean8, digits, rawStr, clean7 ? '+' + clean7 : ''].filter(Boolean)));
+  const candidateKeys = Array.from(new Set([rawStr, digits, tail10, clean7, clean8, '+' + clean7].filter(Boolean)));
 
   // 1. Check /offline-identities
   const map = await getOfflineIdentitiesMap();
@@ -171,8 +164,8 @@ async function lookupRoleForPhone(phone) {
           const u8 = '8' + uTail10;
           if (candidateKeys.includes(uDigits) || candidateKeys.includes(uTail10) || candidateKeys.includes(u7) || candidateKeys.includes(u8)) {
             if (u.role && ['ADMIN', 'LEADER', 'GARDENER'].includes(u.role)) {
-              await recordIdentity({ phone: u7, role: u.role, name: u.name });
-              return { success: true, phone: u7, roles: [u.role], lastUsedRole: u.role, name: u.name || null };
+              await recordIdentity({ phone: u.phone, role: u.role, name: u.name });
+              return { success: true, phone: u.phone, roles: [u.role], lastUsedRole: u.role, name: u.name || null };
             }
           }
         }
@@ -231,48 +224,27 @@ async function restoreOfflineDataToNewCache() {
   CACHE_NAME = getCacheName();
   const cache = await caches.open(CACHE_NAME);
   const pCache = await caches.open(OFFLINE_DATA_CACHE);
-  const keysToRestore = ['/offline-profiles', '/offline-sessions', '/offline-active-account', '/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
+  const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
 
   const allCacheKeys = await caches.keys();
   for (const k of keysToRestore) {
     try {
-      let mergedObj = null;
       let matchedRes = null;
+      try {
+        matchedRes = await pCache.match(k);
+      } catch (e) {}
 
-      for (const cName of [OFFLINE_DATA_CACHE, CACHE_NAME, ...allCacheKeys]) {
-        try {
-          const c = await caches.open(cName);
-          const r = await c.match(k);
-          if (r) {
-            matchedRes = r;
-            try {
-              const data = await r.clone().json();
-              if (data && typeof data === 'object') {
-                if (k.endsWith('-users') || Array.isArray(data)) {
-                  if (!mergedObj) mergedObj = data;
-                } else {
-                  if (!mergedObj) mergedObj = {};
-                  for (const [subKey, subVal] of Object.entries(data)) {
-                    if (!subVal) continue;
-                    const existingSub = mergedObj[subKey];
-                    if (!existingSub || (subVal.ts || 0) >= (existingSub.ts || 0)) {
-                      mergedObj[subKey] = subVal;
-                    }
-                  }
-                }
-              }
-            } catch (e) {}
-          }
-        } catch (e) {}
+      if (!matchedRes) {
+        for (const cName of allCacheKeys) {
+          try {
+            const oldC = await caches.open(cName);
+            matchedRes = await oldC.match(k);
+            if (matchedRes) break;
+          } catch (e) {}
+        }
       }
 
-      if (mergedObj) {
-        const bodyStr = JSON.stringify(mergedObj);
-        const res1 = new Response(bodyStr, { headers: { 'Content-Type': 'application/json' } });
-        const res2 = new Response(bodyStr, { headers: { 'Content-Type': 'application/json' } });
-        await cache.put(k, res1);
-        await pCache.put(k, res2);
-      } else if (matchedRes) {
+      if (matchedRes) {
         await cache.put(k, matchedRes.clone());
         await pCache.put(k, matchedRes.clone());
       }
@@ -307,7 +279,11 @@ async function cacheRolePageAndChunks(path) {
   try {
     CACHE_NAME = getCacheName();
     const cache = await caches.open(CACHE_NAME);
-    const req = new Request(path, { credentials: 'include', redirect: 'manual' });
+    const req = new Request(path, {
+      credentials: 'omit',
+      redirect: 'follow',
+      headers: { 'x-sw-warmup': '1' }
+    });
     const res = await fetch(req);
     if (res && res.ok && res.status === 200 && !res.redirected && res.type !== 'opaqueredirect') {
       const text = await res.clone().text();
@@ -471,8 +447,8 @@ async function precacheAllRoles(retryCount = 0) {
     })
   );
 
-  if (hasError && retryCount < 3) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+  if (hasError && retryCount < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     return precacheAllRoles(retryCount + 1);
   }
 

@@ -820,21 +820,12 @@ export default function GardenerDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
-        const activePhone = localStorage.getItem('auth_phone');
-        const activeKey = activePhone ? String(activePhone).replace(/\D/g, '') : null;
-
         sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
-
-        if (activeKey) {
-          const { deactivateAccount } = await import('@/lib/offlineStore');
-          deactivateAccount(activeKey);
-        } else {
-          localStorage.removeItem('auth_role');
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('offline_session');
-          localStorage.removeItem('offline_session_ts');
-        }
+        localStorage.removeItem('auth_role');
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('offline_session');
+        localStorage.removeItem('offline_session_ts');
         localStorage.removeItem('auth_session_cached');
 
         if ('serviceWorker' in navigator) {

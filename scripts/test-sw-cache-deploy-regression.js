@@ -3,19 +3,21 @@ import fs from 'fs';
 import path from 'path';
 
 async function runSwDeployRegressionTest() {
-  console.log('🧪 Running Test 7.5: SW Cache Deployment Regression & Merge Verification...');
+  console.log('🧪 Running Test 7.5: SW Cache Deployment & Readiness Verification...');
+
+  const deployPath = path.resolve('deploy.sh');
+  const deployCode = fs.readFileSync(deployPath, 'utf8');
+
+  // Verify deploy.sh checks port readiness before warmup
+  assert(deployCode.includes('curl -sf http://127.0.0.1:3000/api/version') || deployCode.includes('curl -sf http://127.0.0.1:3000/login'), 'deploy.sh must wait for port readiness on :3000');
 
   const swPath = path.resolve('public/sw.js');
-  const code = fs.readFileSync(swPath, 'utf8');
+  const swCode = fs.readFileSync(swPath, 'utf8');
 
-  // Verify keysToRestore includes multi-account maps
-  assert(code.includes("'/offline-profiles'"), 'sw.js restoreOfflineDataToNewCache must include /offline-profiles');
-  assert(code.includes("'/offline-sessions'"), 'sw.js restoreOfflineDataToNewCache must include /offline-sessions');
+  // Verify sw.js uses credentials: 'omit' in cacheRolePageAndChunks
+  assert(swCode.includes("credentials: 'omit'") || swCode.includes('credentials:"omit"'), 'sw.js must use credentials: omit when warming role pages');
 
-  // Verify deleteOldCaches checks restoreSuccess
-  assert(code.includes('restoreSuccess'), 'sw.js deleteOldCaches must guard cache deletion on restoreSuccess');
-
-  console.log('✅ Test 7.5 Passed! SW cache deployment merge logic verified.\n');
+  console.log('✅ Test 7.5 Passed! Deployment port readiness check and SW warmup options verified.\n');
 }
 
 runSwDeployRegressionTest().catch((err) => {

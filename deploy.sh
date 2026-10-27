@@ -35,6 +35,22 @@ npm run build
 echo "=== [deploy.sh] Перезапускаю PM2 (zero-downtime reload) ==="
 pm2 reload anemon --update-env
 
+echo "=== [deploy.sh] Ожидаю запуск сервера на порту 3000 ==="
+PORT_READY=0
+for i in {1..30}; do
+  if curl -sf http://127.0.0.1:3000/api/version >/dev/null 2>&1 || curl -sf http://127.0.0.1:3000/login >/dev/null 2>&1; then
+    echo "Сервер готов к работе."
+    PORT_READY=1
+    break
+  fi
+  sleep 2
+done
+
+if [ "$PORT_READY" -ne 1 ]; then
+  echo " ОШИБКА: Сервер не ответил на :3000 в течение 60 секунд."
+  exit 1
+fi
+
 echo "=== [deploy.sh] Выполняю прогрев офлайн-кэша ==="
 npm run warmup-offline-cache
 
