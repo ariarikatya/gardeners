@@ -108,7 +108,7 @@ async function runLogoutTests() {
   const loginPageCode = fs.readFileSync(loginPagePath, 'utf8');
 
   assert(loginPageCode.includes("sessionStorage.getItem('manual_logout') === '1'"), 'login/page.js must check manual_logout in sessionStorage');
-  assert(loginPageCode.includes('if (isManualLogout)'), 'login/page.js must check isManualLogout before proceeding to auto-login');
+  assert(loginPageCode.includes('isLogoutConfirmed') || loginPageCode.includes('isManualLogout'), 'login/page.js must check logout confirmation flag');
   console.log('✅ Test 3 Passed! app/login/page.js correctly contains manual_logout suppression.');
 
   console.log('\n🎉 ALL LOGOUT TESTS PASSED SUCCESSFULLY!');

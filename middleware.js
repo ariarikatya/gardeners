@@ -31,9 +31,22 @@ export async function middleware(request) {
     return NextResponse.next();
   }
 
+  const accountKey = request.headers.get('x-account-key');
+  let tokenCookieName = 'token';
+  if (accountKey) {
+    try {
+      const buf = new TextEncoder().encode(accountKey);
+      const hashBuf = await crypto.subtle.digest('SHA-1', buf);
+      const sha1Hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (sha1Hex && request.cookies.has(`token_${sha1Hex}`)) {
+        tokenCookieName = `token_${sha1Hex}`;
+      }
+    } catch (e) {}
+  }
+
   const authHeader = request.headers.get('authorization');
   const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
-  const token = request.cookies.get('token')?.value || bearerToken;
+  const token = request.cookies.get(tokenCookieName)?.value || request.cookies.get('token')?.value || bearerToken;
 
   const isAdminPage = pathname.startsWith('/admin');
   const isGardenerPage = pathname.startsWith('/gardener');

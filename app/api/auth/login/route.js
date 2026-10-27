@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { signToken } from '@/lib/jwt';
+import crypto from 'crypto';
 
 function isRequestSecure(req) {
   if (process.env.NODE_ENV !== 'production') return false;
@@ -9,47 +10,96 @@ function isRequestSecure(req) {
   return proto.includes('https');
 }
 
+function getPhoneSearchVariants(rawPhone) {
+  const digits = String(rawPhone || '').replace(/\D/g, '').trim();
+  if (!digits) return [];
+  if (digits.length < 10) return [digits];
+  const tail10 = digits.slice(-10);
+  return Array.from(new Set([digits, '7' + tail10, '8' + tail10, tail10]));
+}
+
 export async function POST(req) {
   try {
-    const { phone } = await req.json();
+    const { phone, role: selectedRole } = await req.json();
     if (!phone) {
       return NextResponse.json({ error: 'Введите номер телефона' }, { status: 400 });
     }
 
-    // Приводим номер к единому формату цифр для поиска в БД
-    const cleanPhone = phone.replace(/\D/g, '');
+    const digits = String(phone).replace(/\D/g, '').trim();
+    const variants = getPhoneSearchVariants(phone);
 
-    // Ищем пользователя
-    const user = await prisma.user.findFirst({
-      where: { phone: cleanPhone },
+    const matches = await prisma.user.findMany({
+      where: {
+        phone: { in: variants },
+      },
     });
 
-    if (!user) {
+    if (!matches || matches.length === 0) {
       return NextResponse.json({ error: 'Пользователь с таким номером не найден' }, { status: 404 });
     }
 
-    // Создаем JWT-токен
+    const candidates = matches.map((u) => ({
+      id: u.id,
+      phone: u.phone,
+      role: u.role,
+      name: u.name || null,
+      gardenerId: u.gardenerId || null,
+    }));
+
+    if (candidates.length > 1 && !selectedRole) {
+      return NextResponse.json({
+        success: false,
+        multiple: true,
+        echoPhone: String(phone),
+        candidates,
+      });
+    }
+
+    let targetUser = candidates[0];
+    if (selectedRole) {
+      const found = candidates.find((c) => c.role === selectedRole);
+      if (found) targetUser = found;
+    }
+
     const token = await signToken({
-      userId: user.id,
-      phone: user.phone,
-      role: user.role,
-      gardenerId: user.gardenerId,
+      userId: targetUser.id,
+      phone: targetUser.phone,
+      role: targetUser.role,
+      gardenerId: targetUser.gardenerId,
     });
 
-    const response = NextResponse.json({ success: true, role: user.role, token });
-    
-    // Записываем токен в HttpOnly cookie
+    const sha1Hex = crypto.createHash('sha1').update(digits || targetUser.phone).digest('hex');
+
+    const response = NextResponse.json({
+      success: true,
+      role: targetUser.role,
+      token,
+      name: targetUser.name,
+      echoPhone: String(phone),
+      candidates,
+    });
+
     response.cookies.set('token', token, {
       httpOnly: true,
       secure: isRequestSecure(req),
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 365, // 365 дней
+      maxAge: 60 * 60 * 24 * 365,
       path: '/',
     });
 
+    if (sha1Hex) {
+      response.cookies.set(`token_${sha1Hex}`, token, {
+        httpOnly: true,
+        secure: isRequestSecure(req),
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 365,
+        path: '/',
+      });
+    }
+
     return response;
   } catch (error) {
-    console.error(error);
+    console.error('Login error:', error);
     return NextResponse.json({ error: 'Ошибка сервера' }, { status: 500 });
   }
 }
