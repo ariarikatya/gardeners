@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
-import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
@@ -195,13 +195,13 @@ export default function LeaderDashboard() {
       }
 
       if (!role) {
-        if (navigator.onLine) window.location.assign('/login');
+        if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
         return;
       }
       if (role !== 'LEADER') {
         if (role === 'ADMIN' || role === 'GARDENER') {
           window.location.assign(role === 'ADMIN' ? '/admin' : '/gardener');
-        } else if (navigator.onLine) {
+        } else if (navigator.onLine && !isOfflineSessionValid()) {
           window.location.assign('/login');
         }
         return;

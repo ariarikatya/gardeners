@@ -364,46 +364,86 @@ async function precacheAllRoles(retryCount = 0) {
     })
   );
 
+  // Warmup offline-cache artifacts load (guarded against empty/invalid overrides)
+  const warmupMapping = [
+    { pagePath: '/login', warmupFile: '/offline-cache/login.html' },
+    { pagePath: '/admin', warmupFile: '/offline-cache/admin.html' },
+    { pagePath: '/leader', warmupFile: '/offline-cache/leader.html' },
+    { pagePath: '/gardener', warmupFile: '/offline-cache/gardener.html' },
+  ];
+
   await Promise.all(
-    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users'].map(async (assetUrl) => {
+    warmupMapping.map(async ({ pagePath, warmupFile }) => {
+      try {
+        const warmupRes = await fetch(warmupFile);
+        if (warmupRes && warmupRes.ok) {
+          const text = await warmupRes.clone().text();
+          if (text.length > 500 && (text.includes('<!DOCTYPE html>') || text.includes('<html'))) {
+            const cache = await caches.open(CACHE_NAME);
+            const pCache = await caches.open(OFFLINE_DATA_CACHE);
+            const existingPage = await cache.match(new Request(pagePath)) || await pCache.match(new Request(pagePath));
+            let shouldPut = true;
+            if (existingPage) {
+              try {
+                const existingText = await existingPage.clone().text();
+                if (existingText && existingText.length > text.length) {
+                  shouldPut = false;
+                }
+              } catch (e) {}
+            }
+            if (shouldPut) {
+              safeCachePut(CACHE_NAME, new Request(pagePath), warmupRes.clone());
+              safeCachePut(OFFLINE_DATA_CACHE, new Request(pagePath), warmupRes);
+            }
+          }
+        }
+      } catch (e) {}
+    })
+  );
+
+  await Promise.all(
+    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users', '/offline-cache/offline-users.json'].map(async (assetUrl) => {
       try {
         const res = await fetch(assetUrl);
         if (res && res.ok) {
-          safeCachePut(CACHE_NAME, new Request(assetUrl), res.clone());
-          safeCachePut(OFFLINE_DATA_CACHE, new Request(assetUrl), res);
+          const targetPath = assetUrl === '/offline-cache/offline-users.json' ? '/api/public/offline-users' : assetUrl;
 
-          if (assetUrl === '/api/public/offline-users') {
+          if (assetUrl === '/api/public/offline-users' || assetUrl === '/offline-cache/offline-users.json') {
             try {
               const usersData = await res.clone().json();
               const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
-              const phoneRoleMap = {};
-              for (const u of userList) {
-                if (!u.phone || !u.role) continue;
-                const uDigits = String(u.phone).replace(/\D/g, '');
-                if (!uDigits) continue;
-                const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
-                const u7 = '7' + uTail10;
-                const u8 = '8' + uTail10;
-                const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
-                for (const k of [uTail10, u7, u8, uDigits]) {
-                  if (k) phoneRoleMap[k] = entry;
+              if (userList.length > 0) {
+                safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+                safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res.clone());
+
+                const phoneRoleMap = {};
+                for (const u of userList) {
+                  if (!u.phone || !u.role) continue;
+                  const uDigits = String(u.phone).replace(/\D/g, '');
+                  if (!uDigits) continue;
+                  const uTail10 = uDigits.length >= 10 ? uDigits.slice(-10) : uDigits;
+                  const u7 = '7' + uTail10;
+                  const u8 = '8' + uTail10;
+                  const entry = { role: u.role, name: u.name || null, lastUsedRole: u.role };
+                  for (const k of [uTail10, u7, u8, uDigits]) {
+                    if (k) phoneRoleMap[k] = entry;
+                  }
                 }
+                const mapStr = JSON.stringify(phoneRoleMap);
+                const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+                const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
+                const cache = await caches.open(CACHE_NAME);
+                await cache.put('/phone-role-map', mapRes1);
+                const pCache = await caches.open(OFFLINE_DATA_CACHE);
+                await pCache.put('/phone-role-map', mapRes2);
               }
-              const mapStr = JSON.stringify(phoneRoleMap);
-              const mapRes1 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
-              const mapRes2 = new Response(mapStr, { headers: { 'Content-Type': 'application/json' } });
-              const cache = await caches.open(CACHE_NAME);
-              await cache.put('/phone-role-map', mapRes1);
-              const pCache = await caches.open(OFFLINE_DATA_CACHE);
-              await pCache.put('/phone-role-map', mapRes2);
             } catch (err) {}
+          } else {
+            safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+            safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res);
           }
-        } else {
-          hasError = true;
         }
-      } catch (e) {
-        hasError = true;
-      }
+      } catch (e) {}
     })
   );
 
@@ -488,6 +528,12 @@ async function isOfflineSession() {
     if (sessionRes) {
       const data = await sessionRes.clone().json();
       if (data && data.active) {
+        const isOnline = typeof self !== 'undefined' && self.navigator && self.navigator.onLine;
+        const ts = data.ts || 0;
+        const sessionAge = Date.now() - ts;
+        if (sessionAge > MAX_AGE_30D && isOnline) {
+          return false;
+        }
         isOfflineSessionActive = true;
         return true;
       }
@@ -983,25 +1029,32 @@ self.addEventListener('fetch', (event) => {
           else if (userRole === 'LEADER') rolePath = '/leader';
           else if (userRole === 'GARDENER') rolePath = '/gardener';
 
-          // A1: При активной офлайн-сессии или если по номеру/сессии определена роль — ВСЕГДА отдавать закэшированную страницу роли БЕЗ проверки getPageCacheAge
+          // A1: При активной офлайн-сессии или если по номеру/сессии определена роль — ВСЕГДА отдавать закэшированную страницу роли
           if (activeSession || rolePath) {
             if (rolePath) {
               const roleKey = new Request(rolePath, { method: 'GET' });
               let cachedRolePage = await normalizeCachedResponse(await cache.match(roleKey)) || await normalizeCachedResponse(await pCache.match(roleKey));
               if (cachedRolePage) {
-                return withOfflineHeader(cachedRolePage);
+                const cacheAge = await getPageCacheAge(rolePath);
+                const extraHeaders = {};
+                if (cacheAge > MAX_AGE_24H) {
+                  extraHeaders['X-Offline-Stale'] = '1';
+                }
+                return withOfflineHeader(cachedRolePage, extraHeaders);
               }
             }
           }
 
-          // Запрошенный конкретный путь если роль не определена или роли в кэше нет: проверяем свежесть кэша
+          // Запрошенный конкретный путь если роль не определена или роли в кэше нет
           const directKey = new Request(url.pathname, { method: 'GET' });
           let cachedDirect = await normalizeCachedResponse(await cache.match(directKey)) || await normalizeCachedResponse(await pCache.match(directKey));
           if (cachedDirect) {
             const cacheAge = await getPageCacheAge(url.pathname);
-            if (cacheAge <= MAX_AGE_24H) {
-              return withOfflineHeader(cachedDirect);
+            const extraHeaders = {};
+            if (cacheAge > MAX_AGE_24H) {
+              extraHeaders['X-Offline-Stale'] = '1';
             }
+            return withOfflineHeader(cachedDirect, extraHeaders);
           }
 
           // Если роль вообще нигде не найдена — остаёмся на /login
@@ -1025,7 +1078,7 @@ self.addEventListener('fetch', (event) => {
         } catch (e) {}
 
         return new Response(
-          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Откройте сайт один раз при появлении интернета для полной загрузки офлайн-данных.</p></div></body></html>',
+          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Данные обновятся при появлении сети.</p></div></body></html>',
           { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' } }
         );
       })()
@@ -1043,7 +1096,8 @@ self.addEventListener('fetch', (event) => {
             console.warn(`[SW Server Error ${res.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
           }
           if (res && res.ok && res.status === 200 && !res.redirected) {
-            safeCachePut(CACHE_NAME, request, res);
+            safeCachePut(CACHE_NAME, request, res.clone());
+            safeCachePut(OFFLINE_DATA_CACHE, request, res.clone());
           }
           return res;
         }).catch(() => null);
@@ -1065,13 +1119,53 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // === GET /api/* read-only whitelisted endpoints: Stale-While-Revalidate ===
+  if (request.method === 'GET' && url.pathname.startsWith('/api/')) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        const cachedRes = await cache.match(request) || await pCache.match(request);
+
+        const fetchPromise = fetch(request).then(async (netRes) => {
+          if (netRes && netRes.ok && netRes.status === 200 && !netRes.redirected && netRes.type !== 'opaque' && netRes.type !== 'opaqueredirect') {
+            const clone1 = netRes.clone();
+            const clone2 = netRes.clone();
+            safeCachePut(CACHE_NAME, request, clone1);
+            safeCachePut(OFFLINE_DATA_CACHE, request, clone2);
+          }
+          return netRes;
+        }).catch(() => null);
+
+        if (cachedRes) {
+          event.waitUntil(fetchPromise);
+          return cachedRes;
+        }
+
+        try {
+          const netRes = await fetchPromise;
+          if (netRes) return netRes;
+        } catch (e) {}
+
+        return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      })()
+    );
+    return;
+  }
+
   // === Остальное: Network First ===
   event.respondWith(
     (async () => {
       try {
         const res = await fetch(request);
         if (res && res.status === 200 && res.ok && !res.redirected && res.type !== 'error') {
-          safeCachePut(CACHE_NAME, request, res);
+          safeCachePut(CACHE_NAME, request, res.clone());
+          if (url.pathname === '/api/public/offline-users') {
+            safeCachePut(OFFLINE_DATA_CACHE, request, res.clone());
+          }
         }
         return res;
       } catch (err) {

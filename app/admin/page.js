@@ -5,7 +5,7 @@ import Link from 'next/link';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 
 const emptyOrderForm = {
@@ -483,13 +483,13 @@ export default function AdminDashboard() {
       }
 
       if (!role) {
-        if (navigator.onLine) window.location.assign('/login');
+        if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
         return;
       }
       if (role !== 'ADMIN') {
         if (role === 'LEADER' || role === 'GARDENER') {
           window.location.assign(role === 'LEADER' ? '/leader' : '/gardener');
-        } else if (navigator.onLine) {
+        } else if (navigator.onLine && !isOfflineSessionValid()) {
           window.location.assign('/login');
         }
         return;
