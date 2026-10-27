@@ -81,6 +81,9 @@ export async function middleware(request) {
 
   const response = redirectUrl ? NextResponse.redirect(redirectUrl) : NextResponse.next();
 
+  // Set no-cache headers for page navigation routes and SW to prevent stale HTML caching
+  response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+
   // Sliding session: if token remaining TTL is < 30 days, generate a fresh token
   const nowSec = Math.floor(Date.now() / 1000);
   const expSec = payload.exp || 0;

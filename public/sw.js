@@ -961,44 +961,45 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       (async () => {
-        try {
-          const netRes = await fetchWithTimeout(request, 5000);
-          if (netRes) {
-            if (netRes.redirected || (netRes.status >= 300 && netRes.status < 400)) {
+        const isOnline = typeof self !== 'undefined' && self.navigator && self.navigator.onLine;
+
+        if (isOnline) {
+          try {
+            // Online: Attempt network fetch with 15s budget, never returning cached stale page if online
+            const netRes = await fetchWithTimeout(request, 15000);
+            if (netRes) {
+              if (netRes.ok && netRes.status === 200 && !netRes.redirected) {
+                const resClone = netRes.clone();
+                caches.open(CACHE_NAME).then((cache) => {
+                  try {
+                    const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
+                      headers: { 'Content-Type': 'application/json' }
+                    });
+                    if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
+                      cache.put('/login', resClone.clone());
+                      cache.put(new Request('/login'), resClone.clone());
+                      cache.put('/login-meta', metaRes);
+                    } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
+                      cache.put('/gardener', resClone.clone());
+                      cache.put(new Request('/gardener'), resClone.clone());
+                      cache.put('/gardener-meta', metaRes);
+                    } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
+                      cache.put('/admin', resClone.clone());
+                      cache.put(new Request('/admin'), resClone.clone());
+                      cache.put('/admin-meta', metaRes);
+                    } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
+                      cache.put('/leader', resClone.clone());
+                      cache.put(new Request('/leader'), resClone.clone());
+                      cache.put('/leader-meta', metaRes);
+                    }
+                  } catch (e) {}
+                }).catch(() => {});
+              }
               return netRes;
             }
-
-            if (netRes.ok && netRes.status === 200) {
-              const resClone = netRes.clone();
-              caches.open(CACHE_NAME).then((cache) => {
-                try {
-                  const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
-                    headers: { 'Content-Type': 'application/json' }
-                  });
-                  if (url.pathname === '/' || url.pathname === '/login' || url.pathname.startsWith('/login')) {
-                    cache.put('/login', resClone.clone());
-                    cache.put(new Request('/login'), resClone.clone());
-                    cache.put('/login-meta', metaRes);
-                  } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
-                    cache.put('/gardener', resClone.clone());
-                    cache.put(new Request('/gardener'), resClone.clone());
-                    cache.put('/gardener-meta', metaRes);
-                  } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
-                    cache.put('/admin', resClone.clone());
-                    cache.put(new Request('/admin'), resClone.clone());
-                    cache.put('/admin-meta', metaRes);
-                  } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
-                    cache.put('/leader', resClone.clone());
-                    cache.put(new Request('/leader'), resClone.clone());
-                    cache.put('/leader-meta', metaRes);
-                  }
-                } catch (e) {}
-              }).catch(() => {});
-            }
-            return netRes;
+          } catch (err) {
+            // Network failure or timeout online
           }
-        } catch (err) {
-          // Исключение сети (true offline)
         }
 
         // Кэш-фоллбэки при сбое сети (оффлайн):
