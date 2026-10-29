@@ -1287,13 +1287,19 @@ export default function AdminDashboard() {
           url: localUrl,
           type: isVideo ? 'video' : 'image',
           name: file.name,
-          isTemp: true
+          isTemp: true,
+          fileBlob: file
         };
 
         setFormData(prev => ({
           ...prev,
           orderMedia: [...(prev.orderMedia || []), tempItem]
         }));
+
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          clientNotify(`Связь отсутствует. Файл «${file.name}» сохранён локально для оффлайн-заказа.`, 'info');
+          continue;
+        }
 
         const fd = new FormData();
         fd.append('file', file);
@@ -1341,11 +1347,16 @@ export default function AdminDashboard() {
           }
         } catch (uploadErr) {
           console.error('Upload failed for file:', file.name, uploadErr);
-          clientNotify(`Ошибка загрузки «${file.name}»: ${uploadErr.message}`, 'error');
-          setFormData(prev => ({
-            ...prev,
-            orderMedia: (prev.orderMedia || []).filter(item => item.url !== localUrl)
-          }));
+          const isOfflineNow = typeof navigator !== 'undefined' && !navigator.onLine;
+          if (isOfflineNow) {
+            clientNotify(`Связь отсутствует. Файл «${file.name}» сохранён локально для оффлайн-заказа.`, 'info');
+          } else {
+            clientNotify(`Ошибка загрузки «${file.name}»: ${uploadErr.message}`, 'error');
+            setFormData(prev => ({
+              ...prev,
+              orderMedia: (prev.orderMedia || []).filter(item => item.url !== localUrl)
+            }));
+          }
         }
       }
     } finally {

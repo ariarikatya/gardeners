@@ -79,6 +79,9 @@ export async function POST(req) {
     });
   } catch (e) {
     console.error('Upload error:', e);
+    if (/parse body|formdata/i.test(e.message || '')) {
+      return NextResponse.json({ error: 'Файл повреждён при передаче. Попробуйте еще раз.', retryable: true }, { status: 400 });
+    }
     return NextResponse.json({ error: e.message || 'Не удалось загрузить фото' }, { status: 500 });
   }
 }
