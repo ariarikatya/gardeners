@@ -40,6 +40,20 @@ function formatPhoneDigits(phone) {
   return digits;
 }
 
+function parseOrderMedia(media) {
+  if (!media) return [];
+  if (Array.isArray(media)) return media;
+  if (typeof media === 'string') {
+    try {
+      const parsed = JSON.parse(media);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
 function xhrUpload(url, formData, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -1412,6 +1426,52 @@ export default function GardenerDashboard() {
               📝 {order.comment}
             </div>
           )}
+          {(() => {
+            const mediaList = parseOrderMedia(order.orderMedia);
+            if (mediaList.length === 0) return null;
+            return (
+              <div className="mt-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <div className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1">
+                  <span>📁</span>
+                  <span>Материалы от диспетчера ({mediaList.length}):</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {mediaList.map((item, idx) => {
+                    const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
+                    if (isVideo) {
+                      return (
+                        <a
+                          key={idx}
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+                        >
+                          <span className="text-sm">▶️</span>
+                          <span className="truncate max-w-[140px]">{item.name || `Видео ${idx + 1}`}</span>
+                        </a>
+                      );
+                    }
+                    return (
+                      <a
+                        key={idx}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block"
+                      >
+                        <img
+                          src={item.url}
+                          alt={item.name || `Материал ${idx + 1}`}
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 shadow-sm hover:opacity-90 transition-opacity"
+                        />
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
           {order.status === 'Выполнен' && (
             <div className="mt-2 space-y-1">
               {order.completionComment && (
@@ -1971,6 +2031,52 @@ export default function GardenerDashboard() {
                         <div className="text-sm font-bold text-slate-800">📍 Район: {order.district || 'Не указан'}</div>
                         <div className="text-xs text-slate-600 mt-1">🌿 Услуги: {order.service?.name || 'Не указаны'}</div>
                         {order.description && <div className="text-xs text-slate-600 mt-2 bg-white p-2.5 rounded-lg border border-slate-200">{order.description}</div>}
+                        {(() => {
+                          const mediaList = parseOrderMedia(order.orderMedia);
+                          if (mediaList.length === 0) return null;
+                          return (
+                            <div className="mt-2 bg-white p-2.5 rounded-lg border border-slate-200">
+                              <div className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1">
+                                <span>📁</span>
+                                <span>Материалы от диспетчера ({mediaList.length}):</span>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {mediaList.map((item, idx) => {
+                                  const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
+                                  if (isVideo) {
+                                    return (
+                                      <a
+                                        key={idx}
+                                        href={item.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+                                      >
+                                        <span className="text-sm">▶️</span>
+                                        <span className="truncate max-w-[140px]">{item.name || `Видео ${idx + 1}`}</span>
+                                      </a>
+                                    );
+                                  }
+                                  return (
+                                    <a
+                                      key={idx}
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="block"
+                                    >
+                                      <img
+                                        src={item.url}
+                                        alt={item.name || `Материал ${idx + 1}`}
+                                        className="w-16 h-16 object-cover rounded-lg border border-slate-300 shadow-sm hover:opacity-90 transition-opacity"
+                                      />
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {order.priceContract > 0 && <div className="text-xs font-semibold text-emerald-800 mt-2">Сумма по договору: {order.priceContract} ₽</div>}
 
                         {isClaimQueued && (

@@ -159,7 +159,7 @@ export async function POST(req) {
   if (body.id && String(body.id).startsWith('tmp_')) {
     delete body.id;
   }
-  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash, leadId, webLeadId } = body;
+  const { date, gardenerId, serviceId, clientName, address, district, clientPhone, description, priceContract, priceFact, employeeSalary, companyShare, comment, refusalReason, status, fromLead, serviceIds, isCash, leadId, webLeadId, orderMedia } = body;
 
   const orderDate = new Date(date);
   const days = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -248,6 +248,7 @@ export async function POST(req) {
           serviceIds: serviceIds ? JSON.stringify(serviceIds) : null,
           isCash: typeof isCash === 'boolean' ? isCash : true,
           amoDealId: leadAmoDealId,
+          orderMedia: orderMedia ? (typeof orderMedia === 'string' ? orderMedia : JSON.stringify(orderMedia)) : null,
         },
       });
     }
@@ -720,6 +721,11 @@ export async function PUT(req) {
   if (updateData.serviceIds !== undefined) {
     if (Array.isArray(updateData.serviceIds)) updateData.serviceIds = JSON.stringify(updateData.serviceIds);
     else if (typeof updateData.serviceIds === 'string' && updateData.serviceIds.trim() === '') updateData.serviceIds = null;
+  }
+
+  if (updateData.orderMedia !== undefined) {
+    if (Array.isArray(updateData.orderMedia)) updateData.orderMedia = JSON.stringify(updateData.orderMedia);
+    else if (typeof updateData.orderMedia === 'string' && updateData.orderMedia.trim() === '') updateData.orderMedia = null;
   }
 
   if (updateData.isCash !== undefined) updateData.isCash = Boolean(updateData.isCash);

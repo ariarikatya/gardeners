@@ -86,6 +86,7 @@ model Order {
   photoBefore           String? // Ссылка на фото "До" (ImgBB)
   photoAfter            String? // Ссылка на фото "После" (ImgBB)
   photoAct              String? // Ссылка на фото акта/документа (ImgBB) — если нужно несколько фото, поле хранит JSON array as string
+  orderMedia            String? // JSON-stringified array of media objects [{ url, type: 'image'|'video', name }]
   gardenerId            String?
   gardener              Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   wasAuction            Boolean   @default(false)
