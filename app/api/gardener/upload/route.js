@@ -2,26 +2,30 @@ import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/jwt';
 import prisma from '@/lib/prisma';
 import { scheduleYandexUpload } from '@/lib/yandexDisk';
-import { saveUploadedImage } from '@/lib/uploads';
+import { saveUploadedImage, saveUploadedMedia } from '@/lib/uploads';
 
-async function checkGardener(req) {
+async function checkAuth(req) {
   const token = req.cookies.get('token')?.value;
   if (!token) return { error: 'Необходима авторизация', status: 401 };
   const payload = await verifyToken(token);
   if (!payload) return { error: 'Сессия истекла', status: 401 };
-  if (payload.role !== 'GARDENER') return { error: 'Недостаточно прав', status: 403 };
+  if (!['GARDENER', 'ADMIN', 'LEADER'].includes(payload.role)) return { error: 'Недостаточно прав', status: 403 };
   return { payload };
 }
 
 export async function POST(req) {
-  const auth = await checkGardener(req);
+  const auth = await checkAuth(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const payload = auth.payload;
 
   try {
     const incomingForm = await req.formData();
-    const rawFiles = incomingForm.getAll('image');
-    const files = rawFiles.filter(f => f && typeof f === 'object' && typeof f.arrayBuffer === 'function');
+    const rawFiles = [
+      ...incomingForm.getAll('image'),
+      ...incomingForm.getAll('file'),
+      ...incomingForm.getAll('media')
+    ];
+    const files = rawFiles.filter((f, idx, self) => f && typeof f === 'object' && typeof f.arrayBuffer === 'function' && self.indexOf(f) === idx);
 
     if (files.length === 0) {
       return NextResponse.json({ error: 'Файл не передан' }, { status: 400 });
@@ -48,9 +52,9 @@ export async function POST(req) {
       return { file, fileBuffer, index };
     }));
 
-    // 2. Сохранение всех файлов локально со сжатием sharp (относительные URL)
-    const urls = await Promise.all(fileItems.map(async ({ fileBuffer }) => {
-      return await saveUploadedImage(fileBuffer);
+    // 2. Сохранение всех файлов локально (картинки сжимаются sharp, видео сохраняются с оригинальным расширением)
+    const urls = await Promise.all(fileItems.map(async ({ file, fileBuffer }) => {
+      return await saveUploadedMedia(fileBuffer, { filename: file.name, mimeType: file.type });
     }));
 
     // 3. Дублирование на Яндекс.Диск в фоновом режиме через очередь (с изолированной обработкой ошибок)

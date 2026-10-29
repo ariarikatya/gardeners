@@ -17,8 +17,22 @@ function getMimeType(filePath) {
       return 'image/gif';
     case '.svg':
       return 'image/svg+xml';
+    case '.mp4':
+      return 'video/mp4';
+    case '.webm':
+      return 'video/webm';
+    case '.mov':
+      return 'video/quicktime';
+    case '.mkv':
+      return 'video/x-matroska';
+    case '.avi':
+      return 'video/x-msvideo';
+    case '.3gp':
+      return 'video/3gpp';
+    case '.ogv':
+      return 'video/ogg';
     default:
-      return 'image/jpeg';
+      return 'application/octet-stream';
   }
 }
 

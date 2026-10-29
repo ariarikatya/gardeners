@@ -11,7 +11,7 @@ import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, remo
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
   priceContract: 0, priceFact: 0, employeeSalary: 0, companyShare: 0,
-  status: 'Новый заказ', comment: '', refusalReason: '', date: '', gardenerId: '', serviceId: '', serviceIds: [], isCash: true
+  status: 'Новый заказ', comment: '', refusalReason: '', date: '', gardenerId: '', serviceId: '', serviceIds: [], isCash: true, orderMedia: []
 };
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -28,6 +28,95 @@ function toDateKey(date) {
   const d = new Date(date);
   d.setHours(12, 0, 0, 0);
   return d.toISOString().split('T')[0];
+}
+
+function parseOrderMedia(media) {
+  if (!media) return [];
+  if (Array.isArray(media)) return media;
+  if (typeof media === 'string') {
+    try {
+      const parsed = JSON.parse(media);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function DistrictCombobox({ value, onChange, allDistricts = [], defaultDistricts = [] }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  const combinedDistricts = Array.from(new Set([...allDistricts, ...defaultDistricts]));
+
+  const filteredDistricts = combinedDistricts.filter(d =>
+    !value || d.toLowerCase().includes(String(value).toLowerCase().trim())
+  );
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative mt-1">
+      <div className="relative flex items-center">
+        <input
+          type="text"
+          value={value || ''}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => setIsOpen(true)}
+          className="block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500 pr-8 bg-white"
+          placeholder="Выбор или ввод района..."
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setIsOpen(!isOpen)}
+          className="absolute right-2 text-slate-400 hover:text-slate-600 p-1 text-xs"
+        >
+          ▼
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto z-50 divide-y divide-slate-100">
+          {filteredDistricts.length > 0 ? (
+            filteredDistricts.map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={`w-full text-left px-3 py-2.5 text-sm min-h-[44px] flex items-center hover:bg-emerald-50 hover:text-emerald-900 transition-colors ${value === d ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700'}`}
+                onClick={() => {
+                  onChange(d);
+                  setIsOpen(false);
+                }}
+              >
+                {d}
+              </button>
+            ))
+          ) : (
+            <div className="px-3 py-2.5 text-xs text-slate-400 italic">
+              {value ? `Произвольный район: «${value}»` : 'Начните ввод...'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function calculateOrthodoxEaster(year) {
@@ -251,6 +340,10 @@ export default function AdminDashboard() {
   const [selectedSlot, setSelectedSlot] = useState({ date: null, gardenerId: null });
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [formData, setFormData] = useState(emptyOrderForm);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [mediaProgress, setMediaProgress] = useState(0);
+  const mediaFileRef = useRef(null);
+  const mediaCameraRef = useRef(null);
   const [convertingLeadId, setConvertingLeadId] = useState(null);
   const [exportPeriod, setExportPeriod] = useState('all');
   const [exportCustomStart, setExportCustomStart] = useState('');
@@ -1086,6 +1179,7 @@ export default function AdminDashboard() {
         serviceId: existingOrder.serviceId || '',
         serviceIds: getOrderServiceIds(existingOrder),
         isCash: existingOrder.isCash !== undefined ? existingOrder.isCash : true,
+        orderMedia: parseOrderMedia(existingOrder.orderMedia),
       });
       setShowOrderModal(true);
       return;
@@ -1156,6 +1250,87 @@ export default function AdminDashboard() {
     fetchData();
   };
 
+  const handleMediaSelect = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    for (const file of files) {
+      const isVideo = file.type.startsWith('video/') || !!file.name.match(/\.(mp4|webm|mov|mkv|avi|3gp|ogv)$/i);
+      if (isVideo && file.size > 15 * 1024 * 1024) {
+        clientNotify(`Видео «${file.name}» превышает лимит 15 МБ`, 'error');
+        return;
+      }
+      if (!isVideo && file.size > 5 * 1024 * 1024) {
+        clientNotify(`Фото «${file.name}» превышает лимит 5 МБ`, 'error');
+        return;
+      }
+    }
+
+    setUploadingMedia(true);
+    setMediaProgress(0);
+
+    try {
+      const uploadedItems = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const isVideo = file.type.startsWith('video/') || !!file.name.match(/\.(mp4|webm|mov|mkv|avi|3gp|ogv)$/i);
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('type', 'order_media');
+
+        const data = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', '/api/gardener/upload', true);
+          if (xhr.upload) {
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                const filePct = (e.loaded / e.total) * 100;
+                const totalPct = Math.round(((i + filePct / 100) / files.length) * 100);
+                setMediaProgress(totalPct);
+              }
+            };
+          }
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve({}); }
+            } else {
+              try {
+                const errJson = JSON.parse(xhr.responseText);
+                reject(new Error(errJson.error || `Ошибка загрузки (${xhr.status})`));
+              } catch (e) {
+                reject(new Error(`Ошибка загрузки (${xhr.status})`));
+              }
+            }
+          };
+          xhr.onerror = () => reject(new Error('Сетевая ошибка при загрузке'));
+          xhr.send(fd);
+        });
+
+        if (data.url) {
+          uploadedItems.push({
+            url: data.url,
+            type: isVideo ? 'video' : 'image',
+            name: file.name
+          });
+        }
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        orderMedia: [...(prev.orderMedia || []), ...uploadedItems]
+      }));
+      clientNotify('Медиафайлы успешно загружены', 'success');
+    } catch (err) {
+      console.error('Media upload error:', err);
+      clientNotify(err.message || 'Ошибка при загрузке медиафайлов', 'error');
+    } finally {
+      setUploadingMedia(false);
+      setMediaProgress(0);
+      if (mediaFileRef.current) mediaFileRef.current.value = '';
+      if (mediaCameraRef.current) mediaCameraRef.current.value = '';
+    }
+  };
+
   const openEditOrderModal = (order) => {
     setSelectedOrder(order);
     setFormData({
@@ -1176,6 +1351,7 @@ export default function AdminDashboard() {
       serviceId: order.serviceId || '',
       serviceIds: getOrderServiceIds(order),
       isCash: order.isCash !== undefined ? order.isCash : true,
+      orderMedia: parseOrderMedia(order.orderMedia),
     });
     setShowOrderModal(true);
 
@@ -1186,6 +1362,10 @@ export default function AdminDashboard() {
           if (data && data.order) {
             const fresh = data.order;
             setSelectedOrder(prev => (prev && prev.id === fresh.id ? { ...prev, ...fresh } : prev));
+            setFormData(prev => ({
+              ...prev,
+              orderMedia: parseOrderMedia(fresh.orderMedia)
+            }));
           }
         })
         .catch(() => {});
@@ -3335,11 +3515,54 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+            {selectedOrder && selectedOrder.orderMedia && (() => {
+              const mediaList = parseOrderMedia(selectedOrder.orderMedia);
+              if (mediaList.length === 0) return null;
+              return (
+                <div className="mb-4">
+                  <div className="text-xs font-semibold text-slate-500 mb-2">📁 Материалы от диспетчера ({mediaList.length}):</div>
+                  <div className="flex flex-wrap gap-2">
+                    {mediaList.map((item, idx) => {
+                      const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
+                      if (isVideo) {
+                        return (
+                          <a
+                            key={idx}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg hover:bg-slate-700 transition-colors"
+                          >
+                            <span className="text-sm">▶️</span>
+                            <span className="truncate max-w-[120px]">{item.name || `Видео ${idx + 1}`}</span>
+                          </a>
+                        );
+                      }
+                      return (
+                        <a
+                          key={idx}
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block"
+                        >
+                          <img
+                            src={item.url}
+                            alt={item.name || `Медиа ${idx + 1}`}
+                            className="w-16 h-16 object-cover rounded-lg border border-slate-200"
+                          />
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             <form onSubmit={handleSaveOrder} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Дата</label>
-                  <input type="date" required value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="date" required value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border bg-white appearance-none leading-tight focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Садовник</label>
@@ -3359,7 +3582,7 @@ export default function AdminDashboard() {
                       }
                       setFormData({ ...formData, gardenerId: gId, employeeSalary: salary, companyShare: share });
                     }}
-                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
+                    className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <option value="">Без садовника (для аукциона)</option>
                     {gardeners.map(g => (
@@ -3371,50 +3594,26 @@ export default function AdminDashboard() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">ФИО Клиента</label>
-                  <input type="text" required value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="text" required value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Телефон Клиента</label>
-                  <input type="text" required value={formData.clientPhone} onChange={e => setFormData({...formData, clientPhone: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="text" required value={formData.clientPhone} onChange={e => setFormData({...formData, clientPhone: e.target.value})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Район (примерно где)</label>
-                  <input 
-                    type="text" 
-                    list="district-list" 
-                    value={formData.district} 
-                    onChange={e => setFormData({...formData, district: e.target.value})} 
-                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
-                    placeholder="Начните вводить район..."
+                  <DistrictCombobox
+                    value={formData.district}
+                    onChange={val => setFormData({ ...formData, district: val })}
+                    allDistricts={allDistricts}
+                    defaultDistricts={DEFAULT_DISTRICTS}
                   />
-                  <datalist id="district-list">
-                    {/* Сначала популярные из заказов */}
-                    {allDistricts.slice(0, 10).map(d => <option key={d} value={d} />)}
-                    {/* Затем все остальные фиксированные варианты */}
-                    <option value="Шумейка" />
-                    <option value="Генеральское" />
-                    <option value="Малая Тополевка" />
-                    <option value="Усть курдюм" />
-                    <option value="Зоналка" />
-                    <option value="Юбилейный" />
-                    <option value="Кумыска" />
-                    <option value="Центр" />
-                    <option value="Поливановка" />
-                    <option value="Ленинский район" />
-                    <option value="Трещиха" />
-                    <option value="Маркс" />
-                    <option value="Заводской район" />
-                    <option value="Дальняк" />
-                    <option value="Другое" />
-                    {/* Остальные из истории заказов */}
-                    {allDistricts.slice(10).map(d => <option key={d} value={d} />)}
-                  </datalist>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Адрес</label>
-                  <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="text" required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
               <div>
@@ -3436,21 +3635,21 @@ export default function AdminDashboard() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Сумма по договору</label>
-                  <input type="number" value={formData.priceContract} onChange={e => setFormData({...formData, priceContract: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="number" value={formData.priceContract} onChange={e => setFormData({...formData, priceContract: parseFloat(e.target.value) || 0})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Сумма по факту</label>
-                  <input type="number" value={formData.priceFact} onChange={e => setFormData({...formData, priceFact: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="number" value={formData.priceFact} onChange={e => setFormData({...formData, priceFact: parseFloat(e.target.value) || 0})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">ЗП сотрудника</label>
-                  <input type="number" value={formData.employeeSalary} onChange={e => setFormData({...formData, employeeSalary: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="number" value={formData.employeeSalary} onChange={e => setFormData({...formData, employeeSalary: parseFloat(e.target.value) || 0})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Доля фирмы</label>
-                  <input type="number" value={formData.companyShare} onChange={e => setFormData({...formData, companyShare: parseFloat(e.target.value) || 0})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                  <input type="number" value={formData.companyShare} onChange={e => setFormData({...formData, companyShare: parseFloat(e.target.value) || 0})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
               <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
@@ -3466,7 +3665,7 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Статус заказа</label>
-                <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2">
+                <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
                   <option value="Новый заказ">Новый заказ</option>
                   <option value="Перенос">Перенос</option>
                   <option value="Отказ">Отказ</option>
@@ -3483,15 +3682,118 @@ export default function AdminDashboard() {
                     required
                     value={formData.refusalReason || ''}
                     onChange={e => setFormData({...formData, refusalReason: e.target.value})}
-                    className="mt-1 block w-full border border-slate-300 rounded-lg p-2"
+                    className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     placeholder="Укажите причину отказа или отмены..."
                   />
                 </div>
               )}
               <div>
                 <label className="block text-xs font-semibold text-slate-500">Комментарий</label>
-                <input type="text" value={formData.comment} onChange={e => setFormData({...formData, comment: e.target.value})} className="mt-1 block w-full border border-slate-300 rounded-lg p-2" />
+                <input type="text" value={formData.comment} onChange={e => setFormData({...formData, comment: e.target.value})} className="mt-1 block w-full h-10 text-sm border border-slate-300 rounded-lg px-3 py-2 box-border focus:outline-none focus:ring-2 focus:ring-emerald-500" />
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">
+                  Фото/видео (необязательно)
+                </label>
+
+                {formData.orderMedia && formData.orderMedia.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                    {formData.orderMedia.map((item, idx) => {
+                      const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
+                      return (
+                        <div key={idx} className="relative group">
+                          {isVideo ? (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 px-2.5 py-2 bg-slate-800 text-white text-xs font-medium rounded-lg h-16 max-w-[140px] pr-6"
+                            >
+                              <span className="text-base">▶️</span>
+                              <span className="truncate text-[11px]">{item.name || `Видео ${idx + 1}`}</span>
+                            </a>
+                          ) : (
+                            <a href={item.url} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={item.url}
+                                alt={item.name || `Фото ${idx + 1}`}
+                                className="w-16 h-16 object-cover rounded-lg border border-slate-300"
+                              />
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                orderMedia: (prev.orderMedia || []).filter((_, i) => i !== idx)
+                              }));
+                            }}
+                            className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shadow hover:bg-rose-700"
+                            title="Удалить"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {uploadingMedia && (
+                  <div className="mb-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 font-medium">
+                    <div className="flex justify-between mb-1">
+                      <span>Загрузка медиа...</span>
+                      <span>{mediaProgress}%</span>
+                    </div>
+                    <div className="w-full bg-emerald-200 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-emerald-600 h-full transition-all duration-200"
+                        style={{ width: `${mediaProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <input
+                  ref={mediaFileRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
+                  onChange={(e) => handleMediaSelect(e.target.files)}
+                />
+                <input
+                  ref={mediaCameraRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
+                  onChange={(e) => handleMediaSelect(e.target.files)}
+                />
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={uploadingMedia}
+                    onClick={(e) => { e.preventDefault(); mediaFileRef.current?.click(); }}
+                    className="flex-1 min-h-[44px] py-2 px-3 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    <span>📁 Выбрать файлы</span>
+                    <span className="text-[10px] text-slate-400">(фото ≤5MB, видео ≤15MB)</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={uploadingMedia}
+                    onClick={(e) => { e.preventDefault(); mediaCameraRef.current?.click(); }}
+                    className="min-h-[44px] py-2 px-3 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                  >
+                    <span>📷 Камера</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="flex gap-2 justify-between pt-4">
                 <div>
                   {selectedOrder && (
@@ -3510,8 +3812,12 @@ export default function AdminDashboard() {
                   <button type="button" onClick={() => handleSaveOrder(null, true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg">
                     На аукцион
                   </button>
-                  <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
-                    Сохранить
+                  <button
+                    type="submit"
+                    disabled={uploadingMedia}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium disabled:opacity-50"
+                  >
+                    {uploadingMedia ? `Загрузка (${mediaProgress}%)...` : 'Сохранить'}
                   </button>
                 </div>
               </div>
