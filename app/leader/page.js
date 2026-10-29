@@ -7,6 +7,7 @@ import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
+import { compressImage } from '@/lib/imageCompress';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -1360,7 +1361,8 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
     if (files.length === 0) return;
 
     try {
-      const file = files[0];
+      let file = files[0];
+      file = await compressImage(file);
       const base64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result.split(',')[1]);
@@ -1371,7 +1373,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
       doUploadCatalogImage(base64);
     } catch (err) {
       console.error(err);
-      alert('Ошибка чтения файла');
+      alert(err.message || 'Ошибка чтения файла');
     }
   };
 
@@ -1573,7 +1575,7 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
               ) : null}
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 onChange={handleFileUpload}
                 disabled={uploading}
                 className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 disabled:opacity-50"

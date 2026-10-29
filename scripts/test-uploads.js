@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { saveUploadedImage, getUploadsDir, checkDiskSpace } from '../lib/uploads.js';
+import { saveUploadedImage, saveUploadedMedia, getUploadsDir, checkDiskSpace } from '../lib/uploads.js';
 
 let sharp;
 try {
@@ -207,6 +207,14 @@ async function runUploadsTests() {
     } finally {
       process.env.UPLOADS_DIR = oldUploadsDir;
     }
+
+    // Test 8: Video media upload via saveUploadedMedia
+    console.log('Test 8: Testing video media upload via saveUploadedMedia...');
+    const videoBuffer = Buffer.from('mock-mp4-video-content-stream');
+    const videoUrl = await saveUploadedMedia(videoBuffer, { filename: 'test_video.mp4', mimeType: 'video/mp4' });
+    assert(videoUrl.startsWith('/api/files/'), 'Expected video URL starting with /api/files/');
+    assert(videoUrl.endsWith('.mp4'), `Expected video URL ending with .mp4, got ${videoUrl}`);
+    console.log('✅ Test 8 Passed! Video uploaded and saved with original extension.');
 
     console.log('\n🎉 ALL LOCAL UPLOAD TESTS PASSED SUCCESSFULLY!');
   } finally {

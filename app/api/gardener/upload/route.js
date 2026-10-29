@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import path from 'path';
 import { verifyToken } from '@/lib/jwt';
 import prisma from '@/lib/prisma';
 import { scheduleYandexUpload } from '@/lib/yandexDisk';
@@ -64,7 +65,8 @@ export async function POST(req) {
       const timestamp = Date.now();
 
       for (const item of fileItems) {
-        const fileName = `${which}_${timestamp}_${item.index + 1}.jpg`;
+        const ext = item.file && item.file.name ? (path.extname(item.file.name).toLowerCase() || '.jpg') : '.jpg';
+        const fileName = `${which}_${timestamp}_${item.index + 1}${ext}`;
         scheduleYandexUpload({ folderPath, fileName, fileBuffer: item.fileBuffer });
       }
     } catch (yadiskErr) {
@@ -77,6 +79,9 @@ export async function POST(req) {
     });
   } catch (e) {
     console.error('Upload error:', e);
+    if (/parse body|formdata/i.test(e.message || '')) {
+      return NextResponse.json({ error: 'Файл повреждён при передаче. Попробуйте еще раз.', retryable: true }, { status: 400 });
+    }
     return NextResponse.json({ error: e.message || 'Не удалось загрузить фото' }, { status: 500 });
   }
 }

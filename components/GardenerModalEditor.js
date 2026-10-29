@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
+import { compressImage } from '@/lib/imageCompress';
 
 export default function GardenerModalEditor({ gardener, type, onClose, onSave }) {
   // type: 'skills' | 'inventory' | 'preparations' | 'works' | 'reviews'
@@ -90,7 +91,8 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
     if (files.length === 0) return;
 
     try {
-      for (const file of files) {
+      for (let rawFile of files) {
+        const file = await compressImage(rawFile);
         const base64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result.split(',')[1]);
@@ -337,7 +339,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                               + Фото
                               <input
                                 type="file"
-                                accept="image/*"
+                                accept="image/*,.heic,.heif"
                                 multiple
                                 onChange={(e) => handleFileUpload(e, (urls) => handleAddPhotosToWork(idx, urls))}
                                 className="absolute inset-0 opacity-0 cursor-pointer"
@@ -473,7 +475,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 )}
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.heic,.heif"
                   onChange={(e) => handleFileUpload(e, (urls) => setInvImage(urls[0]))}
                   className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
                 />
@@ -528,7 +530,7 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                 )}
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,.heic,.heif"
                   onChange={(e) => handleFileUpload(e, (urls) => setPrepImage(urls[0]))}
                   className="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
                 />

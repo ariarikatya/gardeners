@@ -7,6 +7,7 @@ import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
+import { compressImage } from '@/lib/imageCompress';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -1251,77 +1252,113 @@ export default function AdminDashboard() {
 
   const handleMediaSelect = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList);
-
-    for (const file of files) {
-      const isVideo = file.type.startsWith('video/') || !!file.name.match(/\.(mp4|webm|mov|mkv|avi|3gp|ogv)$/i);
-      if (isVideo && file.size > 15 * 1024 * 1024) {
-        clientNotify(`Видео «${file.name}» превышает лимит 15 МБ`, 'error');
-        return;
-      }
-      if (!isVideo && file.size > 5 * 1024 * 1024) {
-        clientNotify(`Фото «${file.name}» превышает лимит 5 МБ`, 'error');
-        return;
-      }
-    }
+    const rawFiles = Array.from(fileList);
 
     setUploadingMedia(true);
     setMediaProgress(0);
 
+    const tempItems = [];
     try {
-      const uploadedItems = [];
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const isVideo = file.type.startsWith('video/') || !!file.name.match(/\.(mp4|webm|mov|mkv|avi|3gp|ogv)$/i);
+      for (let i = 0; i < rawFiles.length; i++) {
+        let file = rawFiles[i];
+        const isVideo = (file.type && file.type.startsWith('video/')) ||
+                        !!(file.name && file.name.match(/\.(mp4|webm|mov|mkv|avi|3gp|ogv|hevc)$/i));
+
+        if (!isVideo) {
+          try {
+            file = await compressImage(file);
+          } catch (compressErr) {
+            clientNotify(compressErr.message || `Ошибка сжатия «${file.name}»`, 'error');
+            continue;
+          }
+        }
+
+        if (isVideo && file.size > 25 * 1024 * 1024) {
+          clientNotify(`Видео «${file.name}» (${(file.size / 1024 / 1024).toFixed(1)} МБ) превышает лимит 25 МБ. Пожалуйста, снимите более короткое видео (до 10-15 сек) или выберите файл меньше 25 МБ.`, 'error');
+          continue;
+        }
+        if (!isVideo && file.size > 5 * 1024 * 1024) {
+          clientNotify(`Фото «${file.name}» (${(file.size / 1024 / 1024).toFixed(1)} МБ) превышает лимит 5 МБ`, 'error');
+          continue;
+        }
+
+        const localUrl = URL.createObjectURL(file);
+        const tempItem = {
+          url: localUrl,
+          type: isVideo ? 'video' : 'image',
+          name: file.name,
+          isTemp: true,
+          fileBlob: file
+        };
+
+        setFormData(prev => ({
+          ...prev,
+          orderMedia: [...(prev.orderMedia || []), tempItem]
+        }));
+
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          clientNotify(`Связь отсутствует. Файл «${file.name}» сохранён локально для оффлайн-заказа.`, 'info');
+          continue;
+        }
+
         const fd = new FormData();
         fd.append('file', file);
         fd.append('type', 'order_media');
 
-        const data = await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('POST', '/api/gardener/upload', true);
-          if (xhr.upload) {
-            xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) {
-                const filePct = (e.loaded / e.total) * 100;
-                const totalPct = Math.round(((i + filePct / 100) / files.length) * 100);
-                setMediaProgress(totalPct);
+        try {
+          const data = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/gardener/upload', true);
+            if (xhr.upload) {
+              xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  const filePct = (e.loaded / e.total) * 100;
+                  const totalPct = Math.round(((i + filePct / 100) / rawFiles.length) * 100);
+                  setMediaProgress(totalPct);
+                }
+              };
+            }
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve({}); }
+              } else {
+                try {
+                  const errJson = JSON.parse(xhr.responseText);
+                  reject(new Error(errJson.error || `Ошибка сервера (${xhr.status})`));
+                } catch (e) {
+                  reject(new Error(`Ошибка сервера (${xhr.status})`));
+                }
               }
             };
-          }
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve({}); }
-            } else {
-              try {
-                const errJson = JSON.parse(xhr.responseText);
-                reject(new Error(errJson.error || `Ошибка загрузки (${xhr.status})`));
-              } catch (e) {
-                reject(new Error(`Ошибка загрузки (${xhr.status})`));
-              }
-            }
-          };
-          xhr.onerror = () => reject(new Error('Сетевая ошибка при загрузке'));
-          xhr.send(fd);
-        });
-
-        if (data.url) {
-          uploadedItems.push({
-            url: data.url,
-            type: isVideo ? 'video' : 'image',
-            name: file.name
+            xhr.onerror = () => reject(new Error('Сетевая ошибка при загрузке'));
+            xhr.send(fd);
           });
+
+          if (data.url) {
+            setFormData(prev => ({
+              ...prev,
+              orderMedia: (prev.orderMedia || []).map(item =>
+                item.url === localUrl ? { url: data.url, type: isVideo ? 'video' : 'image', name: file.name } : item
+              )
+            }));
+            clientNotify(`Файл «${file.name}» успешно загружен`, 'success');
+          } else {
+            throw new Error(data.error || 'Сервер не вернул URL файла');
+          }
+        } catch (uploadErr) {
+          console.error('Upload failed for file:', file.name, uploadErr);
+          const isOfflineNow = typeof navigator !== 'undefined' && !navigator.onLine;
+          if (isOfflineNow) {
+            clientNotify(`Связь отсутствует. Файл «${file.name}» сохранён локально для оффлайн-заказа.`, 'info');
+          } else {
+            clientNotify(`Ошибка загрузки «${file.name}»: ${uploadErr.message}`, 'error');
+            setFormData(prev => ({
+              ...prev,
+              orderMedia: (prev.orderMedia || []).filter(item => item.url !== localUrl)
+            }));
+          }
         }
       }
-
-      setFormData(prev => ({
-        ...prev,
-        orderMedia: [...(prev.orderMedia || []), ...uploadedItems]
-      }));
-      clientNotify('Медиафайлы успешно загружены', 'success');
-    } catch (err) {
-      console.error('Media upload error:', err);
-      clientNotify(err.message || 'Ошибка при загрузке медиафайлов', 'error');
     } finally {
       setUploadingMedia(false);
       setMediaProgress(0);
@@ -1392,6 +1429,16 @@ export default function AdminDashboard() {
     const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
 
     if (isOfflineMode) {
+      const mediaPhotos = (formDataCustom.orderMedia || [])
+        .filter(m => m && (m.fileBlob || (m.url && m.url.startsWith('blob:'))))
+        .map(m => ({
+          field: 'orderMedia',
+          blob: m.fileBlob,
+          fileName: m.name || (m.type === 'video' ? 'video.mp4' : 'photo.jpg'),
+          mediaType: m.type || 'image',
+          tempUrl: m.url
+        }));
+
       if (!selectedOrder) {
         const tmpId = 'tmp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         const newOrder = {
@@ -1413,6 +1460,7 @@ export default function AdminDashboard() {
           url: endpoint,
           method: 'POST',
           payload: { ...formDataCustom, id: tmpId, fromLead: !!convertingLeadId },
+          photos: mediaPhotos,
           scope: 'admin'
         });
       } else {
@@ -1436,6 +1484,7 @@ export default function AdminDashboard() {
           url: endpoint,
           method: 'PUT',
           payload: { id: selectedOrder.id, ...formDataCustom },
+          photos: mediaPhotos,
           scope: 'admin'
         });
       }
@@ -3759,7 +3808,7 @@ export default function AdminDashboard() {
                 <input
                   ref={mediaFileRef}
                   type="file"
-                  accept="image/*,video/*"
+                  accept="image/*,video/*,.heic,.heif,.mov,.mp4,.hevc"
                   multiple
                   className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                   onChange={(e) => handleMediaSelect(e.target.files)}
@@ -3773,7 +3822,7 @@ export default function AdminDashboard() {
                     className="w-full min-h-[44px] py-2.5 px-3 border border-slate-300 rounded-lg text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 active:bg-slate-100"
                   >
                     <span>📁 Прикрепить фото/видео</span>
-                    <span className="text-[10px] sm:text-xs text-slate-400 font-normal">(фото ≤5MB, видео ≤15MB)</span>
+                    <span className="text-[10px] sm:text-xs text-slate-400 font-normal">(фото ≤5MB, видео ≤25MB)</span>
                   </button>
                 </div>
               </div>
