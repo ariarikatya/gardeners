@@ -17,12 +17,18 @@ function getMimeType(filePath) {
       return 'image/gif';
     case '.svg':
       return 'image/svg+xml';
+    case '.heic':
+      return 'image/heic';
+    case '.heif':
+      return 'image/heif';
     case '.mp4':
       return 'video/mp4';
     case '.webm':
       return 'video/webm';
     case '.mov':
       return 'video/quicktime';
+    case '.m4v':
+      return 'video/x-m4v';
     case '.mkv':
       return 'video/x-matroska';
     case '.avi':
@@ -31,6 +37,8 @@ function getMimeType(filePath) {
       return 'video/3gpp';
     case '.ogv':
       return 'video/ogg';
+    case '.hevc':
+      return 'video/hevc';
     default:
       return 'application/octet-stream';
   }

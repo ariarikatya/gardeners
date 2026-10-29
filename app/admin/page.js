@@ -1273,8 +1273,8 @@ export default function AdminDashboard() {
           }
         }
 
-        if (isVideo && file.size > 15 * 1024 * 1024) {
-          clientNotify(`Видео «${file.name}» (15 МБ) превышает лимит 15 МБ`, 'error');
+        if (isVideo && file.size > 25 * 1024 * 1024) {
+          clientNotify(`Видео «${file.name}» (${(file.size / 1024 / 1024).toFixed(1)} МБ) превышает лимит 25 МБ. Пожалуйста, снимите более короткое видео (до 10-15 сек) или выберите файл меньше 25 МБ.`, 'error');
           continue;
         }
         if (!isVideo && file.size > 5 * 1024 * 1024) {
@@ -1418,6 +1418,16 @@ export default function AdminDashboard() {
     const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
 
     if (isOfflineMode) {
+      const mediaPhotos = (formDataCustom.orderMedia || [])
+        .filter(m => m && (m.fileBlob || (m.url && m.url.startsWith('blob:'))))
+        .map(m => ({
+          field: 'orderMedia',
+          blob: m.fileBlob,
+          fileName: m.name || (m.type === 'video' ? 'video.mp4' : 'photo.jpg'),
+          mediaType: m.type || 'image',
+          tempUrl: m.url
+        }));
+
       if (!selectedOrder) {
         const tmpId = 'tmp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
         const newOrder = {
@@ -1439,6 +1449,7 @@ export default function AdminDashboard() {
           url: endpoint,
           method: 'POST',
           payload: { ...formDataCustom, id: tmpId, fromLead: !!convertingLeadId },
+          photos: mediaPhotos,
           scope: 'admin'
         });
       } else {
@@ -1462,6 +1473,7 @@ export default function AdminDashboard() {
           url: endpoint,
           method: 'PUT',
           payload: { id: selectedOrder.id, ...formDataCustom },
+          photos: mediaPhotos,
           scope: 'admin'
         });
       }
@@ -3799,7 +3811,7 @@ export default function AdminDashboard() {
                     className="w-full min-h-[44px] py-2.5 px-3 border border-slate-300 rounded-lg text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 active:bg-slate-100"
                   >
                     <span>📁 Прикрепить фото/видео</span>
-                    <span className="text-[10px] sm:text-xs text-slate-400 font-normal">(фото ≤5MB, видео ≤15MB)</span>
+                    <span className="text-[10px] sm:text-xs text-slate-400 font-normal">(фото ≤5MB, видео ≤25MB)</span>
                   </button>
                 </div>
               </div>
