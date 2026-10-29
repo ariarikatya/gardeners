@@ -343,7 +343,6 @@ export default function AdminDashboard() {
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [mediaProgress, setMediaProgress] = useState(0);
   const mediaFileRef = useRef(null);
-  const mediaCameraRef = useRef(null);
   const [convertingLeadId, setConvertingLeadId] = useState(null);
   const [exportPeriod, setExportPeriod] = useState('all');
   const [exportCustomStart, setExportCustomStart] = useState('');
@@ -1327,7 +1326,6 @@ export default function AdminDashboard() {
       setUploadingMedia(false);
       setMediaProgress(0);
       if (mediaFileRef.current) mediaFileRef.current.value = '';
-      if (mediaCameraRef.current) mediaCameraRef.current.value = '';
     }
   };
 
@@ -3444,121 +3442,123 @@ export default function AdminDashboard() {
 
       {/* Модальное окно заказа */}
       {showOrderModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-xl">
-            <h3 className="text-xl font-bold text-slate-800 mb-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-2 sm:p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col p-4 sm:p-6 shadow-xl relative overflow-hidden">
+            <h3 className="text-lg sm:text-xl font-bold text-slate-800 mb-3 flex-shrink-0">
               {selectedOrder ? 'Редактировать / переместить заказ' : `Новая запись на ${selectedSlot.date}`}
             </h3>
-            {(() => {
-              if (!selectedOrder || !formData.date || !formData.gardenerId) return null;
-              const isBlocked = blockedDays.some(b => b.gardenerId === formData.gardenerId && (b.date.startsWith(formData.date) || toDateKey(b.date) === formData.date));
-              if (!isBlocked) return null;
-              return (
-                <div className="mb-4 text-xs font-semibold text-slate-600 bg-slate-100 p-2.5 rounded-lg border border-slate-200 flex items-center gap-2">
-                  <span>🛑</span>
-                  <span>день закрыт — можно только править, нельзя переносить других</span>
-                </div>
-              );
-            })()}
-            {selectedOrder && selectedOrder.status === 'Перенос' && selectedOrder.transferRequestedDate && (
-              <div className="mb-4 text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-100">
-                🗓 Садовник запросил перенос на <b>{new Date(selectedOrder.transferRequestedDate).toLocaleDateString('ru-RU')}</b>. Смените дату/садовника ниже и статус на «Новый заказ», либо назначьте другого свободного садовника.
-              </div>
-            )}
-            {selectedOrder && selectedOrder.status === 'Отказ' && selectedOrder.refusalReason && (
-              <div className="mb-4 text-sm text-rose-800 bg-rose-50 p-3 rounded-lg border border-rose-100">
-                ✕ Садовник отказался: «{selectedOrder.refusalReason}». Назначьте другого садовника и смените статус на «Новый заказ».
-              </div>
-            )}
-            {selectedOrder && selectedOrder.completionComment && (
-              <div className="mb-4 text-xs text-emerald-900 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
-                💬 <b>Комментарий садовника:</b> {selectedOrder.completionComment}
-              </div>
-            )}
-            {selectedOrder && selectedOrder.status === 'Выполнен' && (selectedOrder.photoBefore || selectedOrder.photoAfter || selectedOrder.photoAct) && (
-              <div className="mb-4">
-                <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
-                <div className="flex gap-2">
-                  {(() => {
-                    const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
-                    try {
-                      const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
-                      return arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                          <span className="text-[10px] text-slate-400">До</span>
-                        </a>
-                      ));
-                    } catch (e) { return null; }
-                  })()}
 
-                  {(() => {
-                    const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
-                    try {
-                      const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
-                      return arr.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                          <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                          <span className="text-[10px] text-slate-400">После</span>
-                        </a>
-                      ));
-                    } catch (e) { return null; }
-                  })()}
-
-                  {(() => {
-                    const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
-                    try {
-                      const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
-                      return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
-                    } catch (e) { return null; }
-                  })()}
-                </div>
-              </div>
-            )}
-            {selectedOrder && selectedOrder.orderMedia && (() => {
-              const mediaList = parseOrderMedia(selectedOrder.orderMedia);
-              if (mediaList.length === 0) return null;
-              return (
-                <div className="mb-4">
-                  <div className="text-xs font-semibold text-slate-500 mb-2">📁 Материалы от диспетчера ({mediaList.length}):</div>
-                  <div className="flex flex-wrap gap-2">
-                    {mediaList.map((item, idx) => {
-                      const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
-                      if (isVideo) {
-                        return (
-                          <a
-                            key={idx}
-                            href={item.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg hover:bg-slate-700 transition-colors"
-                          >
-                            <span className="text-sm">▶️</span>
-                            <span className="truncate max-w-[120px]">{item.name || `Видео ${idx + 1}`}</span>
-                          </a>
-                        );
-                      }
-                      return (
-                        <a
-                          key={idx}
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block"
-                        >
-                          <img
-                            src={item.url}
-                            alt={item.name || `Медиа ${idx + 1}`}
-                            className="w-16 h-16 object-cover rounded-lg border border-slate-200"
-                          />
-                        </a>
-                      );
-                    })}
+            <form onSubmit={handleSaveOrder} className="flex flex-col flex-1 overflow-hidden min-h-0">
+              <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+                {(() => {
+                  if (!selectedOrder || !formData.date || !formData.gardenerId) return null;
+                  const isBlocked = blockedDays.some(b => b.gardenerId === formData.gardenerId && (b.date.startsWith(formData.date) || toDateKey(b.date) === formData.date));
+                  if (!isBlocked) return null;
+                  return (
+                    <div className="mb-4 text-xs font-semibold text-slate-600 bg-slate-100 p-2.5 rounded-lg border border-slate-200 flex items-center gap-2">
+                      <span>🛑</span>
+                      <span>день закрыт — можно только править, нельзя переносить других</span>
+                    </div>
+                  );
+                })()}
+                {selectedOrder && selectedOrder.status === 'Перенос' && selectedOrder.transferRequestedDate && (
+                  <div className="mb-4 text-sm text-blue-800 bg-blue-50 p-3 rounded-lg border border-blue-100">
+                    🗓 Садовник запросил перенос на <b>{new Date(selectedOrder.transferRequestedDate).toLocaleDateString('ru-RU')}</b>. Смените дату/садовника ниже и статус на «Новый заказ», либо назначьте другого свободного садовника.
                   </div>
-                </div>
-              );
-            })()}
-            <form onSubmit={handleSaveOrder} className="space-y-4">
+                )}
+                {selectedOrder && selectedOrder.status === 'Отказ' && selectedOrder.refusalReason && (
+                  <div className="mb-4 text-sm text-rose-800 bg-rose-50 p-3 rounded-lg border border-rose-100">
+                    ✕ Садовник отказался: «{selectedOrder.refusalReason}». Назначьте другого садовника и смените статус на «Новый заказ».
+                  </div>
+                )}
+                {selectedOrder && selectedOrder.completionComment && (
+                  <div className="mb-4 text-xs text-emerald-900 bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
+                    💬 <b>Комментарий садовника:</b> {selectedOrder.completionComment}
+                  </div>
+                )}
+                {selectedOrder && selectedOrder.status === 'Выполнен' && (selectedOrder.photoBefore || selectedOrder.photoAfter || selectedOrder.photoAct) && (
+                  <div className="mb-4">
+                    <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
+                    <div className="flex gap-2">
+                      {(() => {
+                        const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
+                        try {
+                          const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
+                          return arr.map((u, i) => (
+                            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
+                              <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                              <span className="text-[10px] text-slate-400">До</span>
+                            </a>
+                          ));
+                        } catch (e) { return null; }
+                      })()}
+
+                      {(() => {
+                        const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
+                        try {
+                          const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
+                          return arr.map((u, i) => (
+                            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
+                              <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                              <span className="text-[10px] text-slate-400">После</span>
+                            </a>
+                          ));
+                        } catch (e) { return null; }
+                      })()}
+
+                      {(() => {
+                        const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
+                        try {
+                          const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
+                          return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
+                        } catch (e) { return null; }
+                      })()}
+                    </div>
+                  </div>
+                )}
+                {selectedOrder && selectedOrder.orderMedia && (() => {
+                  const mediaList = parseOrderMedia(selectedOrder.orderMedia);
+                  if (mediaList.length === 0) return null;
+                  return (
+                    <div className="mb-4">
+                      <div className="text-xs font-semibold text-slate-500 mb-2">📁 Материалы от диспетчера ({mediaList.length}):</div>
+                      <div className="flex flex-wrap gap-2">
+                        {mediaList.map((item, idx) => {
+                          const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
+                          if (isVideo) {
+                            return (
+                              <a
+                                key={idx}
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg hover:bg-slate-700 transition-colors"
+                              >
+                                <span className="text-sm">▶️</span>
+                                <span className="truncate max-w-[120px]">{item.name || `Видео ${idx + 1}`}</span>
+                              </a>
+                            );
+                          }
+                          return (
+                            <a
+                              key={idx}
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block"
+                            >
+                              <img
+                                src={item.url}
+                                alt={item.name || `Медиа ${idx + 1}`}
+                                className="w-16 h-16 object-cover rounded-lg border border-slate-200"
+                              />
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500">Дата</label>
@@ -3730,7 +3730,7 @@ export default function AdminDashboard() {
                                 orderMedia: (prev.orderMedia || []).filter((_, i) => i !== idx)
                               }));
                             }}
-                            className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shadow hover:bg-rose-700"
+                            className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-7 h-7 min-w-[28px] min-h-[28px] flex items-center justify-center text-xs font-bold shadow-md hover:bg-rose-700 active:scale-95 transition-transform"
                             title="Удалить"
                           >
                             ×
@@ -3764,63 +3764,64 @@ export default function AdminDashboard() {
                   className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                   onChange={(e) => handleMediaSelect(e.target.files)}
                 />
-                <input
-                  ref={mediaCameraRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
-                  onChange={(e) => handleMediaSelect(e.target.files)}
-                />
 
-                <div className="flex gap-2">
+                <div>
                   <button
                     type="button"
                     disabled={uploadingMedia}
                     onClick={(e) => { e.preventDefault(); mediaFileRef.current?.click(); }}
-                    className="flex-1 min-h-[44px] py-2 px-3 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                    className="w-full min-h-[44px] py-2.5 px-3 border border-slate-300 rounded-lg text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50 active:bg-slate-100"
                   >
-                    <span>📁 Выбрать файлы</span>
-                    <span className="text-[10px] text-slate-400">(фото ≤5MB, видео ≤15MB)</span>
+                    <span>📁 Прикрепить фото/видео</span>
+                    <span className="text-[10px] sm:text-xs text-slate-400 font-normal">(фото ≤5MB, видео ≤15MB)</span>
                   </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 mt-4 border-t border-slate-200 bg-white flex flex-col sm:flex-row gap-2 sm:justify-between sm:items-center flex-shrink-0">
+              <div className="order-2 sm:order-1">
+                {selectedOrder && (
                   <button
                     type="button"
-                    disabled={uploadingMedia}
-                    onClick={(e) => { e.preventDefault(); mediaCameraRef.current?.click(); }}
-                    className="min-h-[44px] py-2 px-3 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-50"
+                    onClick={handleDeleteOrder}
+                    className="w-full sm:w-auto min-h-[44px] px-3.5 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 text-xs sm:text-sm font-medium transition-colors"
                   >
-                    <span>📷 Камера</span>
+                    Удалить заказ
                   </button>
-                </div>
+                )}
               </div>
-
-              <div className="flex gap-2 justify-between pt-4">
-                <div>
-                  {selectedOrder && (
-                    <button type="button" onClick={handleDeleteOrder} className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50">
-                      Удалить заказ
-                    </button>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setShowOrderModal(false)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">
-                    Отмена
-                  </button>
-                  <button type="button" onClick={handleMoveToRefusal} className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-medium">
-                    ✕ В отказы
-                  </button>
-                  <button type="button" onClick={() => handleSaveOrder(null, true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg">
-                    На аукцион
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={uploadingMedia}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium disabled:opacity-50"
-                  >
-                    {uploadingMedia ? `Загрузка (${mediaProgress}%)...` : 'Сохранить'}
-                  </button>
-                </div>
+              <div className="order-1 sm:order-2 flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowOrderModal(false)}
+                  className="flex-1 sm:flex-initial min-h-[44px] px-3 py-2 border border-slate-300 rounded-lg text-slate-600 text-xs sm:text-sm font-medium hover:bg-slate-50 transition-colors"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={handleMoveToRefusal}
+                  className="flex-1 sm:flex-initial min-h-[44px] px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs sm:text-sm font-semibold transition-colors"
+                >
+                  ✕ В отказы
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveOrder(null, true)}
+                  className="flex-1 sm:flex-initial min-h-[44px] px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs sm:text-sm font-semibold transition-colors"
+                >
+                  На аукцион
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploadingMedia}
+                  className="w-full sm:w-auto min-h-[44px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs sm:text-sm font-bold shadow transition-colors disabled:opacity-50"
+                >
+                  {uploadingMedia ? `Загрузка (${mediaProgress}%)...` : 'Сохранить'}
+                </button>
               </div>
+            </div>
             </form>
           </div>
         </div>
