@@ -6,6 +6,7 @@ import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
+import { compressImage } from '@/lib/imageCompress';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -96,36 +97,6 @@ function xhrUpload(url, formData, onProgress) {
   });
 }
 
-function compressImage(file, maxWidth = 1600, quality = 0.8) {
-  return new Promise((resolve) => {
-    if (!file || !(file instanceof Blob)) return resolve(file);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          let { width, height } = img;
-          if (width > maxWidth) {
-            height = Math.round(height * (maxWidth / width));
-            width = maxWidth;
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob((blob) => (blob ? resolve(blob) : resolve(file)), 'image/jpeg', quality);
-        } catch (err) {
-          resolve(file);
-        }
-      };
-      img.onerror = () => resolve(file);
-      img.src = e.target.result;
-    };
-    reader.onerror = () => resolve(file);
-    reader.readAsDataURL(file);
-  });
-}
 
 export default function GardenerDashboard() {
   const router = useRouter();
@@ -1815,7 +1786,7 @@ export default function GardenerDashboard() {
                       <input
                         ref={fileInputPortfolioRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         multiple
                         onChange={async (e) => {
                           if (!isUploadingRef.current) {
@@ -1919,7 +1890,7 @@ export default function GardenerDashboard() {
                       <input
                         ref={fileInputNewWorkRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         multiple
                         onChange={async (e) => {
                           if (!isUploadingRef.current) {
@@ -2221,7 +2192,7 @@ export default function GardenerDashboard() {
               <input
                 ref={fileInputReceiptRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.heic,.heif"
                 multiple
                 className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
                 onChange={async (e) => {
@@ -2502,7 +2473,7 @@ export default function GardenerDashboard() {
                       <input
                         ref={fileInputBeforeRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         multiple
                         onChange={e => handlePhotoSelect(e, 'before')}
                         className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
@@ -2551,7 +2522,7 @@ export default function GardenerDashboard() {
                       <input
                         ref={fileInputAfterRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         multiple
                         onChange={e => handlePhotoSelect(e, 'after')}
                         className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
@@ -2578,7 +2549,7 @@ export default function GardenerDashboard() {
                       <input
                         ref={fileInputActRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/*,.heic,.heif"
                         multiple
                         onChange={e => handlePhotoSelect(e, 'act')}
                         className="absolute -left-[9999px] -top-[9999px] w-px h-px opacity-0 pointer-events-none"
