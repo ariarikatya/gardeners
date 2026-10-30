@@ -4,7 +4,22 @@ import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import {
+  saveCache,
+  getCache,
+  filterOrdersForOffline,
+  activateOfflineSession,
+  resolveOfflineRoleFromCaches,
+  isOfflineSessionValid,
+  resolveGardenerIdentity,
+  getGardenerIdentity,
+  setGardenerIdentity,
+  persistOrdersCache,
+  loadCachedOrdersBundle,
+  clearIdentityCache,
+  getOfflineDebugInfo,
+  saveShell
+} from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
 
@@ -120,6 +135,7 @@ export default function GardenerDashboard() {
   // Оффлайн состояние
   const [isOffline, setIsOffline] = useState(false);
   const [lastCacheTime, setLastCacheTime] = useState(null);
+  const [offlineIdentity, setOfflineIdentity] = useState(() => (typeof window !== 'undefined' ? getGardenerIdentity() : ''));
   const [queueCount, setQueueCount] = useState(0);
   const [queuedClaimIds, setQueuedClaimIds] = useState(new Set());
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
@@ -230,25 +246,26 @@ export default function GardenerDashboard() {
     });
   };
 
-  const loadFromCache = async () => {
+  const loadFromCache = async (customIdentity = null) => {
     try {
-      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
-        getCache('orders'),
+      const activeId = customIdentity || getGardenerIdentity() || offlineIdentity;
+      if (activeId) setOfflineIdentity(activeId);
+
+      const [bundle, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
+        loadCachedOrdersBundle(activeId),
         getCache('profile'),
         getCache('operations'),
         getCache('auction'),
         getQueue(),
       ]);
 
-      if (cachedOrdersObj && cachedOrdersObj.data) {
-        const rawOrders = cachedOrdersObj.data.orders || [];
-        const dayOffs = cachedOrdersObj.data.dayOffs || [];
-        const merged = applyQueueToOrders(rawOrders, pendingQueue);
+      if (bundle && Array.isArray(bundle.orders) && bundle.orders.length > 0) {
+        const merged = applyQueueToOrders(bundle.orders, pendingQueue);
         setOrders(merged);
-        setMyDayOffs(dayOffs);
+        setMyDayOffs(bundle.dayOffs || []);
         setLoading(false);
-        if (cachedOrdersObj.updatedAt) {
-          setLastCacheTime(formatLastUpdated(cachedOrdersObj.updatedAt));
+        if (bundle.savedAt) {
+          setLastCacheTime(formatLastUpdated(bundle.savedAt));
         }
       }
 
@@ -271,6 +288,8 @@ export default function GardenerDashboard() {
       setQueuedClaimIds(claimIds);
     } catch (e) {
       console.error('Error loading offline cache:', e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -375,13 +394,31 @@ export default function GardenerDashboard() {
       const now = Date.now();
       setLastCacheTime(formatLastUpdated(now));
 
-      // Кэшируем данные
-      const ordersToCache = filterOrdersForOffline(incomingOrders);
-      saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] });
+      // Кэшируем данные по стабильному identity без 14-дневного фильтра
+      const activeIdentity = getGardenerIdentity();
+      if (activeIdentity) {
+        setOfflineIdentity(activeIdentity);
+        persistOrdersCache({
+          orders: incomingOrders,
+          dayOffs: data.dayOffs || [],
+          identity: activeIdentity,
+          currentMonth: calendarMonth,
+        }).catch((err) => console.error('persistOrdersCache error:', err));
+      }
+
       saveCache('operations', ops.operations || []);
+
+      // Сохраняем слепок shell в IndexedDB
+      if (typeof document !== 'undefined' && document.documentElement) {
+        const fullHtml = document.documentElement.outerHTML;
+        if (fullHtml && fullHtml.length > 500) {
+          saveShell('/gardener', fullHtml).catch(() => {});
+        }
+      }
     } catch (e) {
       console.error('fetchOrders network error:', e);
       setIsOffline(true);
+      await loadFromCache();
     } finally {
       if (!silent) setLoading(false);
     }
@@ -429,6 +466,17 @@ export default function GardenerDashboard() {
         setGardenerProfile(data.gardener);
         setMyWorks(data.gardener.works || []);
         saveCache('profile', data.gardener);
+
+        // Стабильный identity: строго gardenerId из ответа профиля, затем телефон, затем email
+        const resolvedId = resolveGardenerIdentity({
+          gardenerId: data.gardener.id,
+          phone: data.gardener.phone || (typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null),
+          email: data.gardener.email,
+        });
+        if (resolvedId) {
+          setOfflineIdentity(resolvedId);
+          setGardenerIdentity(resolvedId).catch(() => {});
+        }
       }
     } catch (e) {
       console.error(e);
@@ -669,6 +717,13 @@ export default function GardenerDashboard() {
 
     ensureFreshUsersList();
 
+    if (typeof window !== 'undefined') {
+      window.__offlineDebug = () => {
+        const id = getGardenerIdentity();
+        return getOfflineDebugInfo(id);
+      };
+    }
+
     const handleBeforeUnload = (e) => {
       if (e && e.persisted) return;
       if (typeof window !== 'undefined') {
@@ -805,6 +860,11 @@ export default function GardenerDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
+        const currentId = offlineIdentity || getGardenerIdentity();
+        if (currentId) {
+          await clearIdentityCache(currentId);
+        }
+
         sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_role');
@@ -812,6 +872,7 @@ export default function GardenerDashboard() {
         localStorage.removeItem('offline_session');
         localStorage.removeItem('offline_session_ts');
         localStorage.removeItem('auth_session_cached');
+        localStorage.removeItem('gardener_identity');
 
         if ('serviceWorker' in navigator) {
           const postWithReply = (targetSw, msg, timeoutMs = 500) => {
@@ -1570,8 +1631,20 @@ export default function GardenerDashboard() {
   for (let i = 0; i < startOffset; i++) calendarCells.push(null);
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
 
-  const goToPrevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
-  const goToNextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
+  const goToPrevMonth = () => {
+    const prevM = new Date(year, month - 1, 1);
+    setCalendarMonth(prevM);
+    if (!navigator.onLine || isOffline) {
+      loadFromCache();
+    }
+  };
+  const goToNextMonth = () => {
+    const nextM = new Date(year, month + 1, 1);
+    setCalendarMonth(nextM);
+    if (!navigator.onLine || isOffline) {
+      loadFromCache();
+    }
+  };
 
   const renderCalendarCell = (d, i) => {
     if (d === null) return <div key={i}></div>;
@@ -1645,7 +1718,9 @@ export default function GardenerDashboard() {
       {/* Оффлайн баннер */}
       {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
         <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
-          <span>⚉ Офлайн-режим: показаны сохранённые данные {lastCacheTime ? `от ${lastCacheTime}` : ''}</span>
+          <span>
+            Оффлайн · данные от {lastCacheTime || '—'} · {orders.length} {orders.length === 1 ? 'заказ' : orders.length < 5 ? 'заказа' : 'заказов'} · ключ {offlineIdentity || getGardenerIdentity() || 'не определен'}
+          </span>
           {queueCount > 0 && <span>(в очереди: {queueCount})</span>}
         </div>
       )}
@@ -2327,7 +2402,11 @@ export default function GardenerDashboard() {
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
         ) : orders.length === 0 ? (
-          <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
+          <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">
+            {isOffline || (typeof window !== 'undefined' && !navigator.onLine)
+              ? 'В этом аккаунте ещё не было успешной загрузки заказов онлайн'
+              : 'У вас пока нет назначенных заказов'}
+          </div>
         ) : viewMode === 'list' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(() => {

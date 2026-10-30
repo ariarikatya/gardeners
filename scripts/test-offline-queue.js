@@ -23,7 +23,7 @@ async function runTests() {
     { id: '4', status: 'Аукцион', date: dateIn5Days },     // Auction -> keep
   ];
 
-  const filtered = filterOrdersForOffline(mockOrders);
+  const filtered = filterOrdersForOffline(mockOrders, { legacyWindow: true });
   const filteredIds = filtered.map(o => o.id);
   assert.deepStrictEqual(filteredIds, ['1', '2', '4'], 'Filtered orders should keep 1, 2, 4 and exclude 3');
   console.log('✅ Test 1 passed!\n');

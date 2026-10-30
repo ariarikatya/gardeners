@@ -13,7 +13,53 @@ function getCacheName() {
 
 let CACHE_NAME = getCacheName();
 const OFFLINE_DATA_CACHE = 'anemon-agro-offline-data';
-const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users'];
+const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users', '/offline.html'];
+
+async function openIdbShellStore() {
+  if (typeof indexedDB === 'undefined') return null;
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open('gardener_offline_db', 2);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('data_cache')) db.createObjectStore('data_cache', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('action_queue')) db.createObjectStore('action_queue', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('shell')) db.createObjectStore('shell', { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+async function saveShellToIdb(key, htmlText) {
+  try {
+    const db = await openIdbShellStore();
+    if (!db) return;
+    const tx = db.transaction('shell', 'readwrite');
+    const store = tx.objectStore('shell');
+    store.put({ key, html: htmlText, updatedAt: Date.now() });
+  } catch (e) {}
+}
+
+async function getShellFromIdb(key) {
+  try {
+    const db = await openIdbShellStore();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction('shell', 'readonly');
+      const store = tx.objectStore('shell');
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result ? req.result.html : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
 
 const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
@@ -392,7 +438,7 @@ async function precacheAllRoles(retryCount = 0) {
   );
 
   await Promise.all(
-    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users', '/offline-cache/offline-users.json'].map(async (assetUrl) => {
+    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/offline.html', '/api/public/offline-users', '/offline-cache/offline-users.json'].map(async (assetUrl) => {
       try {
         const res = await fetch(assetUrl);
         if (res && res.ok) {
@@ -970,7 +1016,9 @@ self.addEventListener('fetch', (event) => {
             if (netRes) {
               if (netRes.ok && netRes.status === 200 && !netRes.redirected) {
                 const resClone = netRes.clone();
-                caches.open(CACHE_NAME).then((cache) => {
+                const resCloneForIdb = netRes.clone();
+
+                caches.open(CACHE_NAME).then(async (cache) => {
                   try {
                     const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
                       headers: { 'Content-Type': 'application/json' }
@@ -979,18 +1027,26 @@ self.addEventListener('fetch', (event) => {
                       cache.put('/login', resClone.clone());
                       cache.put(new Request('/login'), resClone.clone());
                       cache.put('/login-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/login', htmlText);
                     } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                       cache.put('/gardener', resClone.clone());
                       cache.put(new Request('/gardener'), resClone.clone());
                       cache.put('/gardener-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/gardener', htmlText);
                     } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
                       cache.put('/admin', resClone.clone());
                       cache.put(new Request('/admin'), resClone.clone());
                       cache.put('/admin-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/admin', htmlText);
                     } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
                       cache.put('/leader', resClone.clone());
                       cache.put(new Request('/leader'), resClone.clone());
                       cache.put('/leader-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/leader', htmlText);
                     }
                   } catch (e) {}
                 }).catch(() => {});
@@ -1072,14 +1128,47 @@ self.addEventListener('fetch', (event) => {
           }
         } catch (e) {}
 
+        // 3. Fallback: IndexedDB-копия HTML из 'shell'
+        try {
+          const targetShellKey = rolePath || url.pathname || '/gardener';
+          let shellHtml = await getShellFromIdb(targetShellKey);
+          if (!shellHtml && rolePath) {
+            shellHtml = await getShellFromIdb(rolePath);
+          }
+          if (!shellHtml) {
+            shellHtml = await getShellFromIdb('/gardener') || await getShellFromIdb('/login');
+          }
+          if (shellHtml) {
+            return new Response(shellHtml, {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'X-Offline-Served': '1',
+                'X-Offline-Source': 'idb-shell',
+              },
+            });
+          }
+        } catch (e) {}
+
         try {
           const cache = await caches.open(CACHE_NAME);
-          const fb = await cache.match('/login') || await cache.match('/');
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          const fb = await cache.match('/login') || await pCache.match('/login') || await cache.match('/') || await pCache.match('/');
           if (fb) return withOfflineHeader(fb);
         } catch (e) {}
 
+        // 4. Fallback: offline.html (из кэша или fetch)
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          const offlinePage = await cache.match('/offline.html') || await pCache.match('/offline.html');
+          if (offlinePage) {
+            return withOfflineHeader(offlinePage);
+          }
+        } catch (e) {}
+
         return new Response(
-          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Данные обновятся при появлении сети.</p></div></body></html>',
+          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}button{background:#059669;color:#fff;border:none;border-radius:0.5rem;padding:0.6rem 1.2rem;font-weight:600;cursor:pointer;margin-top:1rem}</style></head><body><div class="card"><h1>🌿 Нет подключения к сети</h1><p>Данные появятся после первого онлайн-входа в приложение.</p><button type="button" onclick="location.reload()">Попробовать снова</button></div></body></html>',
           { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' } }
         );
       })()
