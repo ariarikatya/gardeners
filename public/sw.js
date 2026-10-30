@@ -270,10 +270,27 @@ async function restoreOfflineDataToNewCache() {
   CACHE_NAME = getCacheName();
   const cache = await caches.open(CACHE_NAME);
   const pCache = await caches.open(OFFLINE_DATA_CACHE);
-  const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
+  const baseKeysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users', '/offline.html', '/gardener', '/admin', '/leader', '/login', '/'];
 
   const allCacheKeys = await caches.keys();
-  for (const k of keysToRestore) {
+  const oldCacheNames = allCacheKeys.filter((k) => k !== CACHE_NAME);
+
+  // Собираем все ключи запросов из старых кэшей (включая /api/* и страницы ролей)
+  const discoveredKeys = new Set(baseKeysToRestore);
+  for (const cName of oldCacheNames) {
+    try {
+      const oldC = await caches.open(cName);
+      const requests = await oldC.keys();
+      for (const req of requests) {
+        const u = new URL(req.url);
+        if (u.pathname.startsWith('/api/') || baseKeysToRestore.includes(u.pathname)) {
+          discoveredKeys.add(u.pathname);
+        }
+      }
+    } catch (e) {}
+  }
+
+  for (const k of discoveredKeys) {
     try {
       let matchedRes = null;
       try {
@@ -290,7 +307,7 @@ async function restoreOfflineDataToNewCache() {
         }
       }
 
-      if (matchedRes) {
+      if (matchedRes && matchedRes.ok) {
         await cache.put(k, matchedRes.clone());
         await pCache.put(k, matchedRes.clone());
       }

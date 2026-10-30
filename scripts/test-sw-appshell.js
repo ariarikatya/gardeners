@@ -38,9 +38,9 @@ const clientVersionMatch = versionContent.match(/export const CLIENT_VERSION = '
 assert(clientVersionMatch && clientVersionMatch[1], 'lib/version.js must export CLIENT_VERSION');
 const clientVersion = clientVersionMatch[1];
 
-// Verify format: anemon-agro-v<version>-<date>-<hash>
-const cacheNamePattern = /^anemon-agro-v\d+\.\d+\.\d+-\d{8}-[a-zA-Z0-9]+$/;
-assert(cacheNamePattern.test(libCacheName), `CACHE_NAME "${libCacheName}" must match format 'anemon-agro-v<version>-<date>-<hash>'`);
+// Verify format: anemon-agro-v<version>-<hash>
+const cacheNamePattern = /^anemon-agro-v\d+\.\d+\.\d+-[a-zA-Z0-9]+$/;
+assert(cacheNamePattern.test(libCacheName), `CACHE_NAME "${libCacheName}" must match format 'anemon-agro-v<version>-<hash>'`);
 console.log('✅ CACHE_NAME format in lib/version.js matches expected pattern.');
 
 // 4. Test sw.js getCacheName logic dynamically

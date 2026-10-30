@@ -6,7 +6,6 @@ const pkgPath = path.join(__dirname, '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 
 const version = pkg.version || '1.0.0';
-const todayCode = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
 let gitSha = '';
 try {
@@ -14,16 +13,15 @@ try {
 } catch (e) {
   gitSha = process.env.COMMIT_REF
     || process.env.VERCEL_GIT_COMMIT_SHA
-    || process.env.NETLIFY_BUILD_ID
-    || Date.now().toString(36).slice(-6);
+    || process.env.NETLIFY_BUILD_ID;
 }
 
 if (!gitSha) {
-  gitSha = 'dev';
+  gitSha = 'stable';
 }
 
-const swCacheName = `anemon-agro-v${version}-${todayCode}-${gitSha}`;
-const clientVersion = `v${version}-${todayCode}-${gitSha}`;
+const swCacheName = `anemon-agro-v${version}-${gitSha}`;
+const clientVersion = `v${version}-${gitSha}`;
 
 const libDir = path.join(__dirname, '..', 'lib');
 if (!fs.existsSync(libDir)) {

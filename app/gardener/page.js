@@ -912,6 +912,10 @@ export default function GardenerDashboard() {
         localStorage.removeItem('offline_session');
         localStorage.removeItem('offline_session_ts');
         localStorage.removeItem('auth_session_cached');
+        const currentIdentity = gardenerIdentity || getGardenerIdentity();
+        if (currentIdentity) {
+          try { await clearIdentityCache(currentIdentity); } catch (e) {}
+        }
         localStorage.removeItem('gardener_identity');
 
         if ('serviceWorker' in navigator) {
