@@ -251,13 +251,29 @@ export default function GardenerDashboard() {
       const activeId = customIdentity || getGardenerIdentity() || offlineIdentity;
       if (activeId) setOfflineIdentity(activeId);
 
-      const [bundle, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
+      const [
+        bundle,
+        cachedProfileObj,
+        legacyProfileObj,
+        cachedOpsObj,
+        legacyOpsObj,
+        cachedAuctionObj,
+        legacyAuctionObj,
+        pendingQueue,
+      ] = await Promise.all([
         loadCachedOrdersBundle(activeId),
+        activeId ? getCache(`profile::${activeId}`) : Promise.resolve(null),
         getCache('profile'),
+        activeId ? getCache(`operations::${activeId}`) : Promise.resolve(null),
         getCache('operations'),
+        activeId ? getCache(`auction::${activeId}`) : Promise.resolve(null),
         getCache('auction'),
         getQueue(),
       ]);
+
+      const effectiveProfile = cachedProfileObj || legacyProfileObj;
+      const effectiveOps = cachedOpsObj || legacyOpsObj;
+      const effectiveAuction = cachedAuctionObj || legacyAuctionObj;
 
       if (bundle && Array.isArray(bundle.orders) && bundle.orders.length > 0) {
         const merged = applyQueueToOrders(bundle.orders, pendingQueue);
@@ -269,17 +285,29 @@ export default function GardenerDashboard() {
         }
       }
 
-      if (cachedProfileObj && cachedProfileObj.data) {
-        setGardenerProfile(cachedProfileObj.data);
-        setMyWorks(cachedProfileObj.data.works || []);
+      if (effectiveProfile && effectiveProfile.data) {
+        setGardenerProfile(effectiveProfile.data);
+        setMyWorks(effectiveProfile.data.works || []);
+        // Одноразовая миграция на scoped-ключ
+        if (activeId && !cachedProfileObj) {
+          saveCache(`profile::${activeId}`, effectiveProfile.data).catch(() => {});
+        }
       }
 
-      if (cachedOpsObj && cachedOpsObj.data) {
-        setOperations(cachedOpsObj.data || []);
+      if (effectiveOps && effectiveOps.data) {
+        setOperations(effectiveOps.data || []);
+        // Одноразовая миграция на scoped-ключ
+        if (activeId && !cachedOpsObj) {
+          saveCache(`operations::${activeId}`, effectiveOps.data).catch(() => {});
+        }
       }
 
-      if (cachedAuctionObj && cachedAuctionObj.data) {
-        setAuctionOrders(cachedAuctionObj.data || []);
+      if (effectiveAuction && effectiveAuction.data) {
+        setAuctionOrders(effectiveAuction.data || []);
+        // Одноразовая миграция на scoped-ключ
+        if (activeId && !cachedAuctionObj) {
+          saveCache(`auction::${activeId}`, effectiveAuction.data).catch(() => {});
+        }
       }
 
       const activeQueue = (pendingQueue || []).filter(i => i.status !== 'conflict');
@@ -331,6 +359,7 @@ export default function GardenerDashboard() {
   const fetchOrders = async (silent = false) => {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
+      await loadFromCache();
       const authPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       let storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       if (!storedRole) {
@@ -402,11 +431,14 @@ export default function GardenerDashboard() {
           orders: incomingOrders,
           dayOffs: data.dayOffs || [],
           identity: activeIdentity,
-          currentMonth: calendarMonth,
+          currentMonth: new Date(),
         }).catch((err) => console.error('persistOrdersCache error:', err));
       }
 
       saveCache('operations', ops.operations || []);
+      if (activeIdentity) {
+        saveCache(`operations::${activeIdentity}`, ops.operations || []).catch(() => {});
+      }
 
       // Сохраняем слепок shell в IndexedDB
       if (typeof document !== 'undefined' && document.documentElement) {
@@ -440,6 +472,10 @@ export default function GardenerDashboard() {
       const list = data.orders || [];
       setAuctionOrders(list);
       await saveCache('auction', list);
+      const activeId = getGardenerIdentity();
+      if (activeId) {
+        await saveCache(`auction::${activeId}`, list);
+      }
     } catch (e) {
       console.error(e);
       setIsOffline(true);
@@ -476,6 +512,7 @@ export default function GardenerDashboard() {
         if (resolvedId) {
           setOfflineIdentity(resolvedId);
           setGardenerIdentity(resolvedId).catch(() => {});
+          saveCache(`profile::${resolvedId}`, data.gardener).catch(() => {});
         }
       }
     } catch (e) {
@@ -582,7 +619,15 @@ export default function GardenerDashboard() {
   };
 
   useEffect(() => {
+    // Безусловная загрузка кэшированных данных сразу при старте, чтобы не было белого экрана
+    loadFromCache();
+
     if (typeof window !== 'undefined') {
+      // Запрос персистентного хранилища для предотвращения выгрузки браузером при бездействии
+      if (navigator.storage && typeof navigator.storage.persist === 'function') {
+        navigator.storage.persist().catch(() => {});
+      }
+
       const initRoleCheck = async () => {
         const authPhone = localStorage.getItem('auth_phone');
         let role = localStorage.getItem('auth_role');
@@ -595,13 +640,13 @@ export default function GardenerDashboard() {
         }
 
         if (!role) {
-        if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
+          if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
           return;
         }
         if (role !== 'GARDENER') {
           if (role === 'ADMIN' || role === 'LEADER') {
             window.location.assign(role === 'ADMIN' ? '/admin' : '/leader');
-        } else if (navigator.onLine && !isOfflineSessionValid()) {
+          } else if (navigator.onLine && !isOfflineSessionValid()) {
             window.location.assign('/login');
           }
           return;
@@ -860,11 +905,6 @@ export default function GardenerDashboard() {
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
-        const currentId = offlineIdentity || getGardenerIdentity();
-        if (currentId) {
-          await clearIdentityCache(currentId);
-        }
-
         sessionStorage.setItem('logout_confirmed', '1');
         sessionStorage.setItem('manual_logout', '1');
         localStorage.removeItem('auth_role');

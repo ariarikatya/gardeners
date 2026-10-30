@@ -269,8 +269,8 @@ async function runTests() {
 
   console.log('✅ Test 7 passed!\n');
 
-  // Test 8: 500 records limit
-  console.log('Test 8: Max limit 500 records per snapshot');
+  // Test 8: 500 records limit per month and expanded bundle limit
+  console.log('Test 8: Max limit 500 records per month snapshot');
   const largeOrders = [];
   for (let i = 0; i < 600; i++) {
     largeOrders.push({ id: `ord-big-${i}`, date: '2026-08-01', status: 'Новый заказ' });
@@ -280,8 +280,60 @@ async function runTests() {
     identity: 'g-303',
   });
   const bigBundle = await loadCachedOrdersBundle('g-303');
-  assert.strictEqual(bigBundle.orders.length, 500, 'Orders count must be capped at 500');
+  assert.strictEqual(bigBundle.orders.length, 500, 'Orders count must be capped at 500 per month');
   console.log('✅ Test 8 passed!\n');
+
+  // Test 9: Bug 1 - API returned orders ONLY for November -> NO key for October
+  console.log('Test 9: Only November orders returned -> NO October key created; subsequent October orders join bundle');
+  const novOrders = [
+    { id: 'nov-1', status: 'Новый заказ', date: '2026-11-15T12:00:00Z' },
+  ];
+  await persistOrdersCache({
+    orders: novOrders,
+    identity: 'g-bug1',
+    currentMonth: new Date('2026-10-01'), // Calendar might be on October
+  });
+
+  assert.strictEqual(stores.data_cache.has('orders::g-bug1::2026-10'), false, 'Empty month 2026-10 must NOT be written');
+  assert.strictEqual(stores.data_cache.has('orders::g-bug1::2026-11'), true, 'Month 2026-11 must be written');
+
+  let bug1Bundle = await loadCachedOrdersBundle('g-bug1');
+  assert.strictEqual(bug1Bundle.orders.length, 1);
+  assert.strictEqual(bug1Bundle.orders[0].id, 'nov-1');
+
+  // Then October orders appear online
+  const octOrders = [
+    { id: 'oct-1', status: 'Новый заказ', date: '2026-10-10T12:00:00Z' },
+  ];
+  await persistOrdersCache({
+    orders: octOrders,
+    identity: 'g-bug1',
+    currentMonth: new Date('2026-10-01'),
+  });
+
+  assert.strictEqual(stores.data_cache.has('orders::g-bug1::2026-10'), true, 'Month 2026-10 now written');
+  assert.strictEqual(stores.data_cache.has('orders::g-bug1::2026-11'), true, 'Month 2026-11 preserved');
+
+  bug1Bundle = await loadCachedOrdersBundle('g-bug1');
+  assert.strictEqual(bug1Bundle.orders.length, 2, 'Bundle must contain both October and November orders');
+  console.log('✅ Test 9 passed!\n');
+
+  // Test 10: Undated orders are saved under orders::<identity>::undated and included in bundle
+  console.log('Test 10: Undated orders stored under orders::<identity>::undated and included in bundle');
+  const mixedOrders = [
+    { id: 'undated-1', status: 'Новый заказ', date: null },
+    { id: 'dated-1', status: 'Новый заказ', date: '2026-12-05T10:00:00Z' },
+  ];
+  await persistOrdersCache({
+    orders: mixedOrders,
+    identity: 'g-undated',
+  });
+  assert.ok(stores.data_cache.has('orders::g-undated::undated'), 'Must contain orders::g-undated::undated key');
+  assert.ok(stores.data_cache.has('orders::g-undated::2026-12'), 'Must contain orders::g-undated::2026-12 key');
+
+  const undatedBundle = await loadCachedOrdersBundle('g-undated');
+  assert.strictEqual(undatedBundle.orders.length, 2, 'Bundle must contain both undated and dated orders');
+  console.log('✅ Test 10 passed!\n');
 
   console.log('🎉 ALL OFFLINE ORDERS CACHE TESTS PASSED SUCCESSFULLY!');
 }
