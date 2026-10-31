@@ -88,4 +88,13 @@ for (const route of requiredRoutes) {
 }
 console.log(`✅ APP_SHELL contains all required routes: ${requiredRoutes.join(', ')}`);
 
+// 6. Verify Offline Navigation priority in sw.js:
+// In the navigation handler, IDB shell fallback must come before offline.html fallback
+const navHandlerStart = swContent.indexOf("request.mode === 'navigate'");
+assert(navHandlerStart !== -1, 'sw.js must have navigate mode check');
+const navContent = swContent.slice(navHandlerStart);
+assert(navContent.includes('getShellFromIdb'), 'sw.js navigation handler must support getShellFromIdb fallback');
+assert(navContent.indexOf('getShellFromIdb') < navContent.indexOf("cache.match('/offline.html')"), 'IDB shell fallback must come before offline.html in navigation handler');
+console.log('✅ Offline navigation checks Cache API and IDB shell before falling back to offline.html.');
+
 console.log('\n🎉 ALL SW APP_SHELL & VERSIONING TESTS PASSED SUCCESSFULLY!');

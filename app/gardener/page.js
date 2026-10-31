@@ -406,17 +406,26 @@ export default function GardenerDashboard() {
         apiFetch('/api/gardener/operations')
       ]);
 
-      // Явный offline-путь при 503 / resOrders.offline / noInternet
-      if (!resOrders.ok || resOrders.offline || (resOrders.status === 503 && !navigator.onLine)) {
+      // Проверка успешности ответа сервера: при сетевых ошибках, 5xx или невалидном ответе НЕ инвалидируем кэш
+      const isServerOk = resOrders.ok && resOrders.status < 500;
+      let data = null;
+      try {
+        if (isServerOk) {
+          data = await resOrders.json();
+        }
+      } catch (jsonErr) {}
+
+      const hasValidOrdersArray = data && Array.isArray(data.orders);
+
+      if (!isServerOk || !hasValidOrdersArray) {
         setIsOffline(true);
         await loadFromCache();
         if (!silent) setLoading(false);
         return;
       }
 
-      const data = await resOrders.json();
-      const ops = resOps.ok ? await resOps.json() : {};
-      const incomingOrders = data.orders || [];
+      const ops = resOps.ok ? await resOps.json().catch(() => ({})) : {};
+      const incomingOrders = data.orders;
 
       if (silent && orders.length > 0) {
         const prevMap = new Map(orders.map(o => [o.id, o]));
@@ -447,12 +456,13 @@ export default function GardenerDashboard() {
       const activeIdentity = getGardenerIdentity();
       if (activeIdentity) {
         setOfflineIdentity(activeIdentity);
+        const isServerSuccess = resOrders.ok && resOrders.status < 500 && Array.isArray(data.orders);
         await persistOrdersCache({
           orders: incomingOrders,
           dayOffs: data.dayOffs || [],
           identity: activeIdentity,
           currentMonth: new Date(),
-          isServerSuccess: true,
+          isServerSuccess,
         }).catch((err) => console.error('persistOrdersCache error:', err));
       }
 
@@ -645,15 +655,33 @@ export default function GardenerDashboard() {
 
     if (typeof window !== 'undefined') {
       // Запрос персистентного хранилища для предотвращения выгрузки браузером при бездействии
-      if (navigator.storage && typeof navigator.storage.persist === 'function') {
-        navigator.storage.persist().then(persisted => {
-          setStoragePersisted(Boolean(persisted));
-        }).catch(() => {});
-      } else if (navigator.storage && typeof navigator.storage.persisted === 'function') {
-        navigator.storage.persisted().then(persisted => {
-          setStoragePersisted(Boolean(persisted));
-        }).catch(() => {});
-      }
+      const requestStoragePersistence = async () => {
+        if (!navigator.storage) return;
+        try {
+          if (typeof navigator.storage.persisted === 'function') {
+            const alreadyPersisted = await navigator.storage.persisted();
+            if (alreadyPersisted) {
+              setStoragePersisted(true);
+              return;
+            }
+          }
+          if (typeof navigator.storage.persist === 'function') {
+            const granted = await navigator.storage.persist();
+            setStoragePersisted(Boolean(granted));
+          }
+        } catch (e) {}
+      };
+
+      requestStoragePersistence();
+
+      // На iOS и браузерах persist() срабатывает надежнее при пользовательском жесте (клик/тап)
+      const handleUserGesturePersist = () => {
+        requestStoragePersistence();
+        window.removeEventListener('click', handleUserGesturePersist);
+        window.removeEventListener('touchstart', handleUserGesturePersist);
+      };
+      window.addEventListener('click', handleUserGesturePersist, { once: true, passive: true });
+      window.addEventListener('touchstart', handleUserGesturePersist, { once: true, passive: true });
 
       const initRoleCheck = async () => {
         const authPhone = localStorage.getItem('auth_phone');
@@ -832,8 +860,20 @@ export default function GardenerDashboard() {
       flushPendingWrites().catch(() => {});
     };
 
+    const handlePageShow = (e) => {
+      // При восстановлении из bfcache или переключении вкладок
+      if (e && e.persisted) {
+        if (navigator.onLine) {
+          handleOnline();
+        } else {
+          loadFromCache();
+        }
+      }
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -846,6 +886,7 @@ export default function GardenerDashboard() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('pageshow', handlePageShow);
     };
   }, []);
 
@@ -1828,10 +1869,10 @@ export default function GardenerDashboard() {
         </div>
       )}
 
-      {/* Предупреждение о неперсистентном хранилище */}
+      {/* Предупреждение о неперсистентном хранилище и рекомендация PWA */}
       {!storagePersisted && (
-        <div className="bg-yellow-600 text-white text-[11px] px-4 py-1 text-center shadow-inner flex items-center justify-center gap-2">
-          <span>ℹ️ Браузер может очистить офлайн-данные при долгом бездействии. Заходите в приложение периодически при наличии сети.</span>
+        <div className="bg-amber-600 text-white text-[11px] px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>📱 Добавьте приложение на главный экран («Поделиться» → «На экран Домой»), чтобы браузер не очищал сохранённые данные при бездействии.</span>
         </div>
       )}
 

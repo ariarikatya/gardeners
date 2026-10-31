@@ -453,6 +453,59 @@ async function runTests() {
   assert.strictEqual(emptyTestBundle.orders.length, 0, 'Cache must be invalidated when server intentionally returns empty');
   console.log('✅ Test 16 (TEST D) passed!\n');
 
+  // Test 17: Partial loss of monthly keys -> Recovery via snapshot_full
+  console.log('Test 17: Partial loss of monthly keys -> Complete recovery via snapshot_full');
+  const fullBackupOrders = [
+    { id: 'full-1', status: 'Новый заказ', date: '2026-03-01' },
+    { id: 'full-2', status: 'В работе', date: '2026-04-01' },
+  ];
+  await persistOrdersCache({
+    orders: fullBackupOrders,
+    identity: 'g-snapshot-recovery',
+    isServerSuccess: true,
+  });
+  assert.ok(stores.data_cache.has('snapshot_full::g-snapshot-recovery'), 'snapshot_full must be stored');
+  assert.ok(stores.data_cache.has('orders::g-snapshot-recovery::2026-03'));
+  assert.ok(stores.data_cache.has('orders::g-snapshot-recovery::2026-04'));
+
+  // Simulate eviction / corruption of the 2026-04 month key
+  stores.data_cache.delete('orders::g-snapshot-recovery::2026-04');
+  assert.strictEqual(stores.data_cache.has('orders::g-snapshot-recovery::2026-04'), false);
+
+  // Bundle must restore the missing order from snapshot_full
+  const recoveredBundle = await loadCachedOrdersBundle('g-snapshot-recovery');
+  assert.strictEqual(recoveredBundle.orders.length, 2, 'Bundle must contain both orders recovered from snapshot_full');
+  const recIds = new Set(recoveredBundle.orders.map(o => o.id));
+  assert.ok(recIds.has('full-1'));
+  assert.ok(recIds.has('full-2'));
+  console.log('✅ Test 17 passed!\n');
+
+  // Test 18: HTTP 500 server error does NOT overwrite or invalidate cache
+  console.log('Test 18: HTTP 500 response simulation does not overwrite or invalidate existing cache');
+  const existingOrders = [
+    { id: 'survive-500-1', status: 'Новый заказ', date: '2026-05-12' },
+  ];
+  await persistOrdersCache({
+    orders: existingOrders,
+    identity: 'g-500-test',
+    isServerSuccess: true,
+  });
+  let bundleBefore500 = await loadCachedOrdersBundle('g-500-test');
+  assert.strictEqual(bundleBefore500.orders.length, 1);
+
+  // Simulate 500 error where caller does not pass isServerSuccess: true
+  const failedPersist = await persistOrdersCache({
+    orders: [],
+    identity: 'g-500-test',
+    isServerSuccess: false,
+  });
+  assert.strictEqual(failedPersist, false);
+
+  let bundleAfter500 = await loadCachedOrdersBundle('g-500-test');
+  assert.strictEqual(bundleAfter500.orders.length, 1, 'Existing orders must survive HTTP 500 failure');
+  assert.strictEqual(bundleAfter500.orders[0].id, 'survive-500-1');
+  console.log('✅ Test 18 passed!\n');
+
   console.log('🎉 ALL OFFLINE ORDERS CACHE TESTS PASSED SUCCESSFULLY!');
 }
 
