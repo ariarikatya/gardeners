@@ -21,7 +21,9 @@ import {
   saveShell,
   flushPendingWrites,
   getCachedMonth,
-  syncSessionMarkers
+  syncSessionMarkers,
+  getGardenerIdentityAsync,
+  getMeta
 } from '@/lib/offlineStore';
 import { toDateKey } from '@/lib/dates';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
@@ -120,6 +122,7 @@ function xhrUpload(url, formData, onProgress) {
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
+  const [hasCachedBundle, setHasCachedBundle] = useState(false);
   const [myDayOffs, setMyDayOffs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
@@ -280,6 +283,7 @@ export default function GardenerDashboard() {
       const effectiveAuction = cachedAuctionObj || legacyAuctionObj;
 
       if (bundle && Array.isArray(bundle.orders) && bundle.orders.length > 0) {
+        setHasCachedBundle(true);
         // При инициализации отображаем заказы активного месяца календаря calendarMonth
         const curMKey = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`;
         const curMonthOrders = bundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
@@ -298,6 +302,7 @@ export default function GardenerDashboard() {
           }
         }
       } else {
+        setHasCachedBundle(false);
         setOrders([]);
         setLoading(false);
       }
@@ -749,6 +754,16 @@ export default function GardenerDashboard() {
           const readBack = await getCache(testKey);
           if (!readBack || !readBack.data || readBack.data.ts !== testVal.ts) {
             setIsIdbEvicted(true);
+            const debug = typeof window.__offlineDebug === 'function' ? window.__offlineDebug() : {};
+            fetch('/api/client-error', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: `[idb_evicted_detected] keysCount=${debug.keysInIdb?.length || 0}`,
+                stack: 'runIdbSelfTest in app/gardener/page.js',
+                source: 'app/gardener/page.js',
+              }),
+            }).catch(() => {});
           } else {
             setIsIdbEvicted(false);
           }
@@ -758,11 +773,11 @@ export default function GardenerDashboard() {
       };
       runIdbSelfTest();
 
-      // Двусторонняя синхронизация сессионных маркеров (localStorage <-> IndexedDB meta)
-      syncSessionMarkers().catch(() => {});
-
       const initRoleCheck = async () => {
         await syncSessionMarkers();
+        const activeId = await getGardenerIdentityAsync();
+        if (activeId) setOfflineIdentity(activeId);
+
         const authPhone = localStorage.getItem('auth_phone');
         let role = localStorage.getItem('auth_role');
         if (!role) {
@@ -771,6 +786,32 @@ export default function GardenerDashboard() {
 
         if (role) {
           activateOfflineSession(role, authPhone);
+        }
+
+        // Проверка целостности кэша по метаданным last_snapshot
+        if (activeId) {
+          try {
+            const lastSnap = await getMeta(`last_snapshot::${activeId}`);
+            if (lastSnap && Array.isArray(lastSnap.months) && lastSnap.months.length > 0) {
+              const debugInfo = typeof window.__offlineDebug === 'function' ? window.__offlineDebug() : {};
+              const idbKeys = new Set(debugInfo.keysInIdb || []);
+              const missingMonths = lastSnap.months.filter(m => !idbKeys.has(`orders::${activeId}::${m}`));
+              if (missingMonths.length > 0) {
+                fetch('/api/client-error', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    message: `[cache_integrity_mismatch] identity=${activeId} missingMonths=${missingMonths.join(',')}`,
+                    stack: 'initRoleCheck in app/gardener/page.js',
+                    source: 'app/gardener/page.js',
+                  }),
+                }).catch(() => {});
+                if (navigator.onLine) {
+                  fetchOrders(true).catch(() => {});
+                }
+              }
+            }
+          } catch (e) {}
         }
 
         if (!role) {
@@ -1868,6 +1909,11 @@ export default function GardenerDashboard() {
     const pendingQueue = await getQueue();
     const merged = applyQueueToOrders(monthOrders, pendingQueue);
     setOrders(merged);
+
+    // Если онлайн, параллельно подгружаем свежий список заказов
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      fetchOrders(true).catch(() => {});
+    }
   };
 
   const goToNextMonth = async () => {
@@ -1881,6 +1927,11 @@ export default function GardenerDashboard() {
     const pendingQueue = await getQueue();
     const merged = applyQueueToOrders(monthOrders, pendingQueue);
     setOrders(merged);
+
+    // Если онлайн, параллельно подгружаем свежий список заказов
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      fetchOrders(true).catch(() => {});
+    }
   };
 
   const renderCalendarCell = (d, i) => {
@@ -2689,28 +2740,22 @@ export default function GardenerDashboard() {
 
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
-        ) : orders.length === 0 ? (
+        ) : (!hasCachedBundle && orders.length === 0 && (isOffline || (typeof window !== 'undefined' && !navigator.onLine))) ? (
           <div className="text-center text-slate-600 py-8 px-4 bg-white border border-slate-200 rounded-xl space-y-3">
-            {isOffline || (typeof window !== 'undefined' && !navigator.onLine) ? (
-              <>
-                <div className="text-2xl">📡</div>
-                <div className="font-semibold text-slate-800">Данные не сохранены</div>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  В локальном хранилище устройства нет сохранённых заказов для этого аккаунта. Подключитесь к интернету для загрузки данных.
-                </p>
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => fetchOrders(false)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    Повторить попытку
-                  </button>
-                </div>
-              </>
-            ) : (
-              'У вас пока нет назначенных заказов'
-            )}
+            <div className="text-2xl">📡</div>
+            <div className="font-semibold text-slate-800">Данные не сохранены</div>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              В локальном хранилище устройства нет сохранённых заказов для этого аккаунта. Подключитесь к интернету для загрузки данных.
+            </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => fetchOrders(false)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors"
+              >
+                Повторить попытку
+              </button>
+            </div>
           </div>
         ) : viewMode === 'list' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
