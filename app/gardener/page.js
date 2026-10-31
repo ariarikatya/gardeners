@@ -23,7 +23,8 @@ import {
   getCachedMonth,
   syncSessionMarkers,
   getGardenerIdentityAsync,
-  getMeta
+  getMeta,
+  checkAndRotateQuotaProactively
 } from '@/lib/offlineStore';
 import { toDateKey } from '@/lib/dates';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
@@ -131,6 +132,10 @@ export default function GardenerDashboard() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
+  const calendarMonthRef = useRef(calendarMonth);
+  useEffect(() => {
+    calendarMonthRef.current = calendarMonth;
+  }, [calendarMonth]);
   const [selectedDateStr, setSelectedDateStr] = useState(null);
   const [showPastOrders, setShowPastOrders] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -384,7 +389,7 @@ export default function GardenerDashboard() {
     return !navigator.onLine;
   };
 
-  const fetchOrders = async (silent = false) => {
+  const fetchOrders = async (silent = false, targetMonth = null) => {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
       await loadFromCache();
@@ -474,15 +479,16 @@ export default function GardenerDashboard() {
           orders: incomingOrders,
           dayOffs: data.dayOffs || [],
           identity: activeIdentity,
-          currentMonth: new Date(),
+          currentMonth: null, // Для общего GET не шлем currentMonth, чтобы не создавать ложный emptyConfirmed
           isServerSuccess,
         }).catch((err) => console.error('persistOrdersCache error:', err));
 
-        // Синхронизация заказов: для отображения берем заказы текущего выбранного месяца календаря
+        // Синхронизация заказов: для отображения берем заказы АКТУАЛЬНОГО месяца (из targetMonth или calendarMonthRef)
         try {
           const freshBundle = await loadCachedOrdersBundle(activeIdentity);
-          if (freshBundle && freshBundle.orders && freshBundle.orders.length > 0) {
-            const curMKey = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`;
+          const activeCalMonth = targetMonth || calendarMonthRef.current || calendarMonth;
+          if (freshBundle && freshBundle.orders) {
+            const curMKey = `${activeCalMonth.getFullYear()}-${String(activeCalMonth.getMonth() + 1).padStart(2, '0')}`;
             const curMonthOrders = freshBundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
             const allMerged = applyQueueToOrders(curMonthOrders, pendingQueue);
             setOrders(allMerged);
@@ -491,11 +497,14 @@ export default function GardenerDashboard() {
           const serverCount = incomingOrders.length;
           if (serverCount > cachedCount) {
             setCacheCountMismatch({ serverCount, cachedCount });
+            const debug = typeof window.__offlineDebug === 'function' ? window.__offlineDebug() : {};
             fetch('/api/client-error', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                message: `[cache_mismatch] identity: ${activeIdentity}, serverCount: ${serverCount}, cachedCount: ${cachedCount}`
+                message: `[cache_mismatch] identity=${activeIdentity} serverCount=${serverCount} cachedCount=${cachedCount} keys=${(debug.keysInIdb || []).join(',')}`,
+                stack: 'orders completeness check',
+                source: 'app/gardener/page.js',
               }),
             }).catch(() => {});
           } else {
@@ -503,26 +512,19 @@ export default function GardenerDashboard() {
           }
         } catch (mErr) {}
 
-        // Фоновый прогрев следующего месяца для надежной офлайн-навигации
+        // Фоновый прогрев: гарантируем сохранение полного слепка и истории
         if (!silent && navigator.onLine) {
           (async () => {
             try {
-              const nextM = new Date();
-              nextM.setMonth(nextM.getMonth() + 1);
-              const nextMKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
-              const resNext = await apiFetch(`/api/gardener/orders?month=${nextMKey}`);
-              if (resNext.ok) {
-                const nextData = await resNext.json();
-                if (nextData && Array.isArray(nextData.orders)) {
-                  await persistOrdersCache({
-                    orders: nextData.orders,
-                    dayOffs: nextData.dayOffs || [],
-                    identity: activeIdentity,
-                    currentMonth: nextM,
-                    isServerSuccess: true,
-                  }).catch(() => {});
-                }
-              }
+              // Полный список уже получен в incomingOrders и закэширован по всем месяцам.
+              // При необходимости выполняем контрольное обновление бандла без ложных currentMonth.
+              await persistOrdersCache({
+                orders: incomingOrders,
+                dayOffs: data.dayOffs || [],
+                identity: activeIdentity,
+                currentMonth: null,
+                isServerSuccess: true,
+              }).catch(() => {});
             } catch (e) {}
           })();
         }
@@ -759,11 +761,17 @@ export default function GardenerDashboard() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                message: `[idb_evicted_detected] keysCount=${debug.keysInIdb?.length || 0}`,
+                message: `[idb_evicted_detected] keysCount=${debug.keysInIdb?.length || 0} keys=${(debug.keysInIdb || []).join(',')}`,
                 stack: 'runIdbSelfTest in app/gardener/page.js',
                 source: 'app/gardener/page.js',
               }),
             }).catch(() => {});
+            // Автоматический re-warm при обнаружении eviction если онлайн
+            if (navigator.onLine) {
+              fetchOrders(false).then(() => {
+                setIsIdbEvicted(false);
+              }).catch(() => {});
+            }
           } else {
             setIsIdbEvicted(false);
           }
@@ -913,6 +921,7 @@ export default function GardenerDashboard() {
 
     const handleOnline = () => {
       setIsOffline(false);
+      checkAndRotateQuotaProactively(getGardenerIdentity()).catch(() => {});
       // Если оффлайн-кэш был пуст при наличии токена, делаем немедленный re-warm
       if (orders.length === 0 && typeof window !== 'undefined' && localStorage.getItem('auth_token')) {
         fetchOrders(false);
@@ -930,6 +939,7 @@ export default function GardenerDashboard() {
       if (!document.hidden) {
         document.title = '🌿 Мой Кабинет';
         requestStoragePersistence();
+        checkAndRotateQuotaProactively(getGardenerIdentity()).catch(() => {});
         if (typeof window !== 'undefined' && navigator.onLine) {
           handleSyncQueue();
         }
@@ -1900,6 +1910,7 @@ export default function GardenerDashboard() {
 
   const goToPrevMonth = async () => {
     const prevM = new Date(year, month - 1, 1);
+    calendarMonthRef.current = prevM;
     setCalendarMonth(prevM);
     setSelectedDateStr(null);
     const mKey = `${prevM.getFullYear()}-${String(prevM.getMonth() + 1).padStart(2, '0')}`;
@@ -1910,14 +1921,15 @@ export default function GardenerDashboard() {
     const merged = applyQueueToOrders(monthOrders, pendingQueue);
     setOrders(merged);
 
-    // Если онлайн, параллельно подгружаем свежий список заказов
+    // Если онлайн, параллельно подгружаем свежий список заказов с целевым месяцем prevM
     if (typeof window !== 'undefined' && navigator.onLine) {
-      fetchOrders(true).catch(() => {});
+      fetchOrders(true, prevM).catch(() => {});
     }
   };
 
   const goToNextMonth = async () => {
     const nextM = new Date(year, month + 1, 1);
+    calendarMonthRef.current = nextM;
     setCalendarMonth(nextM);
     setSelectedDateStr(null);
     const mKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
@@ -1928,9 +1940,9 @@ export default function GardenerDashboard() {
     const merged = applyQueueToOrders(monthOrders, pendingQueue);
     setOrders(merged);
 
-    // Если онлайн, параллельно подгружаем свежий список заказов
+    // Если онлайн, параллельно подгружаем свежий список заказов с целевым месяцем nextM
     if (typeof window !== 'undefined' && navigator.onLine) {
-      fetchOrders(true).catch(() => {});
+      fetchOrders(true, nextM).catch(() => {});
     }
   };
 
