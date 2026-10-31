@@ -280,7 +280,10 @@ export default function GardenerDashboard() {
       const effectiveAuction = cachedAuctionObj || legacyAuctionObj;
 
       if (bundle && Array.isArray(bundle.orders) && bundle.orders.length > 0) {
-        const merged = applyQueueToOrders(bundle.orders, pendingQueue);
+        // При инициализации отображаем заказы активного месяца календаря calendarMonth
+        const curMKey = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`;
+        const curMonthOrders = bundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
+        const merged = applyQueueToOrders(curMonthOrders, pendingQueue);
         setOrders(merged);
         setMyDayOffs(bundle.dayOffs || []);
         setLoading(false);
@@ -470,11 +473,13 @@ export default function GardenerDashboard() {
           isServerSuccess,
         }).catch((err) => console.error('persistOrdersCache error:', err));
 
-        // Синхронизация заказов со всеми сохранёнными месяцами (bundle union)
+        // Синхронизация заказов: для отображения берем заказы текущего выбранного месяца календаря
         try {
           const freshBundle = await loadCachedOrdersBundle(activeIdentity);
           if (freshBundle && freshBundle.orders && freshBundle.orders.length > 0) {
-            const allMerged = applyQueueToOrders(freshBundle.orders, pendingQueue);
+            const curMKey = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`;
+            const curMonthOrders = freshBundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
+            const allMerged = applyQueueToOrders(curMonthOrders, pendingQueue);
             setOrders(allMerged);
           }
           const cachedCount = (freshBundle && freshBundle.orders) ? freshBundle.orders.length : 0;
@@ -1855,80 +1860,27 @@ export default function GardenerDashboard() {
   const goToPrevMonth = async () => {
     const prevM = new Date(year, month - 1, 1);
     setCalendarMonth(prevM);
+    setSelectedDateStr(null);
     const mKey = `${prevM.getFullYear()}-${String(prevM.getMonth() + 1).padStart(2, '0')}`;
-    if (!navigator.onLine || isOffline) {
-      const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
-      if (cached && cached.orders && cached.orders.length > 0) {
-        setOrders(prev => {
-          const map = new Map(prev.map(o => [o.id, o]));
-          for (const o of cached.orders) map.set(o.id, o);
-          return Array.from(map.values());
-        });
-      }
-    } else {
-      // Онлайн: подгружаем выбранный месяц с сервера и сразу сохраняем в кэш
-      try {
-        const res = await apiFetch(`/api/gardener/orders?month=${mKey}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data && Array.isArray(data.orders)) {
-            const currentIdentity = offlineIdentity || getGardenerIdentity();
-            if (currentIdentity) {
-              await persistOrdersCache({
-                orders: data.orders,
-                dayOffs: data.dayOffs || [],
-                identity: currentIdentity,
-                isServerSuccess: true,
-              });
-            }
-            setOrders(prev => {
-              const map = new Map(prev.map(o => [o.id, o]));
-              for (const o of data.orders) map.set(o.id, o);
-              return Array.from(map.values());
-            });
-          }
-        }
-      } catch (e) {}
-    }
+    const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
+    // Устанавливаем ровно заказы выбранного месяца (или пустой массив если нет)
+    const monthOrders = (cached && Array.isArray(cached.orders)) ? cached.orders : [];
+    const pendingQueue = await getQueue();
+    const merged = applyQueueToOrders(monthOrders, pendingQueue);
+    setOrders(merged);
   };
+
   const goToNextMonth = async () => {
     const nextM = new Date(year, month + 1, 1);
     setCalendarMonth(nextM);
+    setSelectedDateStr(null);
     const mKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
-    if (!navigator.onLine || isOffline) {
-      const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
-      if (cached && cached.orders && cached.orders.length > 0) {
-        setOrders(prev => {
-          const map = new Map(prev.map(o => [o.id, o]));
-          for (const o of cached.orders) map.set(o.id, o);
-          return Array.from(map.values());
-        });
-      }
-    } else {
-      // Онлайн: подгружаем выбранный месяц с сервера и сразу сохраняем в кэш
-      try {
-        const res = await apiFetch(`/api/gardener/orders?month=${mKey}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data && Array.isArray(data.orders)) {
-            const currentIdentity = offlineIdentity || getGardenerIdentity();
-            if (currentIdentity) {
-              await persistOrdersCache({
-                orders: data.orders,
-                dayOffs: data.dayOffs || [],
-                identity: currentIdentity,
-                isServerSuccess: true,
-              });
-            }
-            setOrders(prev => {
-              const map = new Map(prev.map(o => [o.id, o]));
-              for (const o of data.orders) map.set(o.id, o);
-              return Array.from(map.values());
-            });
-          }
-        }
-      } catch (e) {}
-    }
+    const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
+    // Устанавливаем ровно заказы выбранного месяца (или пустой массив если нет)
+    const monthOrders = (cached && Array.isArray(cached.orders)) ? cached.orders : [];
+    const pendingQueue = await getQueue();
+    const merged = applyQueueToOrders(monthOrders, pendingQueue);
+    setOrders(merged);
   };
 
   const renderCalendarCell = (d, i) => {
