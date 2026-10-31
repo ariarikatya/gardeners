@@ -42,7 +42,9 @@ export default function GardenerError({ error, reset }) {
         if ('caches' in window) {
           const keys = await caches.keys();
           for (const key of keys) {
-            await caches.delete(key);
+            if (key !== 'anemon-agro-offline-data' && key.startsWith('anemon-agro-')) {
+              await caches.delete(key);
+            }
           }
         }
         sessionStorage.clear();

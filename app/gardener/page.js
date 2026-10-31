@@ -23,6 +23,7 @@ import {
   getCachedMonth,
   syncSessionMarkers
 } from '@/lib/offlineStore';
+import { toDateKey } from '@/lib/dates';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
 
@@ -469,12 +470,16 @@ export default function GardenerDashboard() {
           isServerSuccess,
         }).catch((err) => console.error('persistOrdersCache error:', err));
 
-        // Сверка полноты онлайн vs офлайн
+        // Синхронизация заказов со всеми сохранёнными месяцами (bundle union)
         try {
           const freshBundle = await loadCachedOrdersBundle(activeIdentity);
+          if (freshBundle && freshBundle.orders && freshBundle.orders.length > 0) {
+            const allMerged = applyQueueToOrders(freshBundle.orders, pendingQueue);
+            setOrders(allMerged);
+          }
           const cachedCount = (freshBundle && freshBundle.orders) ? freshBundle.orders.length : 0;
           const serverCount = incomingOrders.length;
-          if (serverCount !== cachedCount) {
+          if (serverCount > cachedCount) {
             setCacheCountMismatch({ serverCount, cachedCount });
             fetch('/api/client-error', {
               method: 'POST',
@@ -487,6 +492,30 @@ export default function GardenerDashboard() {
             setCacheCountMismatch(null);
           }
         } catch (mErr) {}
+
+        // Фоновый прогрев следующего месяца для надежной офлайн-навигации
+        if (!silent && navigator.onLine) {
+          (async () => {
+            try {
+              const nextM = new Date();
+              nextM.setMonth(nextM.getMonth() + 1);
+              const nextMKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
+              const resNext = await apiFetch(`/api/gardener/orders?month=${nextMKey}`);
+              if (resNext.ok) {
+                const nextData = await resNext.json();
+                if (nextData && Array.isArray(nextData.orders)) {
+                  await persistOrdersCache({
+                    orders: nextData.orders,
+                    dayOffs: nextData.dayOffs || [],
+                    identity: activeIdentity,
+                    currentMonth: nextM,
+                    isServerSuccess: true,
+                  }).catch(() => {});
+                }
+              }
+            } catch (e) {}
+          })();
+        }
       }
 
       await saveCache('operations', ops.operations || []);
@@ -1805,7 +1834,8 @@ export default function GardenerDashboard() {
   const ordersByDate = {};
   orders.forEach(o => {
     if (!matchesSearch(o)) return;
-    const key = o.date.split('T')[0];
+    const key = toDateKey(o.date);
+    if (!key) return;
     if (!ordersByDate[key]) ordersByDate[key] = [];
     ordersByDate[key].push(o);
   });
@@ -1813,7 +1843,8 @@ export default function GardenerDashboard() {
   const dayOffMap = {};
   myDayOffs.forEach(d => {
     if (!d || !d.date) return;
-    const key = typeof d.date === 'string' ? d.date.split('T')[0] : new Date(d.date).toISOString().split('T')[0];
+    const key = toDateKey(d.date);
+    if (!key) return;
     dayOffMap[key] = true;
   });
 
@@ -1824,8 +1855,8 @@ export default function GardenerDashboard() {
   const goToPrevMonth = async () => {
     const prevM = new Date(year, month - 1, 1);
     setCalendarMonth(prevM);
+    const mKey = `${prevM.getFullYear()}-${String(prevM.getMonth() + 1).padStart(2, '0')}`;
     if (!navigator.onLine || isOffline) {
-      const mKey = `${prevM.getFullYear()}-${String(prevM.getMonth() + 1).padStart(2, '0')}`;
       const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
       if (cached && cached.orders && cached.orders.length > 0) {
         setOrders(prev => {
@@ -1834,13 +1865,37 @@ export default function GardenerDashboard() {
           return Array.from(map.values());
         });
       }
+    } else {
+      // Онлайн: подгружаем выбранный месяц с сервера и сразу сохраняем в кэш
+      try {
+        const res = await apiFetch(`/api/gardener/orders?month=${mKey}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.orders)) {
+            const currentIdentity = offlineIdentity || getGardenerIdentity();
+            if (currentIdentity) {
+              await persistOrdersCache({
+                orders: data.orders,
+                dayOffs: data.dayOffs || [],
+                identity: currentIdentity,
+                isServerSuccess: true,
+              });
+            }
+            setOrders(prev => {
+              const map = new Map(prev.map(o => [o.id, o]));
+              for (const o of data.orders) map.set(o.id, o);
+              return Array.from(map.values());
+            });
+          }
+        }
+      } catch (e) {}
     }
   };
   const goToNextMonth = async () => {
     const nextM = new Date(year, month + 1, 1);
     setCalendarMonth(nextM);
+    const mKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
     if (!navigator.onLine || isOffline) {
-      const mKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
       const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
       if (cached && cached.orders && cached.orders.length > 0) {
         setOrders(prev => {
@@ -1849,6 +1904,30 @@ export default function GardenerDashboard() {
           return Array.from(map.values());
         });
       }
+    } else {
+      // Онлайн: подгружаем выбранный месяц с сервера и сразу сохраняем в кэш
+      try {
+        const res = await apiFetch(`/api/gardener/orders?month=${mKey}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.orders)) {
+            const currentIdentity = offlineIdentity || getGardenerIdentity();
+            if (currentIdentity) {
+              await persistOrdersCache({
+                orders: data.orders,
+                dayOffs: data.dayOffs || [],
+                identity: currentIdentity,
+                isServerSuccess: true,
+              });
+            }
+            setOrders(prev => {
+              const map = new Map(prev.map(o => [o.id, o]));
+              for (const o of data.orders) map.set(o.id, o);
+              return Array.from(map.values());
+            });
+          }
+        }
+      } catch (e) {}
     }
   };
 

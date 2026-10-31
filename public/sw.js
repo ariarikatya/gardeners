@@ -1250,15 +1250,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // === GET /api/* read-only whitelisted endpoints: Stale-While-Revalidate ===
+  // === GET /api/* read-only endpoints: Network First с фоллбэком на кэш при отсутствии сети ===
+  // Когда онлайн, ВСЕГДА отдаем свежий ответ сервера, чтобы пользователь не видел устаревший кэш заказов
   if (request.method === 'GET' && url.pathname.startsWith('/api/')) {
     event.respondWith(
       (async () => {
-        const cache = await caches.open(CACHE_NAME);
-        const pCache = await caches.open(OFFLINE_DATA_CACHE);
-        const cachedRes = await cache.match(request) || await pCache.match(request);
-
-        const fetchPromise = fetch(request).then(async (netRes) => {
+        try {
+          const netRes = await fetch(request);
           if (netRes && netRes.ok && netRes.status === 200 && !netRes.redirected && netRes.type !== 'opaque' && netRes.type !== 'opaqueredirect') {
             const clone1 = netRes.clone();
             const clone2 = netRes.clone();
@@ -1266,22 +1264,22 @@ self.addEventListener('fetch', (event) => {
             safeCachePut(OFFLINE_DATA_CACHE, request, clone2);
           }
           return netRes;
-        }).catch(() => null);
+        } catch (netErr) {
+          // Сеть недоступна — фоллбэк на кэшированный ответ
+          try {
+            const cache = await caches.open(CACHE_NAME);
+            const pCache = await caches.open(OFFLINE_DATA_CACHE);
+            const cachedRes = await cache.match(request) || await pCache.match(request);
+            if (cachedRes) {
+              return cachedRes;
+            }
+          } catch (cacheErr) {}
 
-        if (cachedRes) {
-          event.waitUntil(fetchPromise);
-          return cachedRes;
+          return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
-
-        try {
-          const netRes = await fetchPromise;
-          if (netRes) return netRes;
-        } catch (e) {}
-
-        return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' },
-        });
       })()
     );
     return;

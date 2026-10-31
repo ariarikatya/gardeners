@@ -65,16 +65,6 @@ export default function ServiceWorkerRegister() {
           }
         }
 
-        // Unregister старых SW только после завершения миграции кэшей
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          for (const reg of registrations) {
-            const scriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
-            if (scriptUrl && !scriptUrl.includes(expectedVersionParam)) {
-              await reg.unregister();
-            }
-          }
-        }
       } catch (e) {}
     };
 
