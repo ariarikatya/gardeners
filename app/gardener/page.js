@@ -24,7 +24,8 @@ import {
   syncSessionMarkers,
   getGardenerIdentityAsync,
   getMeta,
-  checkAndRotateQuotaProactively
+  checkAndRotateQuotaProactively,
+  formatMonthKey
 } from '@/lib/offlineStore';
 import { toDateKey } from '@/lib/dates';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
