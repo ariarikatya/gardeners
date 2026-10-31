@@ -934,6 +934,30 @@ self.addEventListener('message', (event) => {
     promise.then(() => reply(true)).catch(() => reply(false));
     return;
   }
+
+  // Обработка CLEAR_ALL_CACHES: удаление HTTP кэшей, сохраняя OFFLINE_DATA_CACHE
+  if (event.data.type === 'CLEAR_ALL_CACHES') {
+    const promise = (async () => {
+      try {
+        const cacheNames = await caches.keys();
+        await Promise.all(
+          cacheNames.map((name) => {
+            if (name !== OFFLINE_DATA_CACHE) {
+              return caches.delete(name);
+            }
+            return Promise.resolve(false);
+          })
+        );
+        // Заново инициализируем текущий APP_SHELL в активном кэше
+        await precacheAllRoles();
+      } catch (e) {
+        console.warn('[SW] CLEAR_ALL_CACHES error:', e);
+      }
+    })();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
 });
 
 // === FETCH ===

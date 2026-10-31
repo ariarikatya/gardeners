@@ -18,7 +18,8 @@ import {
   loadCachedOrdersBundle,
   clearIdentityCache,
   getOfflineDebugInfo,
-  saveShell
+  saveShell,
+  flushPendingWrites
 } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
@@ -282,6 +283,10 @@ export default function GardenerDashboard() {
         setLoading(false);
         if (bundle.savedAt) {
           setLastCacheTime(formatLastUpdated(bundle.savedAt));
+          const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+          if (Date.now() - bundle.savedAt > TWENTY_FOUR_HOURS_MS) {
+            setIsDataStale(true);
+          }
         }
       }
 
@@ -290,7 +295,7 @@ export default function GardenerDashboard() {
         setMyWorks(effectiveProfile.data.works || []);
         // Одноразовая миграция на scoped-ключ
         if (activeId && !cachedProfileObj) {
-          saveCache(`profile::${activeId}`, effectiveProfile.data).catch(() => {});
+          await saveCache(`profile::${activeId}`, effectiveProfile.data).catch(() => {});
         }
       }
 
@@ -298,7 +303,7 @@ export default function GardenerDashboard() {
         setOperations(effectiveOps.data || []);
         // Одноразовая миграция на scoped-ключ
         if (activeId && !cachedOpsObj) {
-          saveCache(`operations::${activeId}`, effectiveOps.data).catch(() => {});
+          await saveCache(`operations::${activeId}`, effectiveOps.data).catch(() => {});
         }
       }
 
@@ -306,7 +311,7 @@ export default function GardenerDashboard() {
         setAuctionOrders(effectiveAuction.data || []);
         // Одноразовая миграция на scoped-ключ
         if (activeId && !cachedAuctionObj) {
-          saveCache(`auction::${activeId}`, effectiveAuction.data).catch(() => {});
+          await saveCache(`auction::${activeId}`, effectiveAuction.data).catch(() => {});
         }
       }
 
@@ -351,6 +356,9 @@ export default function GardenerDashboard() {
     }
   };
 
+  const [storagePersisted, setStoragePersisted] = useState(true);
+  const [isDataStale, setIsDataStale] = useState(false);
+
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
     return !navigator.onLine;
@@ -391,8 +399,12 @@ export default function GardenerDashboard() {
         apiFetch('/api/gardener/operations')
       ]);
 
-      if (!resOrders.ok) {
-        throw new Error('Server returned error or offline 503');
+      // Явный offline-путь при 503 / resOrders.offline / noInternet
+      if (!resOrders.ok || resOrders.offline || (resOrders.status === 503 && !navigator.onLine)) {
+        setIsOffline(true);
+        await loadFromCache();
+        if (!silent) setLoading(false);
+        return;
       }
 
       const data = await resOrders.json();
@@ -422,12 +434,13 @@ export default function GardenerDashboard() {
 
       const now = Date.now();
       setLastCacheTime(formatLastUpdated(now));
+      setIsDataStale(false);
 
       // Кэшируем данные по стабильному identity без 14-дневного фильтра
       const activeIdentity = getGardenerIdentity();
       if (activeIdentity) {
         setOfflineIdentity(activeIdentity);
-        persistOrdersCache({
+        await persistOrdersCache({
           orders: incomingOrders,
           dayOffs: data.dayOffs || [],
           identity: activeIdentity,
@@ -435,16 +448,16 @@ export default function GardenerDashboard() {
         }).catch((err) => console.error('persistOrdersCache error:', err));
       }
 
-      saveCache('operations', ops.operations || []);
+      await saveCache('operations', ops.operations || []);
       if (activeIdentity) {
-        saveCache(`operations::${activeIdentity}`, ops.operations || []).catch(() => {});
+        await saveCache(`operations::${activeIdentity}`, ops.operations || []).catch(() => {});
       }
 
       // Сохраняем слепок shell в IndexedDB
       if (typeof document !== 'undefined' && document.documentElement) {
         const fullHtml = document.documentElement.outerHTML;
         if (fullHtml && fullHtml.length > 500) {
-          saveShell('/gardener', fullHtml).catch(() => {});
+          await saveShell('/gardener', fullHtml).catch(() => {});
         }
       }
     } catch (e) {
@@ -511,8 +524,8 @@ export default function GardenerDashboard() {
         });
         if (resolvedId) {
           setOfflineIdentity(resolvedId);
-          setGardenerIdentity(resolvedId).catch(() => {});
-          saveCache(`profile::${resolvedId}`, data.gardener).catch(() => {});
+          await setGardenerIdentity(resolvedId).catch(() => {});
+          await saveCache(`profile::${resolvedId}`, data.gardener).catch(() => {});
         }
       }
     } catch (e) {
@@ -625,7 +638,13 @@ export default function GardenerDashboard() {
     if (typeof window !== 'undefined') {
       // Запрос персистентного хранилища для предотвращения выгрузки браузером при бездействии
       if (navigator.storage && typeof navigator.storage.persist === 'function') {
-        navigator.storage.persist().catch(() => {});
+        navigator.storage.persist().then(persisted => {
+          setStoragePersisted(Boolean(persisted));
+        }).catch(() => {});
+      } else if (navigator.storage && typeof navigator.storage.persisted === 'function') {
+        navigator.storage.persisted().then(persisted => {
+          setStoragePersisted(Boolean(persisted));
+        }).catch(() => {});
       }
 
       const initRoleCheck = async () => {
@@ -696,7 +715,7 @@ export default function GardenerDashboard() {
       }
     }
 
-    loadFromCache();
+    // loadFromCache() уже вызван выше на строке 638, убираем дублирующий вызов
     fetchOrders();
     fetchProfile();
     fetchAuction();
@@ -790,10 +809,18 @@ export default function GardenerDashboard() {
             } catch (err) {}
           }
         }
+        // Запускаем сброс незавершённых транзакций IndexedDB при закрытии вкладки
+        flushPendingWrites().catch(() => {});
       }
     };
+
+    const handlePageHide = (e) => {
+      handleBeforeUnload(e);
+      flushPendingWrites().catch(() => {});
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -805,7 +832,7 @@ export default function GardenerDashboard() {
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
     };
   }, []);
 
@@ -912,9 +939,13 @@ export default function GardenerDashboard() {
         localStorage.removeItem('offline_session');
         localStorage.removeItem('offline_session_ts');
         localStorage.removeItem('auth_session_cached');
-        const currentIdentity = gardenerIdentity || getGardenerIdentity();
-        if (currentIdentity) {
-          try { await clearIdentityCache(currentIdentity); } catch (e) {}
+        try {
+          const currentIdentity = (typeof offlineIdentity !== 'undefined' && offlineIdentity) ? offlineIdentity : getGardenerIdentity();
+          if (currentIdentity) {
+            await clearIdentityCache(currentIdentity);
+          }
+        } catch (e) {
+          console.warn('[Logout] Error clearing identity cache:', e);
         }
         localStorage.removeItem('gardener_identity');
 
@@ -1766,6 +1797,21 @@ export default function GardenerDashboard() {
             Оффлайн · данные от {lastCacheTime || '—'} · {orders.length} {orders.length === 1 ? 'заказ' : orders.length < 5 ? 'заказа' : 'заказов'} · ключ {offlineIdentity || getGardenerIdentity() || 'не определен'}
           </span>
           {queueCount > 0 && <span>(в очереди: {queueCount})</span>}
+        </div>
+      )}
+
+      {/* Предупреждение об устаревших данных */}
+      {isDataStale && (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
+        <div className="bg-orange-600 text-white text-xs font-semibold px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>⚠️ Данные от {lastCacheTime || 'прошлого сеанса'}, возможно устарели — обновите страницу при появлении сети</span>
+          <button type="button" onClick={() => fetchOrders(false)} className="underline hover:text-orange-200">обновить</button>
+        </div>
+      )}
+
+      {/* Предупреждение о неперсистентном хранилище */}
+      {!storagePersisted && (
+        <div className="bg-yellow-600 text-white text-[11px] px-4 py-1 text-center shadow-inner flex items-center justify-center gap-2">
+          <span>ℹ️ Браузер может очистить офлайн-данные при долгом бездействии. Заходите в приложение периодически при наличии сети.</span>
         </div>
       )}
 
