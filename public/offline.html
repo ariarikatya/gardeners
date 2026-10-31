@@ -75,13 +75,45 @@
 <body>
   <div class="card">
     <div class="icon">🌿</div>
-    <h1>Нет подключения к сети</h1>
-    <p>Данные появятся после первого онлайн-входа в приложение с сохранённой сессией.</p>
-    <div class="hint">
+    <h1 id="offline-title">Нет подключения к сети</h1>
+    <p id="offline-desc">Данные ещё ни разу не загружались на этом устройстве.</p>
+    <div class="hint" id="offline-hint">
       Если вы уже входили ранее, проверьте подключение к интернету и нажмите кнопку ниже.
     </div>
+    <div id="cached-summary" style="display:none; margin-bottom: 1.25rem; font-size: 0.8125rem; text-align: left; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 0.75rem; padding: 0.75rem; color: #166534;">
+      <div style="font-weight: 600; margin-bottom: 0.25rem;">📦 Доступен локальный кэш:</div>
+      <div id="cached-meta"></div>
+    </div>
     <button type="button" onclick="window.location.reload()">Повторить</button>
-    <button type="button" style="margin-top: 0.5rem; background: #e2e8f0; color: #0f172a;" onclick="window.location.assign('/gardener')">Загрузить данные заново</button>
+    <button type="button" style="margin-top: 0.5rem; background: #e2e8f0; color: #0f172a;" onclick="window.location.assign('/gardener')">Перейти в кабинет</button>
   </div>
+  <script>
+    (function checkIdb() {
+      try {
+        var req = indexedDB.open('gardener_offline_db');
+        req.onsuccess = function(e) {
+          var db = e.target.result;
+          if (!db.objectStoreNames.contains('data_cache')) return;
+          var tx = db.transaction('data_cache', 'readonly');
+          var store = tx.objectStore('data_cache');
+          var allReq = store.getAll();
+          allReq.onsuccess = function() {
+            var items = allReq.result || [];
+            var fullSnap = items.find(function(it) {
+              return it && it.key && it.key.indexOf('snapshot_full::') === 0;
+            });
+            if (fullSnap && fullSnap.data && Array.isArray(fullSnap.data.orders)) {
+              var count = fullSnap.data.orders.length;
+              var dateStr = fullSnap.data.savedAt ? new Date(fullSnap.data.savedAt).toLocaleDateString('ru-RU') + ' ' + new Date(fullSnap.data.savedAt).toLocaleTimeString('ru-RU') : 'ранее';
+              document.getElementById('offline-title').textContent = 'Офлайн-режим';
+              document.getElementById('offline-desc').textContent = 'Показаны сохранённые данные от ' + dateStr + '.';
+              document.getElementById('cached-summary').style.display = 'block';
+              document.getElementById('cached-meta').textContent = 'Сохранено заказов: ' + count;
+            }
+          };
+        };
+      } catch (e) {}
+    })();
+  </script>
 </body>
 </html>

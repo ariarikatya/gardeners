@@ -5,14 +5,15 @@
  * 1. Онлайн-загрузка текущего месяца (Май).
  * 2. Пользователь переключается на следующий месяц (Июнь).
  * 3. Поздний/просроченный ответ от сервера для предыдущего месяца (Май) приходит после переключения.
- * 4. Проверяется:
- *    - Заказы активного месяца (Июнь) отображаются корректно.
- *    - Просроченный ответ предыдущего месяца отброшен счётчиком поколений и не перетирает активный месяц.
- *    - Непустой месяц (Июнь) никогда не рендерится пустым из-за гонки ответов.
+ * 4. Пользователь переключается на пустой месяц (Июль):
+ *    - Заказы пустые, emptyConfirmed подтверждается.
+ * 5. Пользователь возвращается назад в Май:
+ *    - В state отображаются заказы ровно того месяца, который показан в заголовке календаря (Май), без путаницы и потерь.
  */
 
 const assert = require('assert');
 const { toDateKey } = require('../lib/dates');
+const { formatMonthKey } = require('../lib/offlineStore');
 
 console.log('🧪 Starting Month Sync Race & Generation Counter Verification Test...\n');
 
@@ -34,7 +35,7 @@ const juneOrders = [
   { id: 'june-3', date: '2026-06-25T10:00:00.000Z', clientName: 'Клиент Июнь 3' },
 ];
 
-// Полный ответ сервера
+// Полный ответ сервера (Июль пустой)
 const fullServerOrders = [...mayOrders, ...juneOrders];
 
 // Обработчик сетевого ответа fetchOrders с generation counter
@@ -45,11 +46,11 @@ function handleFetchOrdersResponse(seq, incomingOrders, targetMonth = null) {
   }
 
   const activeCalMonth = targetMonth || calendarMonthRef.current || calendarMonth;
-  const curMKey = `${activeCalMonth.getFullYear()}-${String(activeCalMonth.getMonth() + 1).padStart(2, '0')}`;
+  const curMKey = formatMonthKey(activeCalMonth);
 
   const curMonthOrders = incomingOrders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
   displayedOrders = curMonthOrders;
-  return { discarded: false, orders: curMonthOrders };
+  return { discarded: false, orders: curMonthOrders, month: curMKey };
 }
 
 // 1. Начальная загрузка (Май)
@@ -76,7 +77,23 @@ assert.strictEqual(juneRes.discarded, false, 'Актуальный ответ se
 assert.strictEqual(displayedOrders.length, 3, 'В июне должно быть 3 заказа');
 assert.strictEqual(displayedOrders.every(o => o.id.startsWith('june-')), true);
 
-// 5. Проверяем, что непустой месяц никогда не рендерится пустым
-assert.strictEqual(displayedOrders.length > 0, true, 'Непустой месяц никогда не рендерится пустым');
+// 5. Переключение на пустой месяц (Июль)
+const julyMonth = new Date(2026, 6, 1);
+calendarMonth = julyMonth;
+calendarMonthRef.current = julyMonth;
+const seq3 = ++requestSeq;
+
+const julyRes = handleFetchOrdersResponse(seq3, fullServerOrders, julyMonth);
+assert.strictEqual(julyRes.discarded, false);
+assert.strictEqual(displayedOrders.length, 0, 'В июле должно быть 0 заказов');
+
+// 6. Возвращаемся назад в Май
+calendarMonth = new Date(2026, 4, 1);
+calendarMonthRef.current = calendarMonth;
+const seq4 = ++requestSeq;
+const backMayRes = handleFetchOrdersResponse(seq4, fullServerOrders, calendarMonth);
+assert.strictEqual(backMayRes.discarded, false);
+assert.strictEqual(displayedOrders.length, 2, 'После возврата в Май должны отображаться 2 майских заказа');
+assert.strictEqual(displayedOrders.every(o => o.id.startsWith('may-')), true);
 
 console.log('✅ Test Passed! Month sync race with generation counter successfully verified!\n');
