@@ -281,6 +281,9 @@ export default function GardenerDashboard() {
         setOrders(merged);
         setMyDayOffs(bundle.dayOffs || []);
         setLoading(false);
+        if (bundle.truncated) {
+          setIsDataTruncated(true);
+        }
         if (bundle.savedAt) {
           setLastCacheTime(formatLastUpdated(bundle.savedAt));
           const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
@@ -288,6 +291,9 @@ export default function GardenerDashboard() {
             setIsDataStale(true);
           }
         }
+      } else {
+        setOrders([]);
+        setLoading(false);
       }
 
       if (effectiveProfile && effectiveProfile.data) {
@@ -358,6 +364,7 @@ export default function GardenerDashboard() {
 
   const [storagePersisted, setStoragePersisted] = useState(true);
   const [isDataStale, setIsDataStale] = useState(false);
+  const [isDataTruncated, setIsDataTruncated] = useState(false);
 
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
@@ -445,6 +452,7 @@ export default function GardenerDashboard() {
           dayOffs: data.dayOffs || [],
           identity: activeIdentity,
           currentMonth: new Date(),
+          isServerSuccess: true,
         }).catch((err) => console.error('persistOrdersCache error:', err));
       }
 
@@ -757,7 +765,12 @@ export default function GardenerDashboard() {
 
     const handleOnline = () => {
       setIsOffline(false);
-      fetchOrders(true);
+      // Если оффлайн-кэш был пуст при наличии токена, делаем немедленный re-warm
+      if (orders.length === 0 && typeof window !== 'undefined' && localStorage.getItem('auth_token')) {
+        fetchOrders(false);
+      } else {
+        fetchOrders(true);
+      }
       handleSyncQueue();
     };
 
@@ -1808,6 +1821,13 @@ export default function GardenerDashboard() {
         </div>
       )}
 
+      {/* Предупреждение об усечении данных (truncated) */}
+      {isDataTruncated && (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
+        <div className="bg-amber-700 text-white text-xs font-semibold px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>⚠️ Показаны не все заказы (сохранены только самые актуальные). Полный список доступен онлайн.</span>
+        </div>
+      )}
+
       {/* Предупреждение о неперсистентном хранилище */}
       {!storagePersisted && (
         <div className="bg-yellow-600 text-white text-[11px] px-4 py-1 text-center shadow-inner flex items-center justify-center gap-2">
@@ -2492,10 +2512,27 @@ export default function GardenerDashboard() {
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
         ) : orders.length === 0 ? (
-          <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">
-            {isOffline || (typeof window !== 'undefined' && !navigator.onLine)
-              ? 'В этом аккаунте ещё не было успешной загрузки заказов онлайн'
-              : 'У вас пока нет назначенных заказов'}
+          <div className="text-center text-slate-600 py-8 px-4 bg-white border border-slate-200 rounded-xl space-y-3">
+            {isOffline || (typeof window !== 'undefined' && !navigator.onLine) ? (
+              <>
+                <div className="text-2xl">📡</div>
+                <div className="font-semibold text-slate-800">Данные не сохранены</div>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  В локальном хранилище устройства нет сохранённых заказов для этого аккаунта. Подключитесь к интернету для загрузки данных.
+                </p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => fetchOrders(false)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors"
+                  >
+                    Повторить попытку
+                  </button>
+                </div>
+              </>
+            ) : (
+              'У вас пока нет назначенных заказов'
+            )}
           </div>
         ) : viewMode === 'list' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

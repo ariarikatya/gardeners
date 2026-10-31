@@ -218,12 +218,13 @@ async function runTests() {
   assert.strictEqual(bundle.dayOffs.length, 1);
   console.log('✅ Test 4 passed!\n');
 
-  // Test 5: Empty orders protection
-  console.log('Test 5: Empty orders array never overwrites existing snapshot');
+  // Test 5: Empty orders protection on network error
+  console.log('Test 5: Empty orders array on network failure never overwrites existing snapshot');
   const emptyPersistResult = await persistOrdersCache({
     orders: [],
     dayOffs: [],
     identity: 'g-101',
+    isServerSuccess: false,
   });
   assert.strictEqual(emptyPersistResult, false);
   const bundleAfterEmpty = await loadCachedOrdersBundle('g-101');
@@ -330,6 +331,127 @@ async function runTests() {
     await clearIdentityCache('');
   });
   console.log('✅ Test 12 passed!\n');
+
+  // Test 13: TEST A - Invalidation of emptied month upon resync
+  console.log('Test 13: TEST A - Online: July empty, August with 3 orders -> Offline: bundle has August, NOT July; then server empties August -> after resync August is empty');
+  const augOrders = [
+    { id: 'aug-1', status: 'Новый заказ', date: '2026-08-01' },
+    { id: 'aug-2', status: 'В работе', date: '2026-08-02' },
+    { id: 'aug-3', status: 'Выполнен', date: '2026-08-03' },
+  ];
+  await persistOrdersCache({
+    orders: augOrders,
+    identity: 'g-invalidation',
+    isServerSuccess: true,
+  });
+
+  let testABundle = await loadCachedOrdersBundle('g-invalidation');
+  assert.strictEqual(testABundle.orders.length, 3);
+  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-07'), false);
+  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-08'), true);
+
+  // Now August becomes empty on server, only September appears
+  const sepOrders = [
+    { id: 'sep-1', status: 'Новый заказ', date: '2026-09-01' },
+  ];
+  await persistOrdersCache({
+    orders: sepOrders,
+    identity: 'g-invalidation',
+    isServerSuccess: true,
+  });
+
+  testABundle = await loadCachedOrdersBundle('g-invalidation');
+  assert.strictEqual(testABundle.orders.length, 1);
+  assert.strictEqual(testABundle.orders[0].id, 'sep-1');
+  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-08'), false, 'Emptied August month must be invalidated');
+  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-09'), true);
+  console.log('✅ Test 13 (TEST A) passed!\n');
+
+  // Test 14: TEST B - 600 orders in one month retained with maxPerMonth
+  console.log('Test 14: TEST B - 600 orders in one month are preserved without data loss or marked truncated');
+  const month600Orders = [];
+  for (let i = 0; i < 600; i++) {
+    month600Orders.push({ id: `ord-600-${i}`, status: 'Новый заказ', date: '2026-10-15' });
+  }
+  await persistOrdersCache({
+    orders: month600Orders,
+    identity: 'g-600',
+    maxPerMonth: 3000,
+  });
+  const bundle600 = await loadCachedOrdersBundle('g-600');
+  assert.strictEqual(bundle600.orders.length, 600, 'All 600 orders must be retained when under 3000 capacity');
+
+  // Also verify truncated flag when exceeding maxPerMonth
+  await persistOrdersCache({
+    orders: month600Orders,
+    identity: 'g-trunc',
+    maxPerMonth: 100,
+  });
+  const bundleTrunc = await loadCachedOrdersBundle('g-trunc');
+  assert.strictEqual(bundleTrunc.orders.length, 100);
+  assert.strictEqual(bundleTrunc.truncated, true);
+  console.log('✅ Test 14 (TEST B) passed!\n');
+
+  // Test 15: TEST C - Order transferred between months has no ghost entry in old month
+  console.log('Test 15: TEST C - Order transferred from May to June has no ghost in old May snapshot');
+  const initialMayOrder = [
+    { id: 'transfer-ord-1', status: 'Новый заказ', date: '2026-05-10' },
+  ];
+  await persistOrdersCache({
+    orders: initialMayOrder,
+    identity: 'g-transfer',
+    isServerSuccess: true,
+  });
+  let transferBundle = await loadCachedOrdersBundle('g-transfer');
+  assert.strictEqual(transferBundle.orders.length, 1);
+  assert.strictEqual(stores.data_cache.has('orders::g-transfer::2026-05'), true);
+
+  // Transferred to June
+  const transferredJuneOrder = [
+    { id: 'transfer-ord-1', status: 'Перенос', date: '2026-06-15' },
+  ];
+  await persistOrdersCache({
+    orders: transferredJuneOrder,
+    identity: 'g-transfer',
+    isServerSuccess: true,
+  });
+  transferBundle = await loadCachedOrdersBundle('g-transfer');
+  assert.strictEqual(transferBundle.orders.length, 1);
+  assert.strictEqual(transferBundle.orders[0].date, '2026-06-15');
+  assert.strictEqual(stores.data_cache.has('orders::g-transfer::2026-05'), false, 'May key must be deleted upon transfer');
+  assert.strictEqual(stores.data_cache.has('orders::g-transfer::2026-06'), true);
+  console.log('✅ Test 15 (TEST C) passed!\n');
+
+  // Test 16: TEST D - Empty API response with isServerSuccess: true invalidates keys; offline error preserves them
+  console.log('Test 16: TEST D - Empty API response with isServerSuccess: true clears cache; network error preserves it');
+  const validOrders = [{ id: 'keep-1', status: 'Новый заказ', date: '2026-11-20' }];
+  await persistOrdersCache({
+    orders: validOrders,
+    identity: 'g-empty-test',
+    isServerSuccess: true,
+  });
+  assert.strictEqual(stores.data_cache.has('orders::g-empty-test::2026-11'), true);
+
+  // Network error (isServerSuccess: false) -> previous cache preserved
+  const netErrorResult = await persistOrdersCache({
+    orders: [],
+    identity: 'g-empty-test',
+    isServerSuccess: false,
+  });
+  assert.strictEqual(netErrorResult, false);
+  let emptyTestBundle = await loadCachedOrdersBundle('g-empty-test');
+  assert.strictEqual(emptyTestBundle.orders.length, 1, 'Cache must be preserved on network failure');
+
+  // Server intentionally returns empty array with isServerSuccess: true -> old keys invalidated
+  const serverEmptyResult = await persistOrdersCache({
+    orders: [],
+    identity: 'g-empty-test',
+    isServerSuccess: true,
+  });
+  assert.strictEqual(serverEmptyResult, true);
+  emptyTestBundle = await loadCachedOrdersBundle('g-empty-test');
+  assert.strictEqual(emptyTestBundle.orders.length, 0, 'Cache must be invalidated when server intentionally returns empty');
+  console.log('✅ Test 16 (TEST D) passed!\n');
 
   console.log('🎉 ALL OFFLINE ORDERS CACHE TESTS PASSED SUCCESSFULLY!');
 }
