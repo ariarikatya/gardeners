@@ -4,7 +4,30 @@ import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import {
+  saveCache,
+  getCache,
+  filterOrdersForOffline,
+  activateOfflineSession,
+  resolveOfflineRoleFromCaches,
+  isOfflineSessionValid,
+  resolveGardenerIdentity,
+  getGardenerIdentity,
+  setGardenerIdentity,
+  persistOrdersCache,
+  loadCachedOrdersBundle,
+  clearIdentityCache,
+  getOfflineDebugInfo,
+  saveShell,
+  flushPendingWrites,
+  getCachedMonth,
+  syncSessionMarkers,
+  getGardenerIdentityAsync,
+  getMeta,
+  checkAndRotateQuotaProactively,
+  formatMonthKey
+} from '@/lib/offlineStore';
+import { toDateKey } from '@/lib/dates';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
 
@@ -101,6 +124,7 @@ function xhrUpload(url, formData, onProgress) {
 export default function GardenerDashboard() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
+  const [hasCachedBundle, setHasCachedBundle] = useState(false);
   const [myDayOffs, setMyDayOffs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'calendar'
@@ -109,6 +133,11 @@ export default function GardenerDashboard() {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
+  const calendarMonthRef = useRef(calendarMonth);
+  const requestSeqRef = useRef(0);
+  useEffect(() => {
+    calendarMonthRef.current = calendarMonth;
+  }, [calendarMonth]);
   const [selectedDateStr, setSelectedDateStr] = useState(null);
   const [showPastOrders, setShowPastOrders] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,6 +149,7 @@ export default function GardenerDashboard() {
   // Оффлайн состояние
   const [isOffline, setIsOffline] = useState(false);
   const [lastCacheTime, setLastCacheTime] = useState(null);
+  const [offlineIdentity, setOfflineIdentity] = useState(() => (typeof window !== 'undefined' ? getGardenerIdentity() : ''));
   const [queueCount, setQueueCount] = useState(0);
   const [queuedClaimIds, setQueuedClaimIds] = useState(new Set());
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
@@ -230,39 +260,83 @@ export default function GardenerDashboard() {
     });
   };
 
-  const loadFromCache = async () => {
+  const loadFromCache = async (customIdentity = null) => {
     try {
-      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
-        getCache('orders'),
+      const activeId = customIdentity || getGardenerIdentity() || offlineIdentity;
+      if (activeId) setOfflineIdentity(activeId);
+
+      const [
+        bundle,
+        cachedProfileObj,
+        legacyProfileObj,
+        cachedOpsObj,
+        legacyOpsObj,
+        cachedAuctionObj,
+        legacyAuctionObj,
+        pendingQueue,
+      ] = await Promise.all([
+        loadCachedOrdersBundle(activeId),
+        activeId ? getCache(`profile::${activeId}`) : Promise.resolve(null),
         getCache('profile'),
+        activeId ? getCache(`operations::${activeId}`) : Promise.resolve(null),
         getCache('operations'),
+        activeId ? getCache(`auction::${activeId}`) : Promise.resolve(null),
         getCache('auction'),
         getQueue(),
       ]);
 
-      if (cachedOrdersObj && cachedOrdersObj.data) {
-        const rawOrders = cachedOrdersObj.data.orders || [];
-        const dayOffs = cachedOrdersObj.data.dayOffs || [];
-        const merged = applyQueueToOrders(rawOrders, pendingQueue);
+      const effectiveProfile = cachedProfileObj || legacyProfileObj;
+      const effectiveOps = cachedOpsObj || legacyOpsObj;
+      const effectiveAuction = cachedAuctionObj || legacyAuctionObj;
+
+      if (bundle && Array.isArray(bundle.orders) && bundle.orders.length > 0) {
+        setHasCachedBundle(true);
+        // При инициализации отображаем заказы активного месяца календаря calendarMonth
+        const curMKey = formatMonthKey(calendarMonth);
+        const curMonthOrders = bundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
+        const merged = applyQueueToOrders(curMonthOrders, pendingQueue);
         setOrders(merged);
-        setMyDayOffs(dayOffs);
+        setMyDayOffs(bundle.dayOffs || []);
         setLoading(false);
-        if (cachedOrdersObj.updatedAt) {
-          setLastCacheTime(formatLastUpdated(cachedOrdersObj.updatedAt));
+        if (bundle.truncated) {
+          setIsDataTruncated(true);
+        }
+        if (bundle.savedAt) {
+          setLastCacheTime(formatLastUpdated(bundle.savedAt));
+          const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+          if (Date.now() - bundle.savedAt > TWENTY_FOUR_HOURS_MS) {
+            setIsDataStale(true);
+          }
+        }
+      } else {
+        setHasCachedBundle(false);
+        setOrders([]);
+        setLoading(false);
+      }
+
+      if (effectiveProfile && effectiveProfile.data) {
+        setGardenerProfile(effectiveProfile.data);
+        setMyWorks(effectiveProfile.data.works || []);
+        // Одноразовая миграция на scoped-ключ
+        if (activeId && !cachedProfileObj) {
+          await saveCache(`profile::${activeId}`, effectiveProfile.data).catch(() => {});
         }
       }
 
-      if (cachedProfileObj && cachedProfileObj.data) {
-        setGardenerProfile(cachedProfileObj.data);
-        setMyWorks(cachedProfileObj.data.works || []);
+      if (effectiveOps && effectiveOps.data) {
+        setOperations(effectiveOps.data || []);
+        // Одноразовая миграция на scoped-ключ
+        if (activeId && !cachedOpsObj) {
+          await saveCache(`operations::${activeId}`, effectiveOps.data).catch(() => {});
+        }
       }
 
-      if (cachedOpsObj && cachedOpsObj.data) {
-        setOperations(cachedOpsObj.data || []);
-      }
-
-      if (cachedAuctionObj && cachedAuctionObj.data) {
-        setAuctionOrders(cachedAuctionObj.data || []);
+      if (effectiveAuction && effectiveAuction.data) {
+        setAuctionOrders(effectiveAuction.data || []);
+        // Одноразовая миграция на scoped-ключ
+        if (activeId && !cachedAuctionObj) {
+          await saveCache(`auction::${activeId}`, effectiveAuction.data).catch(() => {});
+        }
       }
 
       const activeQueue = (pendingQueue || []).filter(i => i.status !== 'conflict');
@@ -271,6 +345,8 @@ export default function GardenerDashboard() {
       setQueuedClaimIds(claimIds);
     } catch (e) {
       console.error('Error loading offline cache:', e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -304,14 +380,22 @@ export default function GardenerDashboard() {
     }
   };
 
+  const [storagePersisted, setStoragePersisted] = useState(true);
+  const [isDataStale, setIsDataStale] = useState(false);
+  const [isDataTruncated, setIsDataTruncated] = useState(false);
+  const [isIdbEvicted, setIsIdbEvicted] = useState(false);
+  const [cacheCountMismatch, setCacheCountMismatch] = useState(null);
+
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
     return !navigator.onLine;
   };
 
-  const fetchOrders = async (silent = false) => {
+  const fetchOrders = async (silent = false, targetMonth = null) => {
+    const currentSeq = ++requestSeqRef.current;
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
+      await loadFromCache();
       const authPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
       let storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
       if (!storedRole) {
@@ -343,13 +427,31 @@ export default function GardenerDashboard() {
         apiFetch('/api/gardener/operations')
       ]);
 
-      if (!resOrders.ok) {
-        throw new Error('Server returned error or offline 503');
+      // Проверка успешности ответа сервера: при сетевых ошибках, 5xx или невалидном ответе НЕ инвалидируем кэш
+      const isServerOk = resOrders.ok && resOrders.status < 500;
+      let data = null;
+      try {
+        if (isServerOk) {
+          data = await resOrders.json();
+        }
+      } catch (jsonErr) {}
+
+      const hasValidOrdersArray = data && Array.isArray(data.orders);
+
+      if (!isServerOk || !hasValidOrdersArray) {
+        setIsOffline(true);
+        await loadFromCache();
+        if (!silent) setLoading(false);
+        return;
       }
 
-      const data = await resOrders.json();
-      const ops = resOps.ok ? await resOps.json() : {};
-      const incomingOrders = data.orders || [];
+      // Отбрасываем просроченные ответы, если за время запроса сменился месяц или был инициирован новый запрос
+      if (currentSeq !== requestSeqRef.current) {
+        return;
+      }
+
+      const ops = resOps.ok ? await resOps.json().catch(() => ({})) : {};
+      const incomingOrders = data.orders;
 
       if (silent && orders.length > 0) {
         const prevMap = new Map(orders.map(o => [o.id, o]));
@@ -374,14 +476,71 @@ export default function GardenerDashboard() {
 
       const now = Date.now();
       setLastCacheTime(formatLastUpdated(now));
+      setIsDataStale(false);
 
-      // Кэшируем данные
-      const ordersToCache = filterOrdersForOffline(incomingOrders);
-      saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] });
-      saveCache('operations', ops.operations || []);
+      // Кэшируем данные по стабильному identity без 14-дневного фильтра (один полный вызов)
+      const activeIdentity = getGardenerIdentity();
+      if (activeIdentity) {
+        setOfflineIdentity(activeIdentity);
+        const isServerSuccess = resOrders.ok && resOrders.status < 500 && Array.isArray(data.orders);
+        await persistOrdersCache({
+          orders: incomingOrders,
+          dayOffs: data.dayOffs || [],
+          identity: activeIdentity,
+          currentMonth: null,
+          source: 'full',
+          isServerSuccess,
+        }).catch((err) => console.error('persistOrdersCache error:', err));
+
+        // Синхронизация заказов: для отображения берем заказы АКТУАЛЬНОГО месяца (из targetMonth или calendarMonthRef)
+        try {
+          const activeCalMonth = targetMonth || calendarMonthRef.current || calendarMonth;
+          const curMKey = formatMonthKey(activeCalMonth);
+
+          const freshBundle = await loadCachedOrdersBundle(activeIdentity);
+          if (currentSeq === requestSeqRef.current) {
+            if (freshBundle && freshBundle.orders) {
+              const curMonthOrders = freshBundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
+              const allMerged = applyQueueToOrders(curMonthOrders, pendingQueue);
+              setOrders(allMerged);
+            }
+          }
+          const cachedCount = (freshBundle && freshBundle.orders) ? freshBundle.orders.length : 0;
+          const serverCount = incomingOrders.length;
+          if (serverCount > cachedCount) {
+            setCacheCountMismatch({ serverCount, cachedCount });
+            const debug = typeof window.__offlineDebug === 'function' ? window.__offlineDebug() : {};
+            fetch('/api/client-error', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: `[cache_mismatch] identity=${activeIdentity} serverCount=${serverCount} cachedCount=${cachedCount} keys=${(debug.keysInIdb || []).join(',')}`,
+                stack: 'orders completeness check',
+                source: 'app/gardener/page.js',
+              }),
+            }).catch(() => {});
+          } else {
+            setCacheCountMismatch(null);
+          }
+        } catch (mErr) {}
+      }
+
+      await saveCache('operations', ops.operations || []);
+      if (activeIdentity) {
+        await saveCache(`operations::${activeIdentity}`, ops.operations || []).catch(() => {});
+      }
+
+      // Сохраняем слепок shell в IndexedDB
+      if (typeof document !== 'undefined' && document.documentElement) {
+        const fullHtml = document.documentElement.outerHTML;
+        if (fullHtml && fullHtml.length > 500) {
+          await saveShell('/gardener', fullHtml).catch(() => {});
+        }
+      }
     } catch (e) {
       console.error('fetchOrders network error:', e);
       setIsOffline(true);
+      await loadFromCache();
     } finally {
       if (!silent) setLoading(false);
     }
@@ -403,6 +562,10 @@ export default function GardenerDashboard() {
       const list = data.orders || [];
       setAuctionOrders(list);
       await saveCache('auction', list);
+      const activeId = getGardenerIdentity();
+      if (activeId) {
+        await saveCache(`auction::${activeId}`, list);
+      }
     } catch (e) {
       console.error(e);
       setIsOffline(true);
@@ -429,6 +592,18 @@ export default function GardenerDashboard() {
         setGardenerProfile(data.gardener);
         setMyWorks(data.gardener.works || []);
         saveCache('profile', data.gardener);
+
+        // Стабильный identity: строго gardenerId из ответа профиля, затем телефон, затем email
+        const resolvedId = resolveGardenerIdentity({
+          gardenerId: data.gardener.id,
+          phone: data.gardener.phone || (typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null),
+          email: data.gardener.email,
+        });
+        if (resolvedId) {
+          setOfflineIdentity(resolvedId);
+          await setGardenerIdentity(resolvedId).catch(() => {});
+          await saveCache(`profile::${resolvedId}`, data.gardener).catch(() => {});
+        }
       }
     } catch (e) {
       console.error(e);
@@ -534,10 +709,119 @@ export default function GardenerDashboard() {
   };
 
   useEffect(() => {
+    // Безусловная загрузка кэшированных данных сразу при старте, чтобы не было белого экрана
+    loadFromCache();
+
     if (typeof window !== 'undefined') {
+      // Запрос персистентного хранилища для предотвращения выгрузки браузером при бездействии
+      const requestStoragePersistence = async () => {
+        if (!navigator.storage) return;
+        try {
+          if (typeof navigator.storage.persisted === 'function') {
+            const alreadyPersisted = await navigator.storage.persisted();
+            if (alreadyPersisted) {
+              setStoragePersisted(true);
+              return;
+            }
+          }
+          if (typeof navigator.storage.persist === 'function') {
+            const granted = await navigator.storage.persist();
+            setStoragePersisted(Boolean(granted));
+          }
+        } catch (e) {}
+      };
+
+      requestStoragePersistence();
+
+      // На iOS и браузерах persist() срабатывает надежнее при пользовательском жесте (клик/тап)
+      const handleUserGesturePersist = () => {
+        requestStoragePersistence();
+        window.removeEventListener('click', handleUserGesturePersist);
+        window.removeEventListener('touchstart', handleUserGesturePersist);
+      };
+      window.addEventListener('click', handleUserGesturePersist, { once: true, passive: true });
+      window.addEventListener('touchstart', handleUserGesturePersist, { once: true, passive: true });
+
+      // Периодический self-test IndexedDB: проверка доступности хранилища
+      const runIdbSelfTest = async () => {
+        try {
+          const testKey = 'selftest_probe';
+          const testVal = { ts: Date.now() };
+          await saveCache(testKey, testVal);
+          const readBack = await getCache(testKey);
+          if (!readBack || !readBack.data || readBack.data.ts !== testVal.ts) {
+            setIsIdbEvicted(true);
+            const debug = typeof window.__offlineDebug === 'function' ? window.__offlineDebug() : {};
+            fetch('/api/client-error', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: `[idb_evicted_detected] keysCount=${debug.keysInIdb?.length || 0} keys=${(debug.keysInIdb || []).join(',')}`,
+                stack: 'runIdbSelfTest in app/gardener/page.js',
+                source: 'app/gardener/page.js',
+              }),
+            }).catch(() => {});
+            // Автоматический re-warm при обнаружении eviction если онлайн
+            if (navigator.onLine) {
+              fetchOrders(false).then(() => {
+                setIsIdbEvicted(false);
+              }).catch(() => {});
+            }
+          } else {
+            setIsIdbEvicted(false);
+          }
+        } catch (e) {
+          setIsIdbEvicted(true);
+        }
+      };
+      runIdbSelfTest();
+
       const initRoleCheck = async () => {
-        const authPhone = localStorage.getItem('auth_phone');
+        await syncSessionMarkers();
+        const activeId = await getGardenerIdentityAsync();
+        if (activeId) setOfflineIdentity(activeId);
+
+        let authPhone = localStorage.getItem('auth_phone');
         let role = localStorage.getItem('auth_role');
+
+        // Если маркеры в localStorage пусты при холодном старте, пробуем восстановить из IndexedDB meta
+        if (!authPhone) {
+          const metaPhone = await getMeta('auth_phone');
+          if (metaPhone) {
+            authPhone = String(metaPhone).trim();
+            localStorage.setItem('auth_phone', authPhone);
+          }
+        }
+        if (!role) {
+          const metaRole = await getMeta('auth_role');
+          if (metaRole) {
+            role = String(metaRole).trim();
+            localStorage.setItem('auth_role', role);
+          }
+        }
+
+        // Если онлайн, а токен или роль не найдены, но телефон есть — вызываем auto-login для восстановления сессии
+        if (navigator.onLine && authPhone && (!role || !localStorage.getItem('auth_token'))) {
+          try {
+            const autoRes = await fetch('/api/auth/auto-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: authPhone }),
+            });
+            if (autoRes.ok) {
+              const autoData = await autoRes.json();
+              if (autoData.role) {
+                role = autoData.role;
+                localStorage.setItem('auth_role', role);
+                if (autoData.token) localStorage.setItem('auth_token', autoData.token);
+                activateOfflineSession(role, authPhone);
+                // Прогреваем кэш
+                fetchOrders(true).catch(() => {});
+              }
+            }
+          } catch (autoErr) {}
+        }
+
         if (!role) {
           role = await resolveOfflineRoleFromCaches(authPhone);
         }
@@ -546,14 +830,40 @@ export default function GardenerDashboard() {
           activateOfflineSession(role, authPhone);
         }
 
+        // Проверка целостности кэша по метаданным last_snapshot
+        if (activeId) {
+          try {
+            const lastSnap = await getMeta(`last_snapshot::${activeId}`);
+            if (lastSnap && Array.isArray(lastSnap.months) && lastSnap.months.length > 0) {
+              const debugInfo = typeof window.__offlineDebug === 'function' ? window.__offlineDebug() : {};
+              const idbKeys = new Set(debugInfo.keysInIdb || []);
+              const missingMonths = lastSnap.months.filter(m => !idbKeys.has(`orders::${activeId}::${m}`));
+              if (missingMonths.length > 0) {
+                fetch('/api/client-error', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    message: `[cache_integrity_mismatch] identity=${activeId} missingMonths=${missingMonths.join(',')}`,
+                    stack: 'initRoleCheck in app/gardener/page.js',
+                    source: 'app/gardener/page.js',
+                  }),
+                }).catch(() => {});
+                if (navigator.onLine) {
+                  fetchOrders(true).catch(() => {});
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
         if (!role) {
-        if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
+          if (navigator.onLine && !isOfflineSessionValid()) window.location.assign('/login');
           return;
         }
         if (role !== 'GARDENER') {
           if (role === 'ADMIN' || role === 'LEADER') {
             window.location.assign(role === 'ADMIN' ? '/admin' : '/leader');
-        } else if (navigator.onLine && !isOfflineSessionValid()) {
+          } else if (navigator.onLine && !isOfflineSessionValid()) {
             window.location.assign('/login');
           }
           return;
@@ -603,7 +913,7 @@ export default function GardenerDashboard() {
       }
     }
 
-    loadFromCache();
+    // loadFromCache() уже вызван выше на строке 638, убираем дублирующий вызов
     fetchOrders();
     fetchProfile();
     fetchAuction();
@@ -645,7 +955,13 @@ export default function GardenerDashboard() {
 
     const handleOnline = () => {
       setIsOffline(false);
-      fetchOrders(true);
+      checkAndRotateQuotaProactively(getGardenerIdentity()).catch(() => {});
+      // Если оффлайн-кэш был пуст при наличии токена, делаем немедленный re-warm
+      if (orders.length === 0 && typeof window !== 'undefined' && localStorage.getItem('auth_token')) {
+        fetchOrders(false);
+      } else {
+        fetchOrders(true);
+      }
       handleSyncQueue();
     };
 
@@ -656,6 +972,8 @@ export default function GardenerDashboard() {
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         document.title = '🌿 Мой Кабинет';
+        requestStoragePersistence();
+        checkAndRotateQuotaProactively(getGardenerIdentity()).catch(() => {});
         if (typeof window !== 'undefined' && navigator.onLine) {
           handleSyncQueue();
         }
@@ -668,6 +986,27 @@ export default function GardenerDashboard() {
     };
 
     ensureFreshUsersList();
+
+    if (typeof window !== 'undefined') {
+      window.__offlineDebug = () => {
+        const id = getGardenerIdentity();
+        const info = getOfflineDebugInfo(id);
+        if (info && typeof info.then === 'function') {
+          return info.then(res => ({
+            ...res,
+            cacheCountMismatch,
+            isIdbEvicted,
+            isDataTruncated,
+          }));
+        }
+        return {
+          ...info,
+          cacheCountMismatch,
+          isIdbEvicted,
+          isDataTruncated,
+        };
+      };
+    }
 
     const handleBeforeUnload = (e) => {
       if (e && e.persisted) return;
@@ -690,10 +1029,31 @@ export default function GardenerDashboard() {
             } catch (err) {}
           }
         }
+        // Запускаем сброс незавершённых транзакций IndexedDB при закрытии вкладки
+        flushPendingWrites().catch(() => {});
       }
     };
+
+    const handlePageHide = (e) => {
+      handleBeforeUnload(e);
+      flushPendingWrites().catch(() => {});
+    };
+
+    const handlePageShow = (e) => {
+      // При восстановлении из bfcache или переключении вкладок
+      requestStoragePersistence();
+      if (e && e.persisted) {
+        if (navigator.onLine) {
+          handleOnline();
+        } else {
+          loadFromCache();
+        }
+      }
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -705,7 +1065,8 @@ export default function GardenerDashboard() {
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('pageshow', handlePageShow);
     };
   }, []);
 
@@ -812,6 +1173,15 @@ export default function GardenerDashboard() {
         localStorage.removeItem('offline_session');
         localStorage.removeItem('offline_session_ts');
         localStorage.removeItem('auth_session_cached');
+        try {
+          const currentIdentity = (typeof offlineIdentity !== 'undefined' && offlineIdentity) ? offlineIdentity : getGardenerIdentity();
+          if (currentIdentity) {
+            await clearIdentityCache(currentIdentity);
+          }
+        } catch (e) {
+          console.warn('[Logout] Error clearing identity cache:', e);
+        }
+        localStorage.removeItem('gardener_identity');
 
         if ('serviceWorker' in navigator) {
           const postWithReply = (targetSw, msg, timeoutMs = 500) => {
@@ -1554,7 +1924,8 @@ export default function GardenerDashboard() {
   const ordersByDate = {};
   orders.forEach(o => {
     if (!matchesSearch(o)) return;
-    const key = o.date.split('T')[0];
+    const key = toDateKey(o.date);
+    if (!key) return;
     if (!ordersByDate[key]) ordersByDate[key] = [];
     ordersByDate[key].push(o);
   });
@@ -1562,7 +1933,8 @@ export default function GardenerDashboard() {
   const dayOffMap = {};
   myDayOffs.forEach(d => {
     if (!d || !d.date) return;
-    const key = typeof d.date === 'string' ? d.date.split('T')[0] : new Date(d.date).toISOString().split('T')[0];
+    const key = toDateKey(d.date);
+    if (!key) return;
     dayOffMap[key] = true;
   });
 
@@ -1570,8 +1942,43 @@ export default function GardenerDashboard() {
   for (let i = 0; i < startOffset; i++) calendarCells.push(null);
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
 
-  const goToPrevMonth = () => setCalendarMonth(new Date(year, month - 1, 1));
-  const goToNextMonth = () => setCalendarMonth(new Date(year, month + 1, 1));
+  const goToPrevMonth = async () => {
+    const prevM = new Date(year, month - 1, 1);
+    calendarMonthRef.current = prevM;
+    setCalendarMonth(prevM);
+    setSelectedDateStr(null);
+    const mKey = formatMonthKey(prevM);
+    const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
+    // Устанавливаем ровно заказы выбранного месяца (или пустой массив если нет)
+    const monthOrders = (cached && Array.isArray(cached.orders)) ? cached.orders : [];
+    const pendingQueue = await getQueue();
+    const merged = applyQueueToOrders(monthOrders, pendingQueue);
+    setOrders(merged);
+
+    // Если онлайн, параллельно подгружаем свежий список заказов с целевым месяцем prevM
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      fetchOrders(true, prevM).catch(() => {});
+    }
+  };
+
+  const goToNextMonth = async () => {
+    const nextM = new Date(year, month + 1, 1);
+    calendarMonthRef.current = nextM;
+    setCalendarMonth(nextM);
+    setSelectedDateStr(null);
+    const mKey = formatMonthKey(nextM);
+    const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
+    // Устанавливаем ровно заказы выбранного месяца (или пустой массив если нет)
+    const monthOrders = (cached && Array.isArray(cached.orders)) ? cached.orders : [];
+    const pendingQueue = await getQueue();
+    const merged = applyQueueToOrders(monthOrders, pendingQueue);
+    setOrders(merged);
+
+    // Если онлайн, параллельно подгружаем свежий список заказов с целевым месяцем nextM
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      fetchOrders(true, nextM).catch(() => {});
+    }
+  };
 
   const renderCalendarCell = (d, i) => {
     if (d === null) return <div key={i}></div>;
@@ -1645,8 +2052,61 @@ export default function GardenerDashboard() {
       {/* Оффлайн баннер */}
       {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
         <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
-          <span>⚉ Офлайн-режим: показаны сохранённые данные {lastCacheTime ? `от ${lastCacheTime}` : ''}</span>
+          <span>
+            Оффлайн · данные от {lastCacheTime || '—'} · {orders.length} {orders.length === 1 ? 'заказ' : orders.length < 5 ? 'заказа' : 'заказов'} · ключ {offlineIdentity || getGardenerIdentity() || 'не определен'}
+          </span>
           {queueCount > 0 && <span>(в очереди: {queueCount})</span>}
+        </div>
+      )}
+
+      {/* Предупреждение об устаревших данных */}
+      {isDataStale && (
+        <div className="bg-orange-600 text-white text-xs font-semibold px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>⚠️ Данные от {lastCacheTime || 'прошлого сеанса'}, возможно устарели — обновите страницу при появлении сети</span>
+          <button type="button" onClick={() => fetchOrders(false)} className="underline hover:text-orange-200">обновить</button>
+        </div>
+      )}
+
+      {/* Предупреждение об усечении данных (truncated) */}
+      {isDataTruncated && (
+        <div className="bg-amber-700 text-white text-xs font-semibold px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>⚠️ Показаны не все заказы (сохранены только самые актуальные). Полный список доступен онлайн.</span>
+        </div>
+      )}
+
+      {/* Предупреждение о расхождении количества онлайн vs оффлайн */}
+      {cacheCountMismatch && (
+        <div className="bg-amber-600 text-white text-xs px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>ℹ️ Сервер вернул {cacheCountMismatch.serverCount} заказов, в оффлайн-кэше {cacheCountMismatch.cachedCount}. Синхронизация завершается…</span>
+        </div>
+      )}
+
+      {/* Предупреждение об удалении/eviction IndexedDB браузером */}
+      {isIdbEvicted && (
+        <div className="bg-rose-600 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>⚠️ Офлайн-данные были очищены браузером. Подключитесь к интернету для восстановления кэша.</span>
+          <button type="button" onClick={() => fetchOrders(false)} className="underline hover:text-rose-200">обновить</button>
+        </div>
+      )}
+
+      {/* Предупреждение о неперсистентном хранилище и рекомендация PWA */}
+      {!storagePersisted && (
+        <div className="bg-amber-600 text-white text-[11px] px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>📱 Добавьте приложение на главный экран («Поделиться» → «На экран Домой»), чтобы браузер не очищал сохранённые данные при бездействии.</span>
+          <button
+            type="button"
+            onClick={async () => {
+              if (navigator.storage && typeof navigator.storage.persist === 'function') {
+                const granted = await navigator.storage.persist();
+                setStoragePersisted(Boolean(granted));
+                if (granted) alert('Офлайн-хранилище успешно зафиксировано!');
+                else alert('Браузер отклонил фиксацию. Добавьте сайт как PWA на рабочий стол.');
+              }
+            }}
+            className="px-2 py-0.5 bg-amber-700 hover:bg-amber-800 rounded text-[11px] font-bold"
+          >
+            Сохранить данные офлайн
+          </button>
         </div>
       )}
 
@@ -2326,8 +2786,23 @@ export default function GardenerDashboard() {
 
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
-        ) : orders.length === 0 ? (
-          <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
+        ) : (!hasCachedBundle && orders.length === 0 && (isOffline || (typeof window !== 'undefined' && !navigator.onLine))) ? (
+          <div className="text-center text-slate-600 py-8 px-4 bg-white border border-slate-200 rounded-xl space-y-3">
+            <div className="text-2xl">📡</div>
+            <div className="font-semibold text-slate-800">Данные не сохранены</div>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              В локальном хранилище устройства нет сохранённых заказов для этого аккаунта. Подключитесь к интернету для загрузки данных.
+            </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => fetchOrders(false)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors"
+              >
+                Повторить попытку
+              </button>
+            </div>
+          </div>
         ) : viewMode === 'list' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(() => {
@@ -2353,7 +2828,16 @@ export default function GardenerDashboard() {
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 mb-4 max-w-sm mx-auto">
               <div className="flex items-center justify-between mb-3">
                 <button type="button" onClick={goToPrevMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">←</button>
-                <div className="font-semibold text-slate-700 text-sm">{MONTH_LABELS[month]} {year}</div>
+                <div className="font-semibold text-slate-700 text-sm text-center">
+                  <span>{MONTH_LABELS[month]} {year}</span>
+                  <span className="block text-[11px] font-normal text-slate-400">
+                    {(() => {
+                      const mPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+                      const mCount = orders.filter(o => o.date && o.date.startsWith(mPrefix)).length;
+                      return `${mCount} ${mCount === 1 ? 'заказ' : mCount < 5 ? 'заказа' : 'заказов'}`;
+                    })()}
+                  </span>
+                </div>
                 <button type="button" onClick={goToNextMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">→</button>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-1">

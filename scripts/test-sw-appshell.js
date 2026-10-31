@@ -38,9 +38,9 @@ const clientVersionMatch = versionContent.match(/export const CLIENT_VERSION = '
 assert(clientVersionMatch && clientVersionMatch[1], 'lib/version.js must export CLIENT_VERSION');
 const clientVersion = clientVersionMatch[1];
 
-// Verify format: anemon-agro-v<version>-<date>-<hash>
-const cacheNamePattern = /^anemon-agro-v\d+\.\d+\.\d+-\d{8}-[a-zA-Z0-9]+$/;
-assert(cacheNamePattern.test(libCacheName), `CACHE_NAME "${libCacheName}" must match format 'anemon-agro-v<version>-<date>-<hash>'`);
+// Verify format: anemon-agro-v<version>-<hash>
+const cacheNamePattern = /^anemon-agro-v\d+\.\d+\.\d+-[a-zA-Z0-9]+$/;
+assert(cacheNamePattern.test(libCacheName), `CACHE_NAME "${libCacheName}" must match format 'anemon-agro-v<version>-<hash>'`);
 console.log('✅ CACHE_NAME format in lib/version.js matches expected pattern.');
 
 // 4. Test sw.js getCacheName logic dynamically
@@ -87,5 +87,14 @@ for (const route of requiredRoutes) {
   assert(appShell.includes(route), `APP_SHELL in public/sw.js must contain route "${route}"`);
 }
 console.log(`✅ APP_SHELL contains all required routes: ${requiredRoutes.join(', ')}`);
+
+// 6. Verify Offline Navigation priority in sw.js:
+// In the navigation handler, IDB shell fallback must come before offline.html fallback
+const navHandlerStart = swContent.indexOf("request.mode === 'navigate'");
+assert(navHandlerStart !== -1, 'sw.js must have navigate mode check');
+const navContent = swContent.slice(navHandlerStart);
+assert(navContent.includes('getShellFromIdb'), 'sw.js navigation handler must support getShellFromIdb fallback');
+assert(navContent.indexOf('getShellFromIdb') < navContent.indexOf("cache.match('/offline.html')"), 'IDB shell fallback must come before offline.html in navigation handler');
+console.log('✅ Offline navigation checks Cache API and IDB shell before falling back to offline.html.');
 
 console.log('\n🎉 ALL SW APP_SHELL & VERSIONING TESTS PASSED SUCCESSFULLY!');

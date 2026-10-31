@@ -10,7 +10,14 @@ export default function ServiceWorkerRegister() {
   const [hasPendingOps, setHasPendingOps] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    if (typeof window === 'undefined') return;
+
+    // Глобальный запрос персистентного хранилища для всех ролей (admin, leader, gardener)
+    if (navigator.storage && typeof navigator.storage.persist === 'function') {
+      navigator.storage.persist().catch(() => {});
+    }
+
+    if (!('serviceWorker' in navigator)) return;
 
     let autoReloadTimer = null;
     let refreshing = false;
@@ -28,23 +35,36 @@ export default function ServiceWorkerRegister() {
     const cleanLegacyWorkersAndCaches = async () => {
       try {
         const expectedVersionParam = `v=${encodeURIComponent(CLIENT_VERSION)}`;
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          for (const reg of registrations) {
-            const scriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
-            if (scriptUrl && !scriptUrl.includes(expectedVersionParam)) {
-              await reg.unregister();
-            }
-          }
-        }
+        const targetCacheName = `anemon-agro-${CLIENT_VERSION}`;
+
+        // Перед удалением старых кэшей гарантируем миграцию данных в новый кэш
         if ('caches' in window) {
           const keys = await caches.keys();
-          for (const key of keys) {
-            if (key.startsWith('anemon-agro-') && !key.includes(CLIENT_VERSION)) {
-              await caches.delete(key);
+          const oldKeys = keys.filter(k => k.startsWith('anemon-agro-') && !k.includes(CLIENT_VERSION) && k !== 'anemon-agro-offline-data');
+
+          if (oldKeys.length > 0) {
+            const targetCache = await caches.open(targetCacheName);
+            for (const oldKey of oldKeys) {
+              try {
+                const oldCache = await caches.open(oldKey);
+                const requests = await oldCache.keys();
+                for (const req of requests) {
+                  try {
+                    const res = await oldCache.match(req);
+                    if (res && res.ok) {
+                      await targetCache.put(req, res.clone());
+                    }
+                  } catch (itemErr) {}
+                }
+                // Удаляем старый кэш только после завершения миграции
+                await caches.delete(oldKey);
+              } catch (migrateErr) {
+                console.warn('[SW migration] Skipping deletion of', oldKey, migrateErr);
+              }
             }
           }
         }
+
       } catch (e) {}
     };
 

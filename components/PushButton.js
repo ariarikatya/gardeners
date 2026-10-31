@@ -190,7 +190,11 @@ export default function PushButton({ className = '' }) {
       }
       if ('caches' in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map((k) => caches.delete(k)));
+        await Promise.all(
+          keys
+            .filter((k) => k !== 'anemon-agro-offline-data' && k.startsWith('anemon-agro-'))
+            .map((k) => caches.delete(k))
+        );
       }
       alert('✅ Кэш приложения сброшен. Страница будет обновлена.');
       window.location.reload();

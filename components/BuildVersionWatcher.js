@@ -62,19 +62,21 @@ export default function BuildVersionWatcher() {
     clientLog('user_clicked_version_update_reload', { clientVersion: CLIENT_VERSION, serverVersion });
     try {
       if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        for (const reg of registrations) {
-          await reg.unregister();
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          try { await reg.update(); } catch (e) {}
         }
-        const swUrl = `/sw.js?v=${encodeURIComponent(serverVersion || CLIENT_VERSION)}`;
-        await navigator.serviceWorker.register(swUrl, { scope: '/' });
       }
       if ('caches' in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map((k) => caches.delete(k)));
+        await Promise.all(
+          keys
+            .filter((k) => k !== 'anemon-agro-offline-data' && k.startsWith('anemon-agro-'))
+            .map((k) => caches.delete(k))
+        );
       }
     } catch (e) {
-      console.error('Error unregistering/re-registering service worker on version reload:', e);
+      console.error('Error updating service worker on version reload:', e);
     } finally {
       window.location.reload();
     }

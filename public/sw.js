@@ -13,7 +13,53 @@ function getCacheName() {
 
 let CACHE_NAME = getCacheName();
 const OFFLINE_DATA_CACHE = 'anemon-agro-offline-data';
-const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users'];
+const APP_SHELL = ['/', '/gardener', '/admin', '/leader', '/login', '/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users', '/offline.html'];
+
+async function openIdbShellStore() {
+  if (typeof indexedDB === 'undefined') return null;
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open('gardener_offline_db', 2);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('data_cache')) db.createObjectStore('data_cache', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('action_queue')) db.createObjectStore('action_queue', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('shell')) db.createObjectStore('shell', { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+async function saveShellToIdb(key, htmlText) {
+  try {
+    const db = await openIdbShellStore();
+    if (!db) return;
+    const tx = db.transaction('shell', 'readwrite');
+    const store = tx.objectStore('shell');
+    store.put({ key, html: htmlText, updatedAt: Date.now() });
+  } catch (e) {}
+}
+
+async function getShellFromIdb(key) {
+  try {
+    const db = await openIdbShellStore();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction('shell', 'readonly');
+      const store = tx.objectStore('shell');
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result ? req.result.html : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
 
 const MAX_AGE_24H = 24 * 60 * 60 * 1000;
 const MAX_AGE_30D = 30 * 24 * 60 * 60 * 1000;
@@ -224,10 +270,27 @@ async function restoreOfflineDataToNewCache() {
   CACHE_NAME = getCacheName();
   const cache = await caches.open(CACHE_NAME);
   const pCache = await caches.open(OFFLINE_DATA_CACHE);
-  const keysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users'];
+  const baseKeysToRestore = ['/offline-identities', '/phone-role-map', '/offline-session', '/offline-role', '/api/public/offline-users', '/offline.html', '/gardener', '/admin', '/leader', '/login', '/'];
 
   const allCacheKeys = await caches.keys();
-  for (const k of keysToRestore) {
+  const oldCacheNames = allCacheKeys.filter((k) => k !== CACHE_NAME);
+
+  // Собираем все ключи запросов из старых кэшей (включая /api/* и страницы ролей)
+  const discoveredKeys = new Set(baseKeysToRestore);
+  for (const cName of oldCacheNames) {
+    try {
+      const oldC = await caches.open(cName);
+      const requests = await oldC.keys();
+      for (const req of requests) {
+        const u = new URL(req.url);
+        if (u.pathname.startsWith('/api/') || baseKeysToRestore.includes(u.pathname)) {
+          discoveredKeys.add(u.pathname);
+        }
+      }
+    } catch (e) {}
+  }
+
+  for (const k of discoveredKeys) {
     try {
       let matchedRes = null;
       try {
@@ -244,7 +307,7 @@ async function restoreOfflineDataToNewCache() {
         }
       }
 
-      if (matchedRes) {
+      if (matchedRes && matchedRes.ok) {
         await cache.put(k, matchedRes.clone());
         await pCache.put(k, matchedRes.clone());
       }
@@ -392,7 +455,7 @@ async function precacheAllRoles(retryCount = 0) {
   );
 
   await Promise.all(
-    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/api/public/offline-users', '/offline-cache/offline-users.json'].map(async (assetUrl) => {
+    ['/manifest.json', '/icon-192.png', '/icon-512.png', '/emergency.js', '/offline.html', '/api/public/offline-users', '/offline-cache/offline-users.json'].map(async (assetUrl) => {
       try {
         const res = await fetch(assetUrl);
         if (res && res.ok) {
@@ -528,12 +591,6 @@ async function isOfflineSession() {
     if (sessionRes) {
       const data = await sessionRes.clone().json();
       if (data && data.active) {
-        const isOnline = typeof self !== 'undefined' && self.navigator && self.navigator.onLine;
-        const ts = data.ts || 0;
-        const sessionAge = Date.now() - ts;
-        if (sessionAge > MAX_AGE_30D && isOnline) {
-          return false;
-        }
         isOfflineSessionActive = true;
         return true;
       }
@@ -871,6 +928,30 @@ self.addEventListener('message', (event) => {
     promise.then(() => reply(true)).catch(() => reply(false));
     return;
   }
+
+  // Обработка CLEAR_ALL_CACHES: удаление HTTP кэшей, сохраняя OFFLINE_DATA_CACHE
+  if (event.data.type === 'CLEAR_ALL_CACHES') {
+    const promise = (async () => {
+      try {
+        const cacheNames = await caches.keys();
+        await Promise.all(
+          cacheNames.map((name) => {
+            if (name !== OFFLINE_DATA_CACHE) {
+              return caches.delete(name);
+            }
+            return Promise.resolve(false);
+          })
+        );
+        // Заново инициализируем текущий APP_SHELL в активном кэше
+        await precacheAllRoles();
+      } catch (e) {
+        console.warn('[SW] CLEAR_ALL_CACHES error:', e);
+      }
+    })();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
 });
 
 // === FETCH ===
@@ -970,7 +1051,9 @@ self.addEventListener('fetch', (event) => {
             if (netRes) {
               if (netRes.ok && netRes.status === 200 && !netRes.redirected) {
                 const resClone = netRes.clone();
-                caches.open(CACHE_NAME).then((cache) => {
+                const resCloneForIdb = netRes.clone();
+
+                caches.open(CACHE_NAME).then(async (cache) => {
                   try {
                     const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
                       headers: { 'Content-Type': 'application/json' }
@@ -979,18 +1062,26 @@ self.addEventListener('fetch', (event) => {
                       cache.put('/login', resClone.clone());
                       cache.put(new Request('/login'), resClone.clone());
                       cache.put('/login-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/login', htmlText);
                     } else if (url.pathname === '/gardener' || url.pathname.startsWith('/gardener')) {
                       cache.put('/gardener', resClone.clone());
                       cache.put(new Request('/gardener'), resClone.clone());
                       cache.put('/gardener-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/gardener', htmlText);
                     } else if (url.pathname === '/admin' || url.pathname.startsWith('/admin')) {
                       cache.put('/admin', resClone.clone());
                       cache.put(new Request('/admin'), resClone.clone());
                       cache.put('/admin-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/admin', htmlText);
                     } else if (url.pathname === '/leader' || url.pathname.startsWith('/leader')) {
                       cache.put('/leader', resClone.clone());
                       cache.put(new Request('/leader'), resClone.clone());
                       cache.put('/leader-meta', metaRes);
+                      const htmlText = await resCloneForIdb.text();
+                      saveShellToIdb('/leader', htmlText);
                     }
                   } catch (e) {}
                 }).catch(() => {});
@@ -1072,14 +1163,48 @@ self.addEventListener('fetch', (event) => {
           }
         } catch (e) {}
 
+        // 3. Fallback: IndexedDB-копия HTML из 'shell'
+        try {
+          const targetShellKey = rolePath || url.pathname || '/gardener';
+          let shellHtml = await getShellFromIdb(targetShellKey);
+          if (!shellHtml && rolePath) {
+            shellHtml = await getShellFromIdb(rolePath);
+          }
+          if (!shellHtml) {
+            shellHtml = await getShellFromIdb('/gardener') || await getShellFromIdb('/login');
+          }
+          if (shellHtml) {
+            return new Response(shellHtml, {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/html; charset=utf-8',
+                'X-Offline-Served': '1',
+                'X-Offline-Source': 'idb-shell',
+              },
+            });
+          }
+        } catch (e) {}
+
         try {
           const cache = await caches.open(CACHE_NAME);
-          const fb = await cache.match('/login') || await cache.match('/');
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          const fb = await cache.match('/login') || await pCache.match('/login') || await cache.match('/') || await pCache.match('/');
           if (fb) return withOfflineHeader(fb);
         } catch (e) {}
 
+        // 4. Fallback: offline.html (из кэша или fetch)
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          const offlinePage = await cache.match('/offline.html') || await pCache.match('/offline.html');
+          if (offlinePage) {
+            return withOfflineHeader(offlinePage);
+          }
+        } catch (e) {}
+
+        // 5. Встроенный надежный HTML-fallback: исключает белый экран при любых сбоях кэшей, с авто-reload при онлайн
         return new Response(
-          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Офлайн</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:24rem;width:100%}h1{font-size:1.25rem;margin-bottom:0.5rem;color:#065f46}p{font-size:0.875rem;color:#475569}</style></head><body><div class="card"><h1>🌿 Приложение готово к работе</h1><p>Данные обновятся при появлении сети.</p></div></body></html>',
+          '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Нет подключения · Анемон</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc;color:#0f172a;text-align:center;padding:1rem}.card{background:#fff;padding:2rem 1.5rem;border-radius:1.25rem;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);border:1px solid #e2e8f0;max-width:24rem;width:100%}h1{font-size:1.25rem;margin:0 0 0.5rem;color:#065f46;font-weight:700}p{font-size:0.875rem;color:#475569;line-height:1.5;margin:0 0 1.25rem}.btn{background:#059669;color:#fff;border:none;border-radius:0.75rem;padding:0.75rem 1.5rem;font-size:0.875rem;font-weight:600;cursor:pointer;width:100%;min-height:44px;display:block;text-decoration:none;box-sizing:border-box}</style></head><body><div class="card"><div style="font-size:2.5rem;margin-bottom:0.75rem">🌿</div><h1>Нет подключения к сети</h1><p>Данные появятся после первого онлайн-входа в приложение.</p><button type="button" class="btn" onclick="location.reload()">Проверить подключение</button><button type="button" class="btn" style="margin-top:0.5rem;background:#e2e8f0;color:#0f172a" onclick="location.assign(\'/gardener\')">Перейти в кабинет</button></div><script>window.addEventListener("online",function(){location.reload();});</script></body></html>',
           { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Offline-Served': '1' } }
         );
       })()
@@ -1120,15 +1245,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // === GET /api/* read-only whitelisted endpoints: Stale-While-Revalidate ===
+  // === GET /api/* read-only endpoints: Network First с фоллбэком на кэш при отсутствии сети ===
+  // Когда онлайн, ВСЕГДА отдаем свежий ответ сервера, чтобы пользователь не видел устаревший кэш заказов
   if (request.method === 'GET' && url.pathname.startsWith('/api/')) {
     event.respondWith(
       (async () => {
-        const cache = await caches.open(CACHE_NAME);
-        const pCache = await caches.open(OFFLINE_DATA_CACHE);
-        const cachedRes = await cache.match(request) || await pCache.match(request);
-
-        const fetchPromise = fetch(request).then(async (netRes) => {
+        try {
+          const netRes = await fetch(request);
           if (netRes && netRes.ok && netRes.status === 200 && !netRes.redirected && netRes.type !== 'opaque' && netRes.type !== 'opaqueredirect') {
             const clone1 = netRes.clone();
             const clone2 = netRes.clone();
@@ -1136,22 +1259,22 @@ self.addEventListener('fetch', (event) => {
             safeCachePut(OFFLINE_DATA_CACHE, request, clone2);
           }
           return netRes;
-        }).catch(() => null);
+        } catch (netErr) {
+          // Сеть недоступна — фоллбэк на кэшированный ответ
+          try {
+            const cache = await caches.open(CACHE_NAME);
+            const pCache = await caches.open(OFFLINE_DATA_CACHE);
+            const cachedRes = await cache.match(request) || await pCache.match(request);
+            if (cachedRes) {
+              return cachedRes;
+            }
+          } catch (cacheErr) {}
 
-        if (cachedRes) {
-          event.waitUntil(fetchPromise);
-          return cachedRes;
+          return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
-
-        try {
-          const netRes = await fetchPromise;
-          if (netRes) return netRes;
-        } catch (e) {}
-
-        return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' },
-        });
       })()
     );
     return;

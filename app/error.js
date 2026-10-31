@@ -24,6 +24,15 @@ export default function Error({ error, reset }) {
   const handleClearCacheAndReload = async () => {
     try {
       if (typeof window !== 'undefined') {
+        const savedAuth = {
+          auth_phone: localStorage.getItem('auth_phone'),
+          auth_role: localStorage.getItem('auth_role'),
+          gardener_identity: localStorage.getItem('gardener_identity'),
+          phone_roles_map: localStorage.getItem('phone_roles_map'),
+          offline_session: localStorage.getItem('offline_session'),
+          offline_session_ts: localStorage.getItem('offline_session_ts'),
+        };
+
         if ('serviceWorker' in navigator) {
           const registrations = await navigator.serviceWorker.getRegistrations();
           for (const reg of registrations) {
@@ -33,11 +42,18 @@ export default function Error({ error, reset }) {
         if ('caches' in window) {
           const keys = await caches.keys();
           for (const key of keys) {
-            await caches.delete(key);
+            if (key !== 'anemon-agro-offline-data' && key.startsWith('anemon-agro-')) {
+              await caches.delete(key);
+            }
           }
         }
         sessionStorage.clear();
         localStorage.clear();
+
+        // Восстанавливаем сохранённые ключи авторизации и офлайна
+        Object.entries(savedAuth).forEach(([k, v]) => {
+          if (v !== null) localStorage.setItem(k, v);
+        });
       }
     } catch (e) {
       console.error('Failed to clear caches:', e);
