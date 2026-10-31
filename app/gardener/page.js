@@ -20,7 +20,8 @@ import {
   getOfflineDebugInfo,
   saveShell,
   flushPendingWrites,
-  getCachedMonth
+  getCachedMonth,
+  syncSessionMarkers
 } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
@@ -367,6 +368,7 @@ export default function GardenerDashboard() {
   const [isDataStale, setIsDataStale] = useState(false);
   const [isDataTruncated, setIsDataTruncated] = useState(false);
   const [isIdbEvicted, setIsIdbEvicted] = useState(false);
+  const [cacheCountMismatch, setCacheCountMismatch] = useState(null);
 
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
@@ -466,6 +468,25 @@ export default function GardenerDashboard() {
           currentMonth: new Date(),
           isServerSuccess,
         }).catch((err) => console.error('persistOrdersCache error:', err));
+
+        // Сверка полноты онлайн vs офлайн
+        try {
+          const freshBundle = await loadCachedOrdersBundle(activeIdentity);
+          const cachedCount = (freshBundle && freshBundle.orders) ? freshBundle.orders.length : 0;
+          const serverCount = incomingOrders.length;
+          if (serverCount !== cachedCount) {
+            setCacheCountMismatch({ serverCount, cachedCount });
+            fetch('/api/client-error', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: `[cache_mismatch] identity: ${activeIdentity}, serverCount: ${serverCount}, cachedCount: ${cachedCount}`
+              }),
+            }).catch(() => {});
+          } else {
+            setCacheCountMismatch(null);
+          }
+        } catch (mErr) {}
       }
 
       await saveCache('operations', ops.operations || []);
@@ -703,7 +724,11 @@ export default function GardenerDashboard() {
       };
       runIdbSelfTest();
 
+      // Двусторонняя синхронизация сессионных маркеров (localStorage <-> IndexedDB meta)
+      syncSessionMarkers().catch(() => {});
+
       const initRoleCheck = async () => {
+        await syncSessionMarkers();
         const authPhone = localStorage.getItem('auth_phone');
         let role = localStorage.getItem('auth_role');
         if (!role) {
@@ -829,6 +854,7 @@ export default function GardenerDashboard() {
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         document.title = '🌿 Мой Кабинет';
+        requestStoragePersistence();
         if (typeof window !== 'undefined' && navigator.onLine) {
           handleSyncQueue();
         }
@@ -845,7 +871,21 @@ export default function GardenerDashboard() {
     if (typeof window !== 'undefined') {
       window.__offlineDebug = () => {
         const id = getGardenerIdentity();
-        return getOfflineDebugInfo(id);
+        const info = getOfflineDebugInfo(id);
+        if (info && typeof info.then === 'function') {
+          return info.then(res => ({
+            ...res,
+            cacheCountMismatch,
+            isIdbEvicted,
+            isDataTruncated,
+          }));
+        }
+        return {
+          ...info,
+          cacheCountMismatch,
+          isIdbEvicted,
+          isDataTruncated,
+        };
       };
     }
 
@@ -882,6 +922,7 @@ export default function GardenerDashboard() {
 
     const handlePageShow = (e) => {
       // При восстановлении из bfcache или переключении вкладок
+      requestStoragePersistence();
       if (e && e.persisted) {
         if (navigator.onLine) {
           handleOnline();
@@ -1891,7 +1932,7 @@ export default function GardenerDashboard() {
       )}
 
       {/* Предупреждение об устаревших данных */}
-      {isDataStale && (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
+      {isDataStale && (
         <div className="bg-orange-600 text-white text-xs font-semibold px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
           <span>⚠️ Данные от {lastCacheTime || 'прошлого сеанса'}, возможно устарели — обновите страницу при появлении сети</span>
           <button type="button" onClick={() => fetchOrders(false)} className="underline hover:text-orange-200">обновить</button>
@@ -1899,9 +1940,16 @@ export default function GardenerDashboard() {
       )}
 
       {/* Предупреждение об усечении данных (truncated) */}
-      {isDataTruncated && (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
+      {isDataTruncated && (
         <div className="bg-amber-700 text-white text-xs font-semibold px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
           <span>⚠️ Показаны не все заказы (сохранены только самые актуальные). Полный список доступен онлайн.</span>
+        </div>
+      )}
+
+      {/* Предупреждение о расхождении количества онлайн vs оффлайн */}
+      {cacheCountMismatch && (
+        <div className="bg-amber-600 text-white text-xs px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>ℹ️ Сервер вернул {cacheCountMismatch.serverCount} заказов, в оффлайн-кэше {cacheCountMismatch.cachedCount}. Синхронизация завершается…</span>
         </div>
       )}
 
@@ -2658,7 +2706,16 @@ export default function GardenerDashboard() {
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3 mb-4 max-w-sm mx-auto">
               <div className="flex items-center justify-between mb-3">
                 <button type="button" onClick={goToPrevMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">←</button>
-                <div className="font-semibold text-slate-700 text-sm">{MONTH_LABELS[month]} {year}</div>
+                <div className="font-semibold text-slate-700 text-sm text-center">
+                  <span>{MONTH_LABELS[month]} {year}</span>
+                  <span className="block text-[11px] font-normal text-slate-400">
+                    {(() => {
+                      const mPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+                      const mCount = orders.filter(o => o.date && o.date.startsWith(mPrefix)).length;
+                      return `${mCount} ${mCount === 1 ? 'заказ' : mCount < 5 ? 'заказа' : 'заказов'}`;
+                    })()}
+                  </span>
+                </div>
                 <button type="button" onClick={goToNextMonth} className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-500">→</button>
               </div>
               <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-1">
