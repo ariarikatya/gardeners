@@ -19,7 +19,8 @@ import {
   clearIdentityCache,
   getOfflineDebugInfo,
   saveShell,
-  flushPendingWrites
+  flushPendingWrites,
+  getCachedMonth
 } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
@@ -365,6 +366,7 @@ export default function GardenerDashboard() {
   const [storagePersisted, setStoragePersisted] = useState(true);
   const [isDataStale, setIsDataStale] = useState(false);
   const [isDataTruncated, setIsDataTruncated] = useState(false);
+  const [isIdbEvicted, setIsIdbEvicted] = useState(false);
 
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
@@ -682,6 +684,24 @@ export default function GardenerDashboard() {
       };
       window.addEventListener('click', handleUserGesturePersist, { once: true, passive: true });
       window.addEventListener('touchstart', handleUserGesturePersist, { once: true, passive: true });
+
+      // Периодический self-test IndexedDB: проверка доступности хранилища
+      const runIdbSelfTest = async () => {
+        try {
+          const testKey = 'selftest_probe';
+          const testVal = { ts: Date.now() };
+          await saveCache(testKey, testVal);
+          const readBack = await getCache(testKey);
+          if (!readBack || !readBack.data || readBack.data.ts !== testVal.ts) {
+            setIsIdbEvicted(true);
+          } else {
+            setIsIdbEvicted(false);
+          }
+        } catch (e) {
+          setIsIdbEvicted(true);
+        }
+      };
+      runIdbSelfTest();
 
       const initRoleCheck = async () => {
         const authPhone = localStorage.getItem('auth_phone');
@@ -1760,18 +1780,34 @@ export default function GardenerDashboard() {
   for (let i = 0; i < startOffset; i++) calendarCells.push(null);
   for (let d = 1; d <= daysInMonth; d++) calendarCells.push(d);
 
-  const goToPrevMonth = () => {
+  const goToPrevMonth = async () => {
     const prevM = new Date(year, month - 1, 1);
     setCalendarMonth(prevM);
     if (!navigator.onLine || isOffline) {
-      loadFromCache();
+      const mKey = `${prevM.getFullYear()}-${String(prevM.getMonth() + 1).padStart(2, '0')}`;
+      const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
+      if (cached && cached.orders && cached.orders.length > 0) {
+        setOrders(prev => {
+          const map = new Map(prev.map(o => [o.id, o]));
+          for (const o of cached.orders) map.set(o.id, o);
+          return Array.from(map.values());
+        });
+      }
     }
   };
-  const goToNextMonth = () => {
+  const goToNextMonth = async () => {
     const nextM = new Date(year, month + 1, 1);
     setCalendarMonth(nextM);
     if (!navigator.onLine || isOffline) {
-      loadFromCache();
+      const mKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
+      const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
+      if (cached && cached.orders && cached.orders.length > 0) {
+        setOrders(prev => {
+          const map = new Map(prev.map(o => [o.id, o]));
+          for (const o of cached.orders) map.set(o.id, o);
+          return Array.from(map.values());
+        });
+      }
     }
   };
 
@@ -1869,10 +1905,32 @@ export default function GardenerDashboard() {
         </div>
       )}
 
+      {/* Предупреждение об удалении/eviction IndexedDB браузером */}
+      {isIdbEvicted && (
+        <div className="bg-rose-600 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
+          <span>⚠️ Офлайн-данные были очищены браузером. Подключитесь к интернету для восстановления кэша.</span>
+          <button type="button" onClick={() => fetchOrders(false)} className="underline hover:text-rose-200">обновить</button>
+        </div>
+      )}
+
       {/* Предупреждение о неперсистентном хранилище и рекомендация PWA */}
       {!storagePersisted && (
         <div className="bg-amber-600 text-white text-[11px] px-4 py-1.5 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
           <span>📱 Добавьте приложение на главный экран («Поделиться» → «На экран Домой»), чтобы браузер не очищал сохранённые данные при бездействии.</span>
+          <button
+            type="button"
+            onClick={async () => {
+              if (navigator.storage && typeof navigator.storage.persist === 'function') {
+                const granted = await navigator.storage.persist();
+                setStoragePersisted(Boolean(granted));
+                if (granted) alert('Офлайн-хранилище успешно зафиксировано!');
+                else alert('Браузер отклонил фиксацию. Добавьте сайт как PWA на рабочий стол.');
+              }
+            }}
+            className="px-2 py-0.5 bg-amber-700 hover:bg-amber-800 rounded text-[11px] font-bold"
+          >
+            Сохранить данные офлайн
+          </button>
         </div>
       )}
 

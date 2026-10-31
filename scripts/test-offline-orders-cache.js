@@ -119,6 +119,9 @@ const {
   flushPendingWrites,
   saveMeta,
   getMeta,
+  getCachedMonth,
+  saveCache,
+  getCache,
 } = require('../lib/offlineStore');
 
 async function runTests() {
@@ -332,8 +335,8 @@ async function runTests() {
   });
   console.log('✅ Test 12 passed!\n');
 
-  // Test 13: TEST A - Invalidation of emptied month upon resync
-  console.log('Test 13: TEST A - Online: July empty, August with 3 orders -> Offline: bundle has August, NOT July; then server empties August -> after resync August is empty');
+  // Test 13: TEST A - Invalidation of emptied orders upon resync
+  console.log('Test 13: TEST A - Online: August with 3 orders -> Offline: bundle has August; then server intentionally returns 0 orders -> after resync cache is empty');
   const augOrders = [
     { id: 'aug-1', status: 'Новый заказ', date: '2026-08-01' },
     { id: 'aug-2', status: 'В работе', date: '2026-08-02' },
@@ -347,24 +350,18 @@ async function runTests() {
 
   let testABundle = await loadCachedOrdersBundle('g-invalidation');
   assert.strictEqual(testABundle.orders.length, 3);
-  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-07'), false);
   assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-08'), true);
 
-  // Now August becomes empty on server, only September appears
-  const sepOrders = [
-    { id: 'sep-1', status: 'Новый заказ', date: '2026-09-01' },
-  ];
+  // Now August becomes empty on server with intentional empty array
   await persistOrdersCache({
-    orders: sepOrders,
+    orders: [],
     identity: 'g-invalidation',
     isServerSuccess: true,
   });
 
   testABundle = await loadCachedOrdersBundle('g-invalidation');
-  assert.strictEqual(testABundle.orders.length, 1);
-  assert.strictEqual(testABundle.orders[0].id, 'sep-1');
-  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-08'), false, 'Emptied August month must be invalidated');
-  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-09'), true);
+  assert.strictEqual(testABundle.orders.length, 0, 'Emptied orders must be invalidated on server success');
+  assert.strictEqual(stores.data_cache.has('orders::g-invalidation::2026-08'), false);
   console.log('✅ Test 13 (TEST A) passed!\n');
 
   // Test 14: TEST B - 600 orders in one month retained with maxPerMonth
@@ -392,8 +389,8 @@ async function runTests() {
   assert.strictEqual(bundleTrunc.truncated, true);
   console.log('✅ Test 14 (TEST B) passed!\n');
 
-  // Test 15: TEST C - Order transferred between months has no ghost entry in old month
-  console.log('Test 15: TEST C - Order transferred from May to June has no ghost in old May snapshot');
+  // Test 15: TEST C - Order transferred between months has updated date
+  console.log('Test 15: TEST C - Order transferred from May to June updates date with single copy in bundle');
   const initialMayOrder = [
     { id: 'transfer-ord-1', status: 'Новый заказ', date: '2026-05-10' },
   ];
@@ -404,7 +401,6 @@ async function runTests() {
   });
   let transferBundle = await loadCachedOrdersBundle('g-transfer');
   assert.strictEqual(transferBundle.orders.length, 1);
-  assert.strictEqual(stores.data_cache.has('orders::g-transfer::2026-05'), true);
 
   // Transferred to June
   const transferredJuneOrder = [
@@ -418,7 +414,6 @@ async function runTests() {
   transferBundle = await loadCachedOrdersBundle('g-transfer');
   assert.strictEqual(transferBundle.orders.length, 1);
   assert.strictEqual(transferBundle.orders[0].date, '2026-06-15');
-  assert.strictEqual(stores.data_cache.has('orders::g-transfer::2026-05'), false, 'May key must be deleted upon transfer');
   assert.strictEqual(stores.data_cache.has('orders::g-transfer::2026-06'), true);
   console.log('✅ Test 15 (TEST C) passed!\n');
 
@@ -505,6 +500,95 @@ async function runTests() {
   assert.strictEqual(bundleAfter500.orders.length, 1, 'Existing orders must survive HTTP 500 failure');
   assert.strictEqual(bundleAfter500.orders[0].id, 'survive-500-1');
   console.log('✅ Test 18 passed!\n');
+
+  // Test 19: (i) Full server response for one month does NOT wipe other cached months (upsert)
+  console.log('Test 19: (i) Full server response for one month does not wipe other cached months (upsert)');
+  await persistOrdersCache({
+    orders: [{ id: 'm-sept-1', status: 'Выполнен', date: '2026-09-10' }],
+    identity: 'g-upsert-test',
+    isServerSuccess: true,
+  });
+  assert.strictEqual(stores.data_cache.has('orders::g-upsert-test::2026-09'), true);
+
+  // Now server syncs October only
+  await persistOrdersCache({
+    orders: [{ id: 'm-oct-1', status: 'Новый заказ', date: '2026-10-10' }],
+    identity: 'g-upsert-test',
+    isServerSuccess: true,
+  });
+  assert.strictEqual(stores.data_cache.has('orders::g-upsert-test::2026-09'), true, 'September key must NOT be wiped');
+  assert.strictEqual(stores.data_cache.has('orders::g-upsert-test::2026-10'), true, 'October key must exist');
+
+  const upsertBundle = await loadCachedOrdersBundle('g-upsert-test');
+  assert.strictEqual(upsertBundle.orders.length, 2, 'Bundle must contain both September and October orders');
+  console.log('✅ Test 19 passed!\n');
+
+  // Test 20: (ii) Offline month switching via getCachedMonth
+  console.log('Test 20: (ii) Offline month switching via getCachedMonth returns exact orders per month');
+  const septCached = await getCachedMonth('g-upsert-test', '2026-09');
+  assert.strictEqual(septCached.orders.length, 1);
+  assert.strictEqual(septCached.orders[0].id, 'm-sept-1');
+
+  const octCached = await getCachedMonth('g-upsert-test', '2026-10');
+  assert.strictEqual(octCached.orders.length, 1);
+  assert.strictEqual(octCached.orders[0].id, 'm-oct-1');
+  console.log('✅ Test 20 passed!\n');
+
+  // Test 21: (iii) QuotaExceededError simulation triggers eviction and write retry
+  console.log('Test 21: (iii) QuotaExceededError simulation triggers eviction of orders_history and succeeds');
+  stores.data_cache.set('orders_history::g-quota', { key: 'orders_history::g-quota', data: [{ id: 'old-1' }] });
+  assert.ok(stores.data_cache.has('orders_history::g-quota'));
+
+  let quotaThrown = false;
+  const originalPut = mockDB.transaction(['data_cache'], 'readwrite').objectStore().put;
+
+  // Simulate QuotaExceededError once on put
+  let failOnce = true;
+  const originalTx = mockDB.transaction;
+  mockDB.transaction = (storeNames, mode) => {
+    const tx = originalTx(storeNames, mode);
+    const origStore = tx.objectStore;
+    tx.objectStore = () => {
+      const storeObj = origStore();
+      const origPut = storeObj.put;
+      storeObj.put = (item) => {
+        if (failOnce && item.key === 'quota_target') {
+          failOnce = false;
+          quotaThrown = true;
+          const quotaErr = new Error('Quota exceeded');
+          quotaErr.name = 'QuotaExceededError';
+          setTimeout(() => { if (tx.onerror) tx.onerror(quotaErr); }, 0);
+          return;
+        }
+        return origPut(item);
+      };
+      return storeObj;
+    };
+    return tx;
+  };
+
+  const saveQuotaRes = await saveCache('quota_target', { ok: true });
+  assert.strictEqual(saveQuotaRes, true, 'Save cache must succeed after evicting and retrying');
+  assert.strictEqual(quotaThrown, true, 'QuotaExceededError was triggered');
+  assert.strictEqual(stores.data_cache.has('orders_history::g-quota'), false, 'Old history was evicted');
+  assert.strictEqual(stores.data_cache.has('quota_target'), true, 'Target key was saved');
+
+  // Restore transaction mock
+  mockDB.transaction = originalTx;
+  console.log('✅ Test 21 passed!\n');
+
+  // Test 22: (iv) IndexedDB eviction detection (self-test)
+  console.log('Test 22: (iv) Simulation of evicted IndexedDB returns safe empty state');
+  const probeKey = 'selftest_probe';
+  await saveCache(probeKey, { ts: 123456 });
+  const probeRead = await getCache(probeKey);
+  assert.strictEqual(probeRead.data.ts, 123456);
+
+  // Simulate wipe/eviction of store
+  stores.data_cache.clear();
+  const probeWiped = await getCache(probeKey);
+  assert.strictEqual(probeWiped, null, 'Wiped cache returns null and triggers eviction warning');
+  console.log('✅ Test 22 passed!\n');
 
   console.log('🎉 ALL OFFLINE ORDERS CACHE TESTS PASSED SUCCESSFULLY!');
 }
