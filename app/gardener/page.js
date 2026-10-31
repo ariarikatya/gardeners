@@ -767,13 +767,15 @@ export default function GardenerDashboard() {
     const interval = setInterval(() => {
       if (typeof window !== 'undefined' && navigator.onLine) {
         fetchOrders(true);
+        fetchDayComments();
         handleSyncQueue();
       }
-    }, 45000);
+    }, 30000);
 
     const handleOnline = () => {
       setIsOffline(false);
       fetchOrders(true);
+      fetchDayComments();
       handleSyncQueue();
     };
 
