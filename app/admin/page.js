@@ -822,6 +822,9 @@ export default function AdminDashboard() {
     setLoading(true);
     setMonthLoading(true);
 
+    const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+    const rangeOrdersKey = `admin_orders_${monthKey}`;
+
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
       const authPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
@@ -847,7 +850,7 @@ export default function AdminDashboard() {
         return;
       }
 
-      const cachedOrders = (await getCache('admin_orders'))?.data || [];
+      const cachedOrders = (await getCache(rangeOrdersKey))?.data || (await getCache('admin_orders'))?.data || [];
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
       const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
@@ -915,6 +918,7 @@ export default function AdminDashboard() {
       setBlockedDays(dataB.blockedDays || []);
       setServices(dataS.services || []);
 
+      saveCache(rangeOrdersKey, allOrd);
       saveCache('admin_orders', allOrd);
       saveCache('admin_gardeners', dataG.gardeners || []);
       saveCache('admin_services', dataS.services || []);
@@ -927,7 +931,7 @@ export default function AdminDashboard() {
       console.warn('Network error during fetchData, using cached offline data:', e);
       setIsOffline(true);
 
-      const cachedOrders = (await getCache('admin_orders'))?.data || [];
+      const cachedOrders = (await getCache(rangeOrdersKey))?.data || (await getCache('admin_orders'))?.data || [];
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
       const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];

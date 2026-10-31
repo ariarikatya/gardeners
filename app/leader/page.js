@@ -78,6 +78,7 @@ export default function LeaderDashboard() {
   const [endDate, setEndDate] = useState(getDefaultRange().end);
   const [data, setData] = useState({ totals: {}, gardeners: [] });
   const [loading, setLoading] = useState(true);
+  const fetchSeqRef = useRef(0);
   const [savingId, setSavingId] = useState(null);
   const [opsModalGardener, setOpsModalGardener] = useState(null);
   const [opsList, setOpsList] = useState([]);
@@ -267,6 +268,20 @@ export default function LeaderDashboard() {
     const handleOnline = () => {
       setIsOffline(false);
       handleSyncQueue();
+      fetchData(startDate, endDate);
+      const currentMonthRange = getDefaultRange();
+      if (startDate !== currentMonthRange.start || endDate !== currentMonthRange.end) {
+        (async () => {
+          try {
+            const bgParams = new URLSearchParams({ start: currentMonthRange.start, end: currentMonthRange.end });
+            const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
+            if (bgRes.ok) {
+              const bgJson = await bgRes.json();
+              await saveCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`, bgJson);
+            }
+          } catch (e) {}
+        })();
+      }
     };
 
     const handleOfflineStatus = () => {
@@ -279,6 +294,7 @@ export default function LeaderDashboard() {
     const interval = setInterval(() => {
       if (navigator.onLine) {
         handleSyncQueue();
+        fetchData(startDate, endDate);
       }
     }, 30000);
 
@@ -332,8 +348,12 @@ export default function LeaderDashboard() {
   };
 
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
+    const seq = ++fetchSeqRef.current;
+    const reqStart = nextStart;
+    const reqEnd = nextEnd;
+
     // 1. Immediately inspect cache for this exact date range and display it if present
-    const rangeCacheKey = `leader_data_${nextStart}_${nextEnd}`;
+    const rangeCacheKey = `leader_data_${reqStart}_${reqEnd}`;
     let cached = (await getCache(rangeCacheKey))?.data;
 
     // Check leader_data_latest ONLY if its period matches the requested dates
@@ -342,13 +362,13 @@ export default function LeaderDashboard() {
       if (latestObj && latestObj.period) {
         const latestStart = latestObj.period.start?.slice(0, 10);
         const latestEnd = latestObj.period.end?.slice(0, 10);
-        if (latestStart === nextStart && latestEnd === nextEnd) {
+        if (latestStart === reqStart && latestEnd === reqEnd) {
           cached = latestObj;
         }
       }
     }
 
-    if (cached) {
+    if (seq === fetchSeqRef.current && cached) {
       setData(cached);
     }
 
@@ -385,8 +405,8 @@ export default function LeaderDashboard() {
 
     try {
       const params = new URLSearchParams();
-      if (nextStart) params.set('start', nextStart);
-      if (nextEnd) params.set('end', nextEnd);
+      if (reqStart) params.set('start', reqStart);
+      if (reqEnd) params.set('end', reqEnd);
       const res = await apiFetch(`/api/leader?${params.toString()}`);
       if (!res.ok) {
         const errorText = await res.text();
@@ -395,33 +415,32 @@ export default function LeaderDashboard() {
         throw new Error((errorJson && errorJson.error) || `Ошибка сервера (${res.status}): ${errorText.slice(0, 100)}`);
       }
       const json = await res.json();
-      setData(json);
 
       // Verify that the response period matches the requested period before saving
       const respStart = json.period?.start?.slice(0, 10);
       const respEnd = json.period?.end?.slice(0, 10);
-      if (!respStart || !respEnd || (respStart === nextStart && respEnd === nextEnd)) {
+      if (!respStart || !respEnd || (respStart === reqStart && respEnd === reqEnd)) {
         await saveCache(rangeCacheKey, json);
         await saveCache('leader_data_latest', json);
       }
 
-      // If requested range is not the current month, ensure current month cache is preserved / updated in background
+      if (seq === fetchSeqRef.current) {
+        setData(json);
+      }
+
+      // If requested range is not the current month, ensure current month cache is updated in background
       const currentMonthRange = getDefaultRange();
-      if (nextStart !== currentMonthRange.start || nextEnd !== currentMonthRange.end) {
-        const currentMonthCache = await getCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`);
-        if (!currentMonthCache) {
-          // Pre-cache current month in background so switching back works offline
-          (async () => {
-            try {
-              const bgParams = new URLSearchParams({ start: currentMonthRange.start, end: currentMonthRange.end });
-              const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
-              if (bgRes.ok) {
-                const bgJson = await bgRes.json();
-                await saveCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`, bgJson);
-              }
-            } catch (e) {}
-          })();
-        }
+      if (reqStart !== currentMonthRange.start || reqEnd !== currentMonthRange.end) {
+        (async () => {
+          try {
+            const bgParams = new URLSearchParams({ start: currentMonthRange.start, end: currentMonthRange.end });
+            const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
+            if (bgRes.ok) {
+              const bgJson = await bgRes.json();
+              await saveCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`, bgJson);
+            }
+          } catch (e) {}
+        })();
       }
 
       touchOfflineSession();
@@ -429,11 +448,13 @@ export default function LeaderDashboard() {
     } catch (error) {
       console.warn('Network error in leader fetchData, trying cache:', error.message);
       setIsOffline(true);
-      if (!cached) {
+      if (!cached && seq === fetchSeqRef.current) {
         alert(error.message);
       }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
       await refreshQueueCount();
     }
   };

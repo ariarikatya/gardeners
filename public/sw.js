@@ -865,6 +865,29 @@ self.addEventListener('message', (event) => {
     return;
   }
 
+  if (event.data.type === 'TOUCH_SESSION') {
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        let sessionRes = await cache.match('/offline-session') || await pCache.match('/offline-session');
+        if (sessionRes) {
+          const data = await sessionRes.json();
+          if (data && data.active) {
+            data.ts = Date.now();
+            const res1 = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+            const res2 = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+            await cache.put('/offline-session', res1);
+            await pCache.put('/offline-session', res2);
+          }
+        }
+      } catch (e) {}
+    })();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
   if (event.data.type === 'ONLINE' || event.data.type === 'PRECACHE_ROLES') {
     const promise = precacheAllRoles();
     if (event.waitUntil) event.waitUntil(promise);
