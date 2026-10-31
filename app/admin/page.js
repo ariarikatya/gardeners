@@ -5,7 +5,7 @@ import Link from 'next/link';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
 
@@ -590,6 +590,8 @@ export default function AdminDashboard() {
     };
 
     initRoleCheck();
+    requestStoragePersistence().catch(() => {});
+    touchOfflineSession();
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
     const role = localStorage.getItem('auth_role');

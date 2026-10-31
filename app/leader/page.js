@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
-import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
 
@@ -210,6 +210,8 @@ export default function LeaderDashboard() {
     };
 
     initRoleCheck();
+    requestStoragePersistence().catch(() => {});
+    touchOfflineSession();
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
     const role = localStorage.getItem('auth_role');
@@ -330,7 +332,25 @@ export default function LeaderDashboard() {
   };
 
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
-    setLoading(true);
+    // 1. Immediately inspect cache for this exact date range and display it if present
+    const rangeCacheKey = `leader_data_${nextStart}_${nextEnd}`;
+    let cached = (await getCache(rangeCacheKey))?.data;
+
+    // Check leader_data_latest ONLY if its period matches the requested dates
+    if (!cached) {
+      const latestObj = (await getCache('leader_data_latest'))?.data;
+      if (latestObj && latestObj.period) {
+        const latestStart = latestObj.period.start?.slice(0, 10);
+        const latestEnd = latestObj.period.end?.slice(0, 10);
+        if (latestStart === nextStart && latestEnd === nextEnd) {
+          cached = latestObj;
+        }
+      }
+    }
+
+    if (cached) {
+      setData(cached);
+    }
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
@@ -356,14 +376,12 @@ export default function LeaderDashboard() {
         return;
       }
 
-      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
-      if (cached) {
-        setData(cached);
-      }
       setLoading(false);
       await refreshQueueCount();
       return;
     }
+
+    setLoading(true);
 
     try {
       const params = new URLSearchParams();
@@ -378,16 +396,40 @@ export default function LeaderDashboard() {
       }
       const json = await res.json();
       setData(json);
-      saveCache(`leader_data_${nextStart}_${nextEnd}`, json);
-      saveCache('leader_data_latest', json);
+
+      // Verify that the response period matches the requested period before saving
+      const respStart = json.period?.start?.slice(0, 10);
+      const respEnd = json.period?.end?.slice(0, 10);
+      if (!respStart || !respEnd || (respStart === nextStart && respEnd === nextEnd)) {
+        await saveCache(rangeCacheKey, json);
+        await saveCache('leader_data_latest', json);
+      }
+
+      // If requested range is not the current month, ensure current month cache is preserved / updated in background
+      const currentMonthRange = getDefaultRange();
+      if (nextStart !== currentMonthRange.start || nextEnd !== currentMonthRange.end) {
+        const currentMonthCache = await getCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`);
+        if (!currentMonthCache) {
+          // Pre-cache current month in background so switching back works offline
+          (async () => {
+            try {
+              const bgParams = new URLSearchParams({ start: currentMonthRange.start, end: currentMonthRange.end });
+              const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
+              if (bgRes.ok) {
+                const bgJson = await bgRes.json();
+                await saveCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`, bgJson);
+              }
+            } catch (e) {}
+          })();
+        }
+      }
+
+      touchOfflineSession();
       setIsOffline(false);
     } catch (error) {
       console.warn('Network error in leader fetchData, trying cache:', error.message);
       setIsOffline(true);
-      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
-      if (cached) {
-        setData(cached);
-      } else {
+      if (!cached) {
         alert(error.message);
       }
     } finally {
@@ -896,6 +938,7 @@ export default function LeaderDashboard() {
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 text-left">
                       <th className="px-2 py-1.5 font-semibold">Садовник</th>
+                      <th className="px-2 py-1.5 font-semibold">Комментарии по дням</th>
                       <th className="px-2 py-1.5 font-semibold">Заказы</th>
                       <th className="px-2 py-1.5 font-semibold">Заработано</th>
                       <th className="px-2 py-1.5 font-semibold">Долг фирме</th>
@@ -909,11 +952,29 @@ export default function LeaderDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(data.gardeners || []).map((g) => (
+                    {(data.gardeners || []).map((g) => {
+                      const gardenerComments = (data.dayComments || []).filter(c => c.gardenerId === g.id);
+                      return (
                       <tr key={g.id} className="border-t border-slate-100 align-top">
                         <td className="px-2 py-2">
                           <div className="font-semibold text-slate-800">{g.name}</div>
                           <div className="text-xs text-slate-500">{g.phone}</div>
+                        </td>
+                        <td className="px-2 py-2 max-w-xs">
+                          {gardenerComments.length === 0 ? (
+                            <span className="text-slate-400 text-[11px]">—</span>
+                          ) : (
+                            <div className="space-y-1 max-h-24 overflow-y-auto">
+                              {gardenerComments.map((c) => (
+                                <div key={c.id} className="bg-emerald-50 text-emerald-950 p-1.5 rounded border border-emerald-200 text-[11px]">
+                                  <span className="font-bold text-emerald-800">
+                                    📅 {c.date ? new Date(c.date).toLocaleDateString('ru-RU') : ''}:
+                                  </span>{' '}
+                                  <span>{c.text}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2">{g.totalOrders}</td>
                         <td className="px-2 py-2 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
@@ -1058,7 +1119,8 @@ export default function LeaderDashboard() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 </div>
