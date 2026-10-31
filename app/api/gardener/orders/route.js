@@ -38,19 +38,7 @@ export async function GET(req) {
     })
   ]);
 
-  const dates = orders.map(o => o.date).filter(Boolean).map(d => new Date(d).getTime()).filter(t => !isNaN(t));
-  const minDate = dates.length ? new Date(Math.min(...dates)).toISOString() : null;
-  const maxDate = dates.length ? new Date(Math.max(...dates)).toISOString() : null;
-
-  return NextResponse.json({
-    orders,
-    dayOffs,
-    meta: {
-      count: orders.length,
-      minDate,
-      maxDate,
-    }
-  });
+  return NextResponse.json({ orders, dayOffs });
 }
 
 export async function PUT(req) {

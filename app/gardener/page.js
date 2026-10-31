@@ -133,6 +133,7 @@ export default function GardenerDashboard() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const calendarMonthRef = useRef(calendarMonth);
+  const requestSeqRef = useRef(0);
   useEffect(() => {
     calendarMonthRef.current = calendarMonth;
   }, [calendarMonth]);
@@ -390,6 +391,7 @@ export default function GardenerDashboard() {
   };
 
   const fetchOrders = async (silent = false, targetMonth = null) => {
+    const currentSeq = ++requestSeqRef.current;
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
       await loadFromCache();
@@ -442,6 +444,11 @@ export default function GardenerDashboard() {
         return;
       }
 
+      // Отбрасываем просроченные ответы, если за время запроса сменился месяц или был инициирован новый запрос
+      if (currentSeq !== requestSeqRef.current) {
+        return;
+      }
+
       const ops = resOps.ok ? await resOps.json().catch(() => ({})) : {};
       const incomingOrders = data.orders;
 
@@ -485,13 +492,28 @@ export default function GardenerDashboard() {
 
         // Синхронизация заказов: для отображения берем заказы АКТУАЛЬНОГО месяца (из targetMonth или calendarMonthRef)
         try {
-          const freshBundle = await loadCachedOrdersBundle(activeIdentity);
           const activeCalMonth = targetMonth || calendarMonthRef.current || calendarMonth;
-          if (freshBundle && freshBundle.orders) {
-            const curMKey = `${activeCalMonth.getFullYear()}-${String(activeCalMonth.getMonth() + 1).padStart(2, '0')}`;
-            const curMonthOrders = freshBundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
-            const allMerged = applyQueueToOrders(curMonthOrders, pendingQueue);
-            setOrders(allMerged);
+          const curMKey = `${activeCalMonth.getFullYear()}-${String(activeCalMonth.getMonth() + 1).padStart(2, '0')}`;
+
+          // Клиентское подтверждение scoped-месяца: если полный ответ сервера получен,
+          // подтверждаем наличие или подтвержденную пустоту (emptyConfirmed) именно для активного месяца
+          const scopedMonthOrders = incomingOrders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
+          await persistOrdersCache({
+            orders: scopedMonthOrders,
+            dayOffs: data.dayOffs || [],
+            identity: activeIdentity,
+            currentMonth: curMKey,
+            isScopedMonth: true,
+            isServerSuccess: true,
+          }).catch(() => {});
+
+          const freshBundle = await loadCachedOrdersBundle(activeIdentity);
+          if (currentSeq === requestSeqRef.current) {
+            if (freshBundle && freshBundle.orders) {
+              const curMonthOrders = freshBundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
+              const allMerged = applyQueueToOrders(curMonthOrders, pendingQueue);
+              setOrders(allMerged);
+            }
           }
           const cachedCount = (freshBundle && freshBundle.orders) ? freshBundle.orders.length : 0;
           const serverCount = incomingOrders.length;
@@ -786,8 +808,47 @@ export default function GardenerDashboard() {
         const activeId = await getGardenerIdentityAsync();
         if (activeId) setOfflineIdentity(activeId);
 
-        const authPhone = localStorage.getItem('auth_phone');
+        let authPhone = localStorage.getItem('auth_phone');
         let role = localStorage.getItem('auth_role');
+
+        // Если маркеры в localStorage пусты при холодном старте, пробуем восстановить из IndexedDB meta
+        if (!authPhone) {
+          const metaPhone = await getMeta('auth_phone');
+          if (metaPhone) {
+            authPhone = String(metaPhone).trim();
+            localStorage.setItem('auth_phone', authPhone);
+          }
+        }
+        if (!role) {
+          const metaRole = await getMeta('auth_role');
+          if (metaRole) {
+            role = String(metaRole).trim();
+            localStorage.setItem('auth_role', role);
+          }
+        }
+
+        // Если онлайн, а токен или роль не найдены, но телефон есть — вызываем auto-login для восстановления сессии
+        if (navigator.onLine && authPhone && (!role || !localStorage.getItem('auth_token'))) {
+          try {
+            const autoRes = await fetch('/api/auth/auto-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone: authPhone }),
+            });
+            if (autoRes.ok) {
+              const autoData = await autoRes.json();
+              if (autoData.role) {
+                role = autoData.role;
+                localStorage.setItem('auth_role', role);
+                if (autoData.token) localStorage.setItem('auth_token', autoData.token);
+                activateOfflineSession(role, authPhone);
+                // Прогреваем кэш
+                fetchOrders(true).catch(() => {});
+              }
+            }
+          } catch (autoErr) {}
+        }
+
         if (!role) {
           role = await resolveOfflineRoleFromCaches(authPhone);
         }
