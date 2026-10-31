@@ -250,6 +250,32 @@ async function restoreOfflineDataToNewCache() {
       }
     } catch (e) {}
   }
+
+  // 1.1: Migrate all successful /api/* responses and pages/chunks from old caches into OFFLINE_DATA_CACHE and CACHE_NAME
+  for (const cName of allCacheKeys) {
+    if (cName === CACHE_NAME || cName === OFFLINE_DATA_CACHE) continue;
+    try {
+      const oldC = await caches.open(cName);
+      const requests = await oldC.keys();
+      for (const req of requests) {
+        try {
+          const reqUrl = new URL(req.url);
+          // Migrate /api/* GET responses, pages and static chunks
+          if (reqUrl.pathname.startsWith('/api/') || reqUrl.pathname.startsWith('/_next/') || ['/', '/admin', '/leader', '/gardener', '/login'].includes(reqUrl.pathname)) {
+            const alreadyInCache = await cache.match(req);
+            const alreadyInPCache = await pCache.match(req);
+            if (!alreadyInCache || !alreadyInPCache) {
+              const res = await oldC.match(req);
+              if (res && res.ok && res.status === 200 && !res.redirected) {
+                if (!alreadyInCache) await cache.put(req, res.clone());
+                if (!alreadyInPCache) await pCache.put(req, res.clone());
+              }
+            }
+          }
+        } catch (itemErr) {}
+      }
+    } catch (oldErr) {}
+  }
 }
 
 async function deleteOldCaches() {

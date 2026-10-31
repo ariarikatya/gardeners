@@ -352,6 +352,8 @@ export default function AdminDashboard() {
   const [startFromToday, setStartFromToday] = useState(true);
   const [monthLoading, setMonthLoading] = useState(false);
   const [tableScale, setTableScale] = useState(1);
+  const [dayComments, setDayComments] = useState([]);
+  const [isStaleOfflineData, setIsStaleOfflineData] = useState(false);
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
@@ -822,8 +824,22 @@ export default function AdminDashboard() {
     setLoading(true);
     setMonthLoading(true);
 
-    const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
-    const rangeOrdersKey = `admin_orders_${monthKey}`;
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const now = new Date();
+
+    let startOfMonth;
+    if (startFromToday && now.getFullYear() === year && now.getMonth() === month) {
+      startOfMonth = new Date(year, month, now.getDate(), 0, 0, 0, 0);
+    } else {
+      startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+    }
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+    const startStr = startOfMonth.toISOString().slice(0, 10);
+    const endStr = endOfMonth.toISOString().slice(0, 10);
+    const rangeOrdersKey = `admin_orders_${startStr}_${endStr}`;
+    const rangeCommentsKey = `admin_day_comments_${startStr}_${endStr}`;
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
@@ -850,7 +866,24 @@ export default function AdminDashboard() {
         return;
       }
 
-      const cachedOrders = (await getCache(rangeOrdersKey))?.data || (await getCache('admin_orders'))?.data || [];
+      let cachedOrders = (await getCache(rangeOrdersKey))?.data;
+      let cachedDayComments = (await getCache(rangeCommentsKey))?.data;
+      let isStale = false;
+
+      if (!cachedOrders) {
+        // Fallback: check month key without startFromToday
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        cachedOrders = (await getCache(`admin_orders_${monthKey}`))?.data;
+      }
+
+      if (!cachedOrders) {
+        // Fallback to generic admin_orders with stale warning flag
+        cachedOrders = (await getCache('admin_orders'))?.data || [];
+        if (cachedOrders && cachedOrders.length > 0) {
+          isStale = true;
+        }
+      }
+
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
       const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
@@ -858,13 +891,15 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
+      setIsStaleOfflineData(isStale);
       setGardeners(cachedGardeners);
-      setOrders(cachedOrders.filter(o => o.status !== 'Аукцион'));
-      setAuctionOrders(cachedOrders.filter(o => o.status === 'Аукцион' || o.wasAuction));
+      setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders((cachedOrders || []).filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(cachedDayOffs);
       setBlockedDays(cachedBlockedDays);
       setServices(cachedServices);
       setWebLeads(cachedWebLeads);
+      setDayComments(cachedDayComments || []);
       if (cachedMe) setCurrentUser(cachedMe);
 
       setLoading(false);
@@ -874,18 +909,6 @@ export default function AdminDashboard() {
     }
 
     try {
-      const year = currentMonth.getFullYear();
-      const month = currentMonth.getMonth();
-      const now = new Date();
-
-      let startOfMonth;
-      if (startFromToday && now.getFullYear() === year && now.getMonth() === month) {
-        startOfMonth = new Date(year, month, now.getDate(), 0, 0, 0, 0);
-      } else {
-        startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
-      }
-      const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
       const [resG, resO, resD, resB, resS, resMe] = await Promise.all([
         apiFetch('/api/admin/gardeners'),
         apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
@@ -910,28 +933,46 @@ export default function AdminDashboard() {
       const dataB = resB.ok ? await resB.json() : {};
       const dataS = resS.ok ? await resS.json() : {};
       const allOrd = dataO.orders || [];
+      const comments = dataO.dayComments || [];
 
+      setIsStaleOfflineData(false);
       setGardeners(dataG.gardeners || []);
       setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
       setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(dataD.dayOffs || []);
       setBlockedDays(dataB.blockedDays || []);
       setServices(dataS.services || []);
+      setDayComments(comments);
 
       saveCache(rangeOrdersKey, allOrd);
+      saveCache(rangeCommentsKey, comments);
       saveCache('admin_orders', allOrd);
       saveCache('admin_gardeners', dataG.gardeners || []);
       saveCache('admin_services', dataS.services || []);
       saveCache('admin_dayOffs', dataD.dayOffs || []);
       saveCache('admin_blockedDays', dataB.blockedDays || []);
 
+      touchOfflineSession();
+      requestStoragePersistence().catch(() => {});
       setIsOffline(false);
       await loadWebLeads(true);
     } catch (e) {
       console.warn('Network error during fetchData, using cached offline data:', e);
       setIsOffline(true);
 
-      const cachedOrders = (await getCache(rangeOrdersKey))?.data || (await getCache('admin_orders'))?.data || [];
+      let cachedOrders = (await getCache(rangeOrdersKey))?.data;
+      let cachedDayComments = (await getCache(rangeCommentsKey))?.data;
+      let isStale = false;
+
+      if (!cachedOrders) {
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        cachedOrders = (await getCache(`admin_orders_${monthKey}`))?.data;
+      }
+      if (!cachedOrders) {
+        cachedOrders = (await getCache('admin_orders'))?.data || [];
+        if (cachedOrders && cachedOrders.length > 0) isStale = true;
+      }
+
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
       const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
@@ -939,13 +980,15 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
+      setIsStaleOfflineData(isStale);
       setGardeners(cachedGardeners);
-      setOrders(cachedOrders.filter(o => o.status !== 'Аукцион'));
-      setAuctionOrders(cachedOrders.filter(o => o.status === 'Аукцион' || o.wasAuction));
+      setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders((cachedOrders || []).filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(cachedDayOffs);
       setBlockedDays(cachedBlockedDays);
       setServices(cachedServices);
       setWebLeads(cachedWebLeads);
+      setDayComments(cachedDayComments || []);
       if (cachedMe) setCurrentUser(cachedMe);
     } finally {
       setLoading(false);
@@ -2499,6 +2542,11 @@ export default function AdminDashboard() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
+                  {isStaleOfflineData && (
+                    <span className="bg-amber-100 text-amber-900 border border-amber-300 text-xs font-medium px-2 py-0.5 rounded-full">
+                      ⚠️ Офлайн: показаны сохранённые данные другого периода
+                    </span>
+                  )}
                   <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold px-2 py-0.5 rounded-full">
                     Заказов: {orders.length}
                   </span>
@@ -2789,6 +2837,23 @@ export default function AdminDashboard() {
                               <span className="flex flex-col gap-0.5">
                                 <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
                                 {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
+                                {(() => {
+                                  const dateComments = dayComments.filter(c => c.date?.slice(0, 10) === dateStr);
+                                  if (dateComments.length === 0) return null;
+                                  return (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {dateComments.map(c => (
+                                        <span
+                                          key={c.id}
+                                          title={`${c.gardenerName || 'Садовник'}: ${c.text}`}
+                                          className="inline-flex items-center gap-0.5 bg-emerald-100 text-emerald-800 text-[10px] px-1 py-0.5 rounded cursor-help font-normal"
+                                        >
+                                          💬 {c.gardenerName ? c.gardenerName.split(' ')[0] : ''}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                               </span>
                             </td>
                             {displayGardeners.map(g => {

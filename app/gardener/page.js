@@ -302,7 +302,7 @@ export default function GardenerDashboard() {
       const claimIds = new Set(activeQueue.filter(i => i.actionType === 'AUCTION_CLAIM').map(i => i.payload?.orderId));
       setQueuedClaimIds(claimIds);
       if (result.syncedCount > 0) {
-        await Promise.all([fetchOrders(true), fetchProfile(), fetchAuction()]);
+        await Promise.all([fetchOrders(true), fetchProfile(), fetchAuction(), fetchDayComments()]);
         setSyncedToastMsg(`Связь восстановлена, ${result.syncedCount} ${result.syncedCount === 1 ? 'заявка отправлена' : result.syncedCount < 5 ? 'заявки отправлены' : 'заявок отправлено'}`);
         setShowSyncedToast(true);
         setTimeout(() => setShowSyncedToast(false), 4000);
@@ -389,6 +389,9 @@ export default function GardenerDashboard() {
       const ordersToCache = filterOrdersForOffline(incomingOrders);
       saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] });
       saveCache('operations', ops.operations || []);
+
+      touchOfflineSession();
+      requestStoragePersistence().catch(() => {});
     } catch (e) {
       console.error('fetchOrders network error:', e);
       setIsOffline(true);

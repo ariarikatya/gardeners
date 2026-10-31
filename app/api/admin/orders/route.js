@@ -138,11 +138,32 @@ export async function GET(req) {
     if (endParam) where.date.lte = new Date(endParam);
   }
 
-  const orders = await prisma.order.findMany({
-    where,
-    include: { gardener: true, service: true },
-  });
-  return NextResponse.json({ orders });
+  const [orders, dayComments] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      include: { gardener: true, service: true },
+    }),
+    prisma.gardenerDayComment.findMany({
+      where: (startParam || endParam) ? {
+        date: {
+          ...(startParam ? { gte: new Date(startParam) } : {}),
+          ...(endParam ? { lte: new Date(endParam) } : {}),
+        }
+      } : {},
+      include: { gardener: true },
+      orderBy: { date: 'asc' },
+    }),
+  ]);
+
+  const formattedDayComments = (dayComments || []).map((c) => ({
+    id: c.id,
+    date: c.date,
+    gardenerId: c.gardenerId,
+    gardenerName: c.gardener?.name || null,
+    text: c.text,
+  }));
+
+  return NextResponse.json({ orders, dayComments: formattedDayComments });
 }
 
 export async function POST(req) {
