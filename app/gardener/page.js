@@ -291,7 +291,7 @@ export default function GardenerDashboard() {
       if (bundle && Array.isArray(bundle.orders) && bundle.orders.length > 0) {
         setHasCachedBundle(true);
         // При инициализации отображаем заказы активного месяца календаря calendarMonth
-        const curMKey = `${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, '0')}`;
+        const curMKey = formatMonthKey(calendarMonth);
         const curMonthOrders = bundle.orders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
         const merged = applyQueueToOrders(curMonthOrders, pendingQueue);
         setOrders(merged);
@@ -477,7 +477,7 @@ export default function GardenerDashboard() {
       setLastCacheTime(formatLastUpdated(now));
       setIsDataStale(false);
 
-      // Кэшируем данные по стабильному identity без 14-дневного фильтра
+      // Кэшируем данные по стабильному identity без 14-дневного фильтра (один полный вызов)
       const activeIdentity = getGardenerIdentity();
       if (activeIdentity) {
         setOfflineIdentity(activeIdentity);
@@ -486,26 +486,15 @@ export default function GardenerDashboard() {
           orders: incomingOrders,
           dayOffs: data.dayOffs || [],
           identity: activeIdentity,
-          currentMonth: null, // Для общего GET не шлем currentMonth, чтобы не создавать ложный emptyConfirmed
+          currentMonth: null,
+          source: 'full',
           isServerSuccess,
         }).catch((err) => console.error('persistOrdersCache error:', err));
 
         // Синхронизация заказов: для отображения берем заказы АКТУАЛЬНОГО месяца (из targetMonth или calendarMonthRef)
         try {
           const activeCalMonth = targetMonth || calendarMonthRef.current || calendarMonth;
-          const curMKey = `${activeCalMonth.getFullYear()}-${String(activeCalMonth.getMonth() + 1).padStart(2, '0')}`;
-
-          // Клиентское подтверждение scoped-месяца: если полный ответ сервера получен,
-          // подтверждаем наличие или подтвержденную пустоту (emptyConfirmed) именно для активного месяца
-          const scopedMonthOrders = incomingOrders.filter(o => o.date && toDateKey(o.date).startsWith(curMKey));
-          await persistOrdersCache({
-            orders: scopedMonthOrders,
-            dayOffs: data.dayOffs || [],
-            identity: activeIdentity,
-            currentMonth: curMKey,
-            isScopedMonth: true,
-            isServerSuccess: true,
-          }).catch(() => {});
+          const curMKey = formatMonthKey(activeCalMonth);
 
           const freshBundle = await loadCachedOrdersBundle(activeIdentity);
           if (currentSeq === requestSeqRef.current) {
@@ -533,23 +522,6 @@ export default function GardenerDashboard() {
             setCacheCountMismatch(null);
           }
         } catch (mErr) {}
-
-        // Фоновый прогрев: гарантируем сохранение полного слепка и истории
-        if (!silent && navigator.onLine) {
-          (async () => {
-            try {
-              // Полный список уже получен в incomingOrders и закэширован по всем месяцам.
-              // При необходимости выполняем контрольное обновление бандла без ложных currentMonth.
-              await persistOrdersCache({
-                orders: incomingOrders,
-                dayOffs: data.dayOffs || [],
-                identity: activeIdentity,
-                currentMonth: null,
-                isServerSuccess: true,
-              }).catch(() => {});
-            } catch (e) {}
-          })();
-        }
       }
 
       await saveCache('operations', ops.operations || []);
@@ -1974,7 +1946,7 @@ export default function GardenerDashboard() {
     calendarMonthRef.current = prevM;
     setCalendarMonth(prevM);
     setSelectedDateStr(null);
-    const mKey = `${prevM.getFullYear()}-${String(prevM.getMonth() + 1).padStart(2, '0')}`;
+    const mKey = formatMonthKey(prevM);
     const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
     // Устанавливаем ровно заказы выбранного месяца (или пустой массив если нет)
     const monthOrders = (cached && Array.isArray(cached.orders)) ? cached.orders : [];
@@ -1993,7 +1965,7 @@ export default function GardenerDashboard() {
     calendarMonthRef.current = nextM;
     setCalendarMonth(nextM);
     setSelectedDateStr(null);
-    const mKey = `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, '0')}`;
+    const mKey = formatMonthKey(nextM);
     const cached = await getCachedMonth(offlineIdentity || getGardenerIdentity(), mKey);
     // Устанавливаем ровно заказы выбранного месяца (или пустой массив если нет)
     const monthOrders = (cached && Array.isArray(cached.orders)) ? cached.orders : [];

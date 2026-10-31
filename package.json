@@ -37,6 +37,8 @@
     "test:sw-appshell": "node scripts/test-sw-appshell.js",
     "test:sw-offline-navigate": "node scripts/test-sw-offline-navigate.js",
     "test:offline-orders-cache": "node scripts/test-offline-orders-cache.js",
+    "test:month-cache-persistence": "node scripts/test-month-cache-persistence.js",
+    "test:month-sync-race": "node scripts/test-month-sync-race.js",
     "test:sw-cache-migration": "node scripts/test-sw-cache-migration.js",
     "test:error-boundary-preserve-auth": "node scripts/test-error-boundary-preserve-auth.js"
   },

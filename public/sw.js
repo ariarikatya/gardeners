@@ -591,12 +591,6 @@ async function isOfflineSession() {
     if (sessionRes) {
       const data = await sessionRes.clone().json();
       if (data && data.active) {
-        const isOnline = typeof self !== 'undefined' && self.navigator && self.navigator.onLine;
-        const ts = data.ts || 0;
-        const sessionAge = Date.now() - ts;
-        if (sessionAge > MAX_AGE_30D && isOnline) {
-          return false;
-        }
         isOfflineSessionActive = true;
         return true;
       }
