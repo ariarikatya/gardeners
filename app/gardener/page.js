@@ -469,7 +469,7 @@ export default function GardenerDashboard() {
     const existing = dayComments[dateStr];
     const updatedMap = { ...dayComments, [dateStr]: { id: existing?.id || `tmp_c_${Date.now()}`, text: trimmed } };
     setDayComments(updatedMap);
-    saveCache('day_comments', updatedMap);
+    await saveCache('day_comments', updatedMap);
 
     const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
     if (isOfflineMode) {
@@ -500,7 +500,7 @@ export default function GardenerDashboard() {
       if (json.dayComment) {
         const newMap = { ...dayComments, [dateStr]: { id: json.dayComment.id, text: json.dayComment.text } };
         setDayComments(newMap);
-        saveCache('day_comments', newMap);
+        await saveCache('day_comments', newMap);
       }
     } catch (e) {
       alert(e.message || 'Ошибка сохранения комментария');
@@ -517,7 +517,7 @@ export default function GardenerDashboard() {
     const nextMap = { ...dayComments };
     delete nextMap[dateStr];
     setDayComments(nextMap);
-    saveCache('day_comments', nextMap);
+    await saveCache('day_comments', nextMap);
     setDayCommentInput('');
 
     const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;

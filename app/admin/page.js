@@ -951,6 +951,9 @@ export default function AdminDashboard() {
         const monthOrders = allCumulative.filter(o => o.date && getLocalYearMonth(o.date) === monthKey);
         if (monthOrders.length > 0) {
           cachedOrders = monthOrders;
+        } else if (allCumulative.length > 0) {
+          cachedOrders = allCumulative;
+          isStale = true;
         }
       }
       if (!cachedDayComments) {
@@ -1070,8 +1073,12 @@ export default function AdminDashboard() {
       const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
 
       // 1.3: Save canonical and cumulative cache immediately (incrementally) so data is on disk
+      // Do not overwrite canonical key with empty array if there was already non-empty data in cache
+      const prevCanonicalOrders = (await getCache(canonicalOrdersKey))?.data;
+      const shouldSaveCanonicalOrders = allOrd.length > 0 || !Array.isArray(prevCanonicalOrders) || prevCanonicalOrders.length === 0;
+
       await Promise.all([
-        saveCache(canonicalOrdersKey, allOrd),
+        shouldSaveCanonicalOrders ? saveCache(canonicalOrdersKey, allOrd) : Promise.resolve(),
         saveCache(canonicalCommentsKey, comments),
       ]);
       await Promise.all([

@@ -105,4 +105,23 @@ assert.strictEqual(
   'app/gardener/error.js must preserve anemon-agro-offline-data when clearing caches'
 );
 
+// 6. Check protection against overwriting canonicalOrdersKey with empty array
+assert.strictEqual(
+  adminContent.includes('const prevCanonicalOrders = (await getCache(canonicalOrdersKey))?.data;'),
+  true,
+  'Admin must check previous canonical orders before saving'
+);
+assert.strictEqual(
+  adminContent.includes('shouldSaveCanonicalOrders ? saveCache(canonicalOrdersKey, allOrd) : Promise.resolve()'),
+  true,
+  'Admin must not overwrite non-empty canonical orders with empty array'
+);
+
+// 7. Check fallback to cumulative admin_orders with isStale in catch and instant cache
+assert.strictEqual(
+  adminContent.includes('else if (allCumulative.length > 0) {\n          cachedOrders = allCumulative;\n          isStale = true;\n        }'),
+  true,
+  'Admin must fall back to allCumulative orders with isStale = true when month orders are absent'
+);
+
 console.log('🎉 ALL Month Cache Persistence & Scope Tests passed successfully!\n');

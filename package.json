@@ -34,9 +34,10 @@
     "test:logout": "node scripts/test-logout.js",
     "test:login-flow": "node scripts/test-login-flow.js",
     "test:offline-login": "node scripts/test-offline-saved-phone-login.js",
+    "test:month-cache": "node scripts/test-month-cache-persistence.js",
     "test:sw-appshell": "node scripts/test-sw-appshell.js",
     "test:sw-offline-navigate": "node scripts/test-sw-offline-navigate.js",
-    "test:offline-reliability": "node scripts/test-cache-isolation-and-tz.js && node scripts/test-three-month-cache.js && node scripts/test-leader-range-cache.js && node scripts/test-comment-queue-squash.js && node scripts/test-multi-account-offline.js && node scripts/test-logout-scopes-one-account.js && node scripts/test-self-healing-and-multicomment.js && node scripts/test-incremental-and-scoped.js"
+    "test:offline-reliability": "node scripts/test-month-cache-persistence.js && node scripts/test-cache-isolation-and-tz.js && node scripts/test-three-month-cache.js && node scripts/test-leader-range-cache.js && node scripts/test-comment-queue-squash.js && node scripts/test-multi-account-offline.js && node scripts/test-logout-scopes-one-account.js && node scripts/test-self-healing-and-multicomment.js && node scripts/test-incremental-and-scoped.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
