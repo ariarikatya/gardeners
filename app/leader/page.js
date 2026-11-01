@@ -96,6 +96,7 @@ export default function LeaderDashboard() {
   const pendingCountRef = useRef(0);
   const [conflictItems, setConflictItems] = useState([]);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
 
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
@@ -270,23 +271,10 @@ export default function LeaderDashboard() {
       }).catch(() => {});
     }
 
-    const handleOnline = () => {
+    const handleOnline = async () => {
       setIsOffline(false);
       handleSyncQueue();
-      fetchData(startDate, endDate);
-      const currentMonthRange = getDefaultRange();
-      if (startDate !== currentMonthRange.start || endDate !== currentMonthRange.end) {
-        (async () => {
-          try {
-            const bgParams = new URLSearchParams({ start: currentMonthRange.start, end: currentMonthRange.end });
-            const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
-            if (bgRes.ok) {
-              const bgJson = await bgRes.json();
-              await saveCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`, bgJson);
-            }
-          } catch (e) {}
-        })();
-      }
+      await fetchData(startDate, endDate);
     };
 
     const handleOfflineStatus = () => {
@@ -361,16 +349,21 @@ export default function LeaderDashboard() {
 
     // 1. Immediately inspect cache for this exact date range and display it if present
     const rangeCacheKey = `leader_data_${reqStart}_${reqEnd}`;
-    let cached = (await getCache(rangeCacheKey))?.data;
+    const cachedRangeObj = await getCache(rangeCacheKey);
+    let cached = cachedRangeObj?.data;
+    if (cachedRangeObj?.updatedAt) {
+      setCacheUpdatedAt(cachedRangeObj.updatedAt);
+    }
 
     // Check leader_data_latest ONLY if its period matches the requested dates
     if (!cached) {
-      const latestObj = (await getCache('leader_data_latest'))?.data;
-      if (latestObj && latestObj.period) {
-        const latestStart = latestObj.period.start?.slice(0, 10);
-        const latestEnd = latestObj.period.end?.slice(0, 10);
+      const latestObj = await getCache('leader_data_latest');
+      if (latestObj && latestObj.data?.period) {
+        const latestStart = latestObj.data.period.start?.slice(0, 10);
+        const latestEnd = latestObj.data.period.end?.slice(0, 10);
         if (latestStart === reqStart && latestEnd === reqEnd) {
-          cached = latestObj;
+          cached = latestObj.data;
+          if (latestObj.updatedAt) setCacheUpdatedAt(latestObj.updatedAt);
         }
       }
     }
@@ -435,19 +428,41 @@ export default function LeaderDashboard() {
         setData(json);
       }
 
-      // If requested range is not the current month, ensure current month cache is updated in background
-      const currentMonthRange = getDefaultRange();
-      if (reqStart !== currentMonthRange.start || reqEnd !== currentMonthRange.end) {
-        (async () => {
+      // Guarantee 3-month cache: current, previous, and next month relative to getDefaultRange()
+      const nowD = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const getMonthRange = (year, month) => {
+        const dt = new Date(year, month, 1);
+        const y = dt.getFullYear();
+        const m = dt.getMonth();
+        const lastDay = new Date(y, m + 1, 0).getDate();
+        return {
+          start: `${y}-${pad2(m + 1)}-01`,
+          end: `${y}-${pad2(m + 1)}-${pad2(lastDay)}`,
+        };
+      };
+
+      const threeMonthRanges = [
+        getMonthRange(nowD.getFullYear(), nowD.getMonth() - 1),
+        getMonthRange(nowD.getFullYear(), nowD.getMonth()),
+        getMonthRange(nowD.getFullYear(), nowD.getMonth() + 1),
+      ];
+
+      const rangesToPreload = threeMonthRanges.filter(r => r.start !== reqStart || r.end !== reqEnd);
+
+      if (rangesToPreload.length > 0) {
+        await Promise.all(rangesToPreload.map(async (r) => {
           try {
-            const bgParams = new URLSearchParams({ start: currentMonthRange.start, end: currentMonthRange.end });
+            const bgParams = new URLSearchParams({ start: r.start, end: r.end });
             const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
             if (bgRes.ok) {
               const bgJson = await bgRes.json();
-              await saveCache(`leader_data_${currentMonthRange.start}_${currentMonthRange.end}`, bgJson);
+              await saveCache(`leader_data_${r.start}_${r.end}`, bgJson);
             }
-          } catch (e) {}
-        })();
+          } catch (e) {
+            console.warn(`Could not preload leader range ${r.start}..${r.end}:`, e);
+          }
+        }));
       }
 
       touchOfflineSession();
@@ -769,13 +784,24 @@ export default function LeaderDashboard() {
       {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
         <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
               {pendingQueueCount > 0 && (
                 <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
                   В очереди изменений: {pendingQueueCount}
                 </span>
               )}
+              {isOffline && cacheUpdatedAt && (() => {
+                const d = new Date(cacheUpdatedAt);
+                const pad = (n) => String(n).padStart(2, '0');
+                const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+                const isOlder24h = (Date.now() - cacheUpdatedAt) > 24 * 60 * 60 * 1000;
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${isOlder24h ? 'bg-red-700 text-white border border-red-400' : 'bg-amber-600/90 text-amber-50'}`}>
+                    Данные сохранены: {timeStr}{isOlder24h ? ' (старше 24 ч)' : ''}
+                  </span>
+                );
+              })()}
             </div>
             {pendingQueueCount > 0 && (
               <button

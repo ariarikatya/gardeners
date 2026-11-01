@@ -355,6 +355,7 @@ export default function AdminDashboard() {
   const [tableScale, setTableScale] = useState(1);
   const [dayComments, setDayComments] = useState([]);
   const [isStaleOfflineData, setIsStaleOfflineData] = useState(false);
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
   const [activeCommentPopup, setActiveCommentPopup] = useState(null);
 
   // Добавление / редактирование садовника
@@ -946,15 +947,25 @@ export default function AdminDashboard() {
         return;
       }
 
-      let cachedOrders = (await getCache(canonicalOrdersKey))?.data;
+      const getLocalYearMonth = (dateVal) => {
+        if (!dateVal) return '';
+        const d = new Date(dateVal);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      const cachedOrdersObj = await getCache(canonicalOrdersKey);
+      let cachedOrders = cachedOrdersObj?.data;
       let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
       let isStale = false;
+      let cacheTs = cachedOrdersObj?.updatedAt || null;
 
       if (!cachedOrders) {
-        // Fallback to generic cumulative admin_orders with stale warning flag if month is absent
-        const allCumulative = (await getCache('admin_orders'))?.data || [];
-        // Extract orders matching this month if present
-        const monthOrders = allCumulative.filter(o => o.date && o.date.startsWith(monthKey));
+        const cumulativeObj = await getCache('admin_orders');
+        const allCumulative = cumulativeObj?.data || [];
+        if (!cacheTs && cumulativeObj?.updatedAt) cacheTs = cumulativeObj.updatedAt;
+
+        const monthOrders = allCumulative.filter(o => o.date && getLocalYearMonth(o.date) === monthKey);
         if (monthOrders.length > 0) {
           cachedOrders = monthOrders;
         } else if (allCumulative.length > 0) {
@@ -964,7 +975,7 @@ export default function AdminDashboard() {
       }
       if (!cachedDayComments) {
         const allComments = (await getCache('admin_day_comments'))?.data || [];
-        cachedDayComments = allComments.filter(c => c.date && c.date.startsWith(monthKey));
+        cachedDayComments = allComments.filter(c => c.date && getLocalYearMonth(c.date) === monthKey);
       }
 
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
@@ -974,6 +985,7 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
+      if (cacheTs) setCacheUpdatedAt(cacheTs);
       setIsStaleOfflineData(isStale);
       setGardeners(cachedGardeners);
       setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
@@ -1069,22 +1081,20 @@ export default function AdminDashboard() {
         },
       ];
 
-      (async () => {
-        for (const adj of adjacentMonths) {
-          try {
-            const adjRes = await apiFetch(`/api/admin/orders?start=${encodeURIComponent(adj.start.toISOString())}&end=${encodeURIComponent(adj.end.toISOString())}`);
-            if (adjRes.ok) {
-              const adjData = await adjRes.json();
-              if (adjData.orders) {
-                await saveCache(`admin_orders_${adj.key}`, adjData.orders);
-              }
-              if (adjData.dayComments) {
-                await saveCache(`admin_day_comments_${adj.key}`, adjData.dayComments);
-              }
-            }
-          } catch (adjErr) {}
+      await Promise.all(adjacentMonths.map(async (adj) => {
+        try {
+          const adjRes = await apiFetch(`/api/admin/orders?start=${encodeURIComponent(adj.start.toISOString())}&end=${encodeURIComponent(adj.end.toISOString())}`);
+          if (adjRes.ok) {
+            const adjData = await adjRes.json();
+            await Promise.all([
+              adjData.orders ? saveCache(`admin_orders_${adj.key}`, adjData.orders) : Promise.resolve(),
+              adjData.dayComments ? saveCache(`admin_day_comments_${adj.key}`, adjData.dayComments) : Promise.resolve(),
+            ]);
+          }
+        } catch (adjErr) {
+          console.warn(`Could not preload adjacent month ${adj.key}:`, adjErr);
         }
-      })();
+      }));
 
       touchOfflineSession();
       await requestStoragePersistence().catch(() => {});
@@ -1094,13 +1104,25 @@ export default function AdminDashboard() {
       console.warn('Network error during fetchData, using cached offline data:', e);
       setIsOffline(true);
 
-      let cachedOrders = (await getCache(canonicalOrdersKey))?.data;
+      const getLocalYearMonth = (dateVal) => {
+        if (!dateVal) return '';
+        const d = new Date(dateVal);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      const cachedOrdersObj = await getCache(canonicalOrdersKey);
+      let cachedOrders = cachedOrdersObj?.data;
       let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
       let isStale = false;
+      let cacheTs = cachedOrdersObj?.updatedAt || null;
 
       if (!cachedOrders) {
-        const allCumulative = (await getCache('admin_orders'))?.data || [];
-        const monthOrders = allCumulative.filter(o => o.date && o.date.startsWith(monthKey));
+        const cumulativeObj = await getCache('admin_orders');
+        const allCumulative = cumulativeObj?.data || [];
+        if (!cacheTs && cumulativeObj?.updatedAt) cacheTs = cumulativeObj.updatedAt;
+
+        const monthOrders = allCumulative.filter(o => o.date && getLocalYearMonth(o.date) === monthKey);
         if (monthOrders.length > 0) {
           cachedOrders = monthOrders;
         } else if (allCumulative.length > 0) {
@@ -1110,7 +1132,7 @@ export default function AdminDashboard() {
       }
       if (!cachedDayComments) {
         const allComments = (await getCache('admin_day_comments'))?.data || [];
-        cachedDayComments = allComments.filter(c => c.date && c.date.startsWith(monthKey));
+        cachedDayComments = allComments.filter(c => c.date && getLocalYearMonth(c.date) === monthKey);
       }
 
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
@@ -1120,6 +1142,7 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
+      if (cacheTs) setCacheUpdatedAt(cacheTs);
       setIsStaleOfflineData(isStale);
       setGardeners(cachedGardeners);
       setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
@@ -2536,13 +2559,24 @@ export default function AdminDashboard() {
       {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
         <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
               {pendingQueueCount > 0 && (
                 <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
                   В очереди изменений: {pendingQueueCount}
                 </span>
               )}
+              {isOffline && cacheUpdatedAt && (() => {
+                const d = new Date(cacheUpdatedAt);
+                const pad = (n) => String(n).padStart(2, '0');
+                const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+                const isOlder24h = (Date.now() - cacheUpdatedAt) > 24 * 60 * 60 * 1000;
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${isOlder24h ? 'bg-red-700 text-white border border-red-400' : 'bg-amber-600/90 text-amber-50'}`}>
+                    Данные сохранены: {timeStr}{isOlder24h ? ' (старше 24 ч)' : ''}
+                  </span>
+                );
+              })()}
             </div>
             {pendingQueueCount > 0 && (
               <button

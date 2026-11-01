@@ -194,7 +194,9 @@ export default function GardenerDashboard() {
   const formatLastUpdated = (timestamp) => {
     if (!timestamp) return null;
     const d = new Date(timestamp);
-    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    if (isNaN(d.getTime())) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
   };
 
   const applyQueueToOrders = (ordersList, queueItems) => {
@@ -1817,7 +1819,14 @@ export default function GardenerDashboard() {
       {/* Оффлайн баннер */}
       {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
         <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
-          <span>⚉ Офлайн-режим: показаны сохранённые данные {lastCacheTime ? `от ${lastCacheTime}` : ''}</span>
+          <span>⚉ Офлайн-режим: показаны сохранённые данные</span>
+          {lastCacheTime && (() => {
+            return (
+              <span className="bg-amber-600/90 text-amber-50 px-2 py-0.5 rounded-full text-[11px] font-medium">
+                Данные сохранены: {lastCacheTime}
+              </span>
+            );
+          })()}
           {queueCount > 0 && <span>(в очереди: {queueCount})</span>}
         </div>
       )}
