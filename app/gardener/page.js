@@ -284,6 +284,9 @@ export default function GardenerDashboard() {
       setQueuedClaimIds(claimIds);
     } catch (e) {
       console.error('Error loading offline cache:', e);
+    } finally {
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
     }
   };
 
@@ -406,6 +409,8 @@ export default function GardenerDashboard() {
     } catch (e) {
       console.error('fetchOrders network error:', e);
       setIsOffline(true);
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
     } finally {
       if (!silent) setLoading(false);
     }
@@ -435,7 +440,9 @@ export default function GardenerDashboard() {
           });
         }
         setDayComments(map);
-        saveCache('day_comments', map);
+        await saveCache('day_comments', map);
+        touchOfflineSession();
+        await requestStoragePersistence().catch(() => {});
       }
     } catch (e) {
       console.warn('fetchDayComments error, checking cache:', e);
@@ -445,6 +452,8 @@ export default function GardenerDashboard() {
           setDayComments(cached.data);
         }
       } catch (cErr) {}
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
     }
   };
 

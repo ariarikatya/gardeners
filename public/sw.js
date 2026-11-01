@@ -609,6 +609,24 @@ self.addEventListener('message', (event) => {
     return;
   }
 
+  if (event.data.type === 'CLEAR_ALL_CACHES') {
+    const promise = (async () => {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys
+            .filter((k) => k !== OFFLINE_DATA_CACHE)
+            .map((k) => caches.delete(k))
+        );
+      } catch (e) {
+        console.warn('[sw] Error in CLEAR_ALL_CACHES:', e);
+      }
+    })();
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
   if (event.data.type === 'SET_CACHE_NAME' && event.data.cacheName) {
     CACHE_NAME = event.data.cacheName.startsWith('anemon-agro-') ? event.data.cacheName : `anemon-agro-${event.data.cacheName}`;
     reply(true);

@@ -29,15 +29,6 @@ export default function ServiceWorkerRegister() {
     const cleanLegacyWorkersAndCaches = async () => {
       try {
         const expectedVersionParam = `v=${encodeURIComponent(CLIENT_VERSION)}`;
-        if ('serviceWorker' in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          for (const reg of registrations) {
-            const scriptUrl = reg.active?.scriptURL || reg.installing?.scriptURL || reg.waiting?.scriptURL || '';
-            if (scriptUrl && !scriptUrl.includes(expectedVersionParam)) {
-              await reg.unregister();
-            }
-          }
-        }
         if ('caches' in window) {
           const keys = await caches.keys();
           for (const key of keys) {
