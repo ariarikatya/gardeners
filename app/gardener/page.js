@@ -2,6 +2,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
+import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
+import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
+import PhotoViewer from '@/components/PhotoViewer';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -180,6 +183,19 @@ export default function GardenerDashboard() {
   const [dayCommentInput, setDayCommentInput] = useState('');
   const [savingDayComment, setSavingDayComment] = useState(false);
 
+  // Полноэкранный просмотр фото
+  const [viewerImages, setViewerImages] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  const openViewer = (images, index = 0) => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setViewerImages(list);
+    setViewerIndex(index);
+    setIsViewerOpen(true);
+  };
+
   const ensureFreshUsersList = async () => {
     if (typeof window === 'undefined' || !navigator.onLine) return;
     try {
@@ -267,7 +283,21 @@ export default function GardenerDashboard() {
       }
 
       if (cachedOpsObj && cachedOpsObj.data) {
-        setOperations(cachedOpsObj.data || []);
+        const rawOps = cachedOpsObj.data || [];
+        // Добавляем несинхронизированные траты из очереди
+        const pendingExpenses = (pendingQueue || [])
+          .filter(i => i.actionType === 'EXPENSE_POST' && i.payload)
+          .map(i => ({
+            id: 'pending_' + (i.id || Math.random().toString(36).slice(2)),
+            type: 'expense',
+            amount: Number(i.payload.amount || 0),
+            description: i.payload.description || '',
+            receiptUrl: i.payload.receiptUrl || null,
+            approved: false,
+            createdAt: i.createdAt ? new Date(i.createdAt).toISOString() : new Date().toISOString(),
+            isPendingSync: true,
+          }));
+        setOperations([...pendingExpenses, ...rawOps]);
       }
 
       if (cachedAuctionObj && cachedAuctionObj.data) {
@@ -1592,20 +1622,23 @@ export default function GardenerDashboard() {
                         </a>
                       );
                     }
+                    const allPhotoUrls = mediaList
+                      .filter(m => !(m.type === 'video' || (m.url && m.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i))))
+                      .map(m => m.url);
+                    const photoIdx = allPhotoUrls.indexOf(item.url);
                     return (
-                      <a
+                      <button
+                        type="button"
                         key={idx}
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block"
+                        onClick={() => openViewer(allPhotoUrls, Math.max(0, photoIdx))}
+                        className="block text-left"
                       >
                         <img
                           src={item.url}
                           alt={item.name || `Материал ${idx + 1}`}
-                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 shadow-sm hover:opacity-90 transition-opacity"
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 shadow-sm hover:opacity-90 transition-opacity cursor-pointer"
                         />
-                      </a>
+                      </button>
                     );
                   })}
                 </div>
@@ -1937,7 +1970,9 @@ export default function GardenerDashboard() {
                             <div className="flex flex-wrap gap-2 items-center">
                               {imgList.map((imgUrl, pIdx) => (
                                 <div key={pIdx} className="relative group">
-                                  <img src={imgUrl} alt={`${work.title} ${pIdx+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
+                                  <button type="button" onClick={() => openViewer(imgList, pIdx)} className="block">
+                                    <img src={imgUrl} alt={`${work.title} ${pIdx+1}`} className="w-20 h-20 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -2049,7 +2084,9 @@ export default function GardenerDashboard() {
                       <div className="flex flex-wrap gap-2">
                         {newWorkImages.map((img, i) => (
                           <div key={i} className="relative">
-                            <img src={img} alt="Предпросмотр" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <button type="button" onClick={() => openViewer(newWorkImages, i)} className="block">
+                              <img src={img} alt="Предпросмотр" className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => setNewWorkImages(newWorkImages.filter((_, idx) => idx !== i))}
@@ -2218,20 +2255,23 @@ export default function GardenerDashboard() {
                                       </a>
                                     );
                                   }
+                                  const allAuctionPhotoUrls = mediaList
+                                    .filter(m => !(m.type === 'video' || (m.url && m.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i))))
+                                    .map(m => m.url);
+                                  const pIdx = allAuctionPhotoUrls.indexOf(item.url);
                                   return (
-                                    <a
+                                    <button
+                                      type="button"
                                       key={idx}
-                                      href={item.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="block"
+                                      onClick={() => openViewer(allAuctionPhotoUrls, Math.max(0, pIdx))}
+                                      className="block text-left"
                                     >
                                       <img
                                         src={item.url}
                                         alt={item.name || `Материал ${idx + 1}`}
-                                        className="w-16 h-16 object-cover rounded-lg border border-slate-300 shadow-sm hover:opacity-90 transition-opacity"
+                                        className="w-16 h-16 object-cover rounded-lg border border-slate-300 shadow-sm hover:opacity-90 transition-opacity cursor-pointer"
                                       />
-                                    </a>
+                                    </button>
                                   );
                                 })}
                               </div>
@@ -2338,7 +2378,9 @@ export default function GardenerDashboard() {
                   <div className="flex items-center gap-2 mt-1">
                     {expenseReceiptUrl ? (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <img src={expenseReceiptUrl} alt="Чек" className="w-16 h-16 object-cover rounded border" />
+                        <button type="button" onClick={() => openViewer(expenseReceiptUrl)} className="block">
+                          <img src={expenseReceiptUrl} alt="Чек" className="w-16 h-16 object-cover rounded border cursor-pointer" />
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -2438,31 +2480,90 @@ export default function GardenerDashboard() {
             </div>
 
             <div>
-              <div className="text-sm text-slate-600 mb-2">Ваши траты в период</div>
-              {operations.filter(o => o.type === 'expense').length === 0 ? (
-                <div className="text-sm text-slate-400">Трат нет</div>
-              ) : (
-                <>
-                  <ul className="space-y-2 max-h-40 overflow-auto">
-                    {operations.filter(o => o.type === 'expense').map(op => (
-                      <li key={op.id} className="border rounded p-2 flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-medium">{op.description || 'Трата'} — {formatMoney(op.amount)}</div>
-                          <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
-                          {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-700">Открыть чек</a>}
-                        </div>
-                        <div className="text-xs">
-                          {op.approved ? <span className="text-emerald-700">Утверждён {op.approvedAmount ? `на ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-slate-500">В ожидании</span>}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-800">
-                    <span>Итого трат:</span>
-                    <span>{formatMoney(operations.filter(o => o.type === 'expense').reduce((sum, o) => sum + Number(o.amount || 0), 0))}</span>
-                  </div>
-                </>
-              )}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold text-slate-700">Все ваши траты</div>
+                <span className="text-xs text-slate-400">за всё время</span>
+              </div>
+              {(() => {
+                const allExpenses = operations
+                  .filter(o => o.type === 'expense')
+                  .slice()
+                  .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+                if (allExpenses.length === 0) {
+                  return <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">Трат пока нет</div>;
+                }
+
+                // Группировка по месяцам
+                const groupedByMonth = {};
+                allExpenses.forEach((op) => {
+                  const d = new Date(op.createdAt || Date.now());
+                  const monthName = MONTH_LABELS[d.getMonth()] || '';
+                  const yearVal = d.getFullYear();
+                  const key = `${monthName} ${yearVal}`;
+                  if (!groupedByMonth[key]) groupedByMonth[key] = [];
+                  groupedByMonth[key].push(op);
+                });
+
+                const totalExpensesSum = allExpenses.reduce((sum, o) => sum + Number(o.amount || 0), 0);
+
+                return (
+                  <>
+                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                      {Object.entries(groupedByMonth).map(([monthLabel, items]) => {
+                        const monthSum = items.reduce((s, o) => s + Number(o.amount || 0), 0);
+                        return (
+                          <div key={monthLabel} className="bg-slate-50 rounded-xl p-2.5 border border-slate-200">
+                            <div className="flex items-center justify-between text-xs font-bold text-slate-600 mb-1.5 pb-1 border-b border-slate-200">
+                              <span>📅 {monthLabel}</span>
+                              <span className="text-emerald-800">{formatMoney(monthSum)}</span>
+                            </div>
+                            <ul className="space-y-1.5">
+                              {items.map(op => (
+                                <li key={op.id} className="bg-white rounded-lg p-2 border border-slate-200 shadow-xs flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-slate-800 truncate">
+                                      {op.description || 'Трата'} — <span className="text-emerald-700">{formatMoney(op.amount)}</span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-400">
+                                      {new Date(op.createdAt).toLocaleString('ru-RU')}
+                                      {op.isPendingSync && <span className="ml-1.5 text-amber-600 font-medium">⏳ ожидает отправки</span>}
+                                    </div>
+                                    {op.receiptUrl && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openViewer(op.receiptUrl)}
+                                        className="text-[11px] text-emerald-700 underline font-medium cursor-pointer"
+                                      >
+                                        Посмотреть чек
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div className="text-right flex-shrink-0 text-[11px]">
+                                    {op.approved ? (
+                                      <span className="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                        Утверждён {op.approvedAmount ? `(${formatMoney(op.approvedAmount)})` : ''}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                        В ожидании
+                                      </span>
+                                    )}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-800">
+                      <span>Итого трат за всё время:</span>
+                      <span className="text-emerald-700">{formatMoney(totalExpensesSum)}</span>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -2678,10 +2779,16 @@ export default function GardenerDashboard() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «До»</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoBeforeItems.map((item) => (
+                      {photoBeforeItems.map((item, itemIdx) => (
                         <div key={item.id} className="relative group flex flex-col items-center">
                           <div className="relative">
-                            <img src={item.url} alt="До" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <button
+                              type="button"
+                              onClick={() => openViewer(photoBeforeItems.map(x => x.url), itemIdx)}
+                              className="block"
+                            >
+                              <img src={item.url} alt="До" className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => setPhotoBeforeItems(prev => prev.filter(x => x.id !== item.id))}
@@ -2727,10 +2834,16 @@ export default function GardenerDashboard() {
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото «После»</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoAfterItems.map((item) => (
+                      {photoAfterItems.map((item, itemIdx) => (
                         <div key={item.id} className="relative group flex flex-col items-center">
                           <div className="relative">
-                            <img src={item.url} alt="После" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                            <button
+                              type="button"
+                              onClick={() => openViewer(photoAfterItems.map(x => x.url), itemIdx)}
+                              className="block"
+                            >
+                              <img src={item.url} alt="После" className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => setPhotoAfterItems(prev => prev.filter(x => x.id !== item.id))}
@@ -2776,7 +2889,18 @@ export default function GardenerDashboard() {
 
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Фото акта / документа</label>
                     <div className="flex flex-wrap gap-2 items-center mb-2">
-                      {photoActUrls.map((url, index) => <div key={url || index} className="relative"><img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button></div>)}
+                      {photoActUrls.map((url, index) => (
+                        <div key={url || index} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => openViewer(photoActUrls, index)}
+                            className="block"
+                          >
+                            <img src={url} alt={`Акт ${index + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                          </button>
+                          <button type="button" onClick={() => setPhotoActUrls(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 text-xs border">×</button>
+                        </div>
+                      ))}
                       <button
                         type="button"
                         onClick={(e) => {
@@ -2863,6 +2987,17 @@ export default function GardenerDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      <InstallNotificationsGuideModal />
+      <EnablePushOnPwaModal />
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
+        />
       )}
     </div>
   );

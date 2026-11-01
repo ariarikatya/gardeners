@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import PhotoViewer from '@/components/PhotoViewer';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { compressImage } from '@/lib/imageCompress';
 
@@ -17,6 +18,19 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
   const [items, setItems] = useState(parseItems(gardener[type]));
   const [uploading, setUploading] = useState(false);
   const [catalogItems, setCatalogItems] = useState([]);
+
+  // Полноэкранный просмотр фото
+  const [viewerImages, setViewerImages] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  const openViewer = (images, index = 0) => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setViewerImages(list);
+    setViewerIndex(index);
+    setIsViewerOpen(true);
+  };
   const [pendingUploads, setPendingUploads] = useState([]); // Array of { base64, callbackKey, loading, retryable, error }
 
   useEffect(() => {
@@ -265,7 +279,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                         <div className="flex items-center gap-3">
                           {item.image ? (
                             <div className="relative group">
-                              <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                              <button type="button" onClick={() => openViewer(item.image)} className="block">
+                                <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0 cursor-pointer" />
+                              </button>
                               <button
                                 onClick={() => setItems(items.map((it, i) => i === idx ? { ...it, image: null } : it))}
                                 className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
@@ -290,7 +306,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                         <div className="flex items-center gap-3">
                           {item.image ? (
                             <div className="relative group">
-                              <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                              <button type="button" onClick={() => openViewer(item.image)} className="block">
+                                <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0 cursor-pointer" />
+                              </button>
                               <button
                                 onClick={() => setItems(items.map((it, i) => i === idx ? { ...it, image: null } : it))}
                                 className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow"
@@ -323,7 +341,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                           <div className="flex flex-wrap gap-2 items-center">
                             {workImgList.map((img, photoIdx) => (
                               <div key={photoIdx} className="relative group">
-                                <img src={img} alt={`${item.title} ${photoIdx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                                <button type="button" onClick={() => openViewer(workImgList, photoIdx)} className="block">
+                                  <img src={img} alt={`${item.title} ${photoIdx+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 flex-shrink-0 cursor-pointer" />
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteWorkPhoto(idx, photoIdx)}
@@ -469,7 +489,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
               <div className="flex items-center gap-2">
                 {invImage && (
                   <div className="relative">
-                    <img src={invImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                    <button type="button" onClick={() => openViewer(invImage)} className="block">
+                      <img src={invImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                    </button>
                     <button type="button" onClick={() => setInvImage('')} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
                   </div>
                 )}
@@ -524,7 +546,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
               <div className="flex items-center gap-2">
                 {prepImage && (
                   <div className="relative">
-                    <img src={prepImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                    <button type="button" onClick={() => openViewer(prepImage)} className="block">
+                      <img src={prepImage} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                    </button>
                     <button type="button" onClick={() => setPrepImage('')} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
                   </div>
                 )}
@@ -552,7 +576,9 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
                   <div className="flex flex-wrap gap-2">
                     {workImages.map((img, i) => (
                       <div key={i} className="relative">
-                        <img src={img} alt={`Предпросмотр ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                        <button type="button" onClick={() => openViewer(workImages, i)} className="block">
+                          <img src={img} alt={`Предпросмотр ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                        </button>
                         <button type="button" onClick={() => setWorkImages(workImages.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center shadow">✕</button>
                       </div>
                     ))}
@@ -624,6 +650,14 @@ export default function GardenerModalEditor({ gardener, type, onClose, onSave })
           </button>
         </div>
       </div>
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
+        />
+      )}
     </div>
   );
 }

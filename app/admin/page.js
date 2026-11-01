@@ -3,6 +3,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import PushButton from '@/components/PushButton';
+import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
+import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
+import PhotoViewer from '@/components/PhotoViewer';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -331,6 +334,19 @@ export default function AdminDashboard() {
   // Оффлайн состояние и очередь
   const [isOffline, setIsOffline] = useState(false);
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
+
+  // Полноэкранный просмотр фото
+  const [viewerImages, setViewerImages] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  const openViewer = (images, index = 0) => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setViewerImages(list);
+    setViewerIndex(index);
+    setIsViewerOpen(true);
+  };
   const pendingCountRef = useRef(0);
   const [conflictItems, setConflictItems] = useState([]);
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -3888,46 +3904,59 @@ export default function AdminDashboard() {
                 {selectedOrder && selectedOrder.status === 'Выполнен' && (selectedOrder.photoBefore || selectedOrder.photoAfter || selectedOrder.photoAct) && (
                   <div className="mb-4">
                     <div className="text-xs font-semibold text-slate-500 mb-2">Фотоотчёт садовника:</div>
-                    <div className="flex gap-2">
-                      {(() => {
-                        const before = selectedOrder.photoBefore && String(selectedOrder.photoBefore).trim();
-                        try {
-                          const arr = before && before.startsWith('[') ? JSON.parse(before) : before ? [before] : [];
-                          return arr.map((u, i) => (
-                            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                              <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                              <span className="text-[10px] text-slate-400">До</span>
-                            </a>
-                          ));
-                        } catch (e) { return null; }
-                      })()}
+                    {(() => {
+                      const parseArr = (val) => {
+                        const s = val && String(val).trim();
+                        try { return s && s.startsWith('[') ? JSON.parse(s) : s ? [s] : []; } catch (e) { return []; }
+                      };
+                      const beforeArr = parseArr(selectedOrder.photoBefore);
+                      const afterArr = parseArr(selectedOrder.photoAfter);
+                      const actArr = parseArr(selectedOrder.photoAct);
+                      const allReportPhotos = [...beforeArr, ...afterArr, ...actArr];
 
-                      {(() => {
-                        const after = selectedOrder.photoAfter && String(selectedOrder.photoAfter).trim();
-                        try {
-                          const arr = after && after.startsWith('[') ? JSON.parse(after) : after ? [after] : [];
-                          return arr.map((u, i) => (
-                            <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block">
-                              <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
-                              <span className="text-[10px] text-slate-400">После</span>
-                            </a>
-                          ));
-                        } catch (e) { return null; }
-                      })()}
+                      return (
+                        <div className="flex flex-wrap gap-2">
+                          {beforeArr.map((u, i) => {
+                            const globalIdx = allReportPhotos.indexOf(u);
+                            return (
+                              <button key={`before_${i}`} type="button" onClick={() => openViewer(allReportPhotos, Math.max(0, globalIdx))} className="block text-left">
+                                <img src={u} alt={`До ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                                <span className="text-[10px] text-slate-400">До</span>
+                              </button>
+                            );
+                          })}
 
-                      {(() => {
-                        const act = selectedOrder.photoAct && String(selectedOrder.photoAct).trim();
-                        try {
-                          const arr = act && act.startsWith('[') ? JSON.parse(act) : act ? [act] : [];
-                          return arr.map((u, i) => <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="block"><img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200" /><span className="text-[10px] text-slate-400">Акт</span></a>);
-                        } catch (e) { return null; }
-                      })()}
-                    </div>
+                          {afterArr.map((u, i) => {
+                            const globalIdx = allReportPhotos.indexOf(u);
+                            return (
+                              <button key={`after_${i}`} type="button" onClick={() => openViewer(allReportPhotos, Math.max(0, globalIdx))} className="block text-left">
+                                <img src={u} alt={`После ${i+1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                                <span className="text-[10px] text-slate-400">После</span>
+                              </button>
+                            );
+                          })}
+
+                          {actArr.map((u, i) => {
+                            const globalIdx = allReportPhotos.indexOf(u);
+                            return (
+                              <button key={`act_${i}`} type="button" onClick={() => openViewer(allReportPhotos, Math.max(0, globalIdx))} className="block text-left">
+                                <img src={u} alt={`Акт ${i + 1}`} className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                                <span className="text-[10px] text-slate-400">Акт</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
                 {selectedOrder && selectedOrder.orderMedia && (() => {
                   const mediaList = parseOrderMedia(selectedOrder.orderMedia);
                   if (mediaList.length === 0) return null;
+                  const photoList = mediaList
+                    .filter(m => !(m.type === 'video' || (m.url && m.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i))))
+                    .map(m => m.url);
+
                   return (
                     <div className="mb-4">
                       <div className="text-xs font-semibold text-slate-500 mb-2">📁 Материалы от диспетчера ({mediaList.length}):</div>
@@ -3948,20 +3977,20 @@ export default function AdminDashboard() {
                               </a>
                             );
                           }
+                          const photoIdx = photoList.indexOf(item.url);
                           return (
-                            <a
+                            <button
                               key={idx}
-                              href={item.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block"
+                              type="button"
+                              onClick={() => openViewer(photoList, Math.max(0, photoIdx))}
+                              className="block text-left"
                             >
                               <img
                                 src={item.url}
                                 alt={item.name || `Медиа ${idx + 1}`}
-                                className="w-16 h-16 object-cover rounded-lg border border-slate-200"
+                                className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer"
                               />
-                            </a>
+                            </button>
                           );
                         })}
                       </div>
@@ -4261,6 +4290,16 @@ export default function AdminDashboard() {
             )}
           </div>
         </div>
+      )}
+      <InstallNotificationsGuideModal />
+      <EnablePushOnPwaModal />
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
+        />
       )}
     </div>
   );

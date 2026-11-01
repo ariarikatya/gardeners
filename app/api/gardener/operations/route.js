@@ -33,9 +33,14 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const startRaw = searchParams.get('start');
   const endRaw = searchParams.get('end');
-  const { start, end } = getDateRange(startRaw, endRaw);
 
-  const ops = await prisma.operation.findMany({ where: { gardenerId, createdAt: { gte: start, lte: end } }, orderBy: { createdAt: 'desc' } });
+  const where = { gardenerId };
+  if (startRaw || endRaw) {
+    const { start, end } = getDateRange(startRaw, endRaw);
+    where.createdAt = { gte: start, lte: end };
+  }
+
+  const ops = await prisma.operation.findMany({ where, orderBy: { createdAt: 'desc' } });
   return NextResponse.json({ operations: ops });
 }
 
