@@ -357,6 +357,7 @@ export default function AdminDashboard() {
   const [isStaleOfflineData, setIsStaleOfflineData] = useState(false);
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
   const [activeCommentPopup, setActiveCommentPopup] = useState(null);
+  const [monthPreloadWarnings, setMonthPreloadWarnings] = useState([]);
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
@@ -1054,9 +1055,12 @@ export default function AdminDashboard() {
       comments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
       const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
 
+      // 1.3: Save canonical and cumulative cache immediately (incrementally) so data is on disk
       await Promise.all([
         saveCache(canonicalOrdersKey, allOrd),
         saveCache(canonicalCommentsKey, comments),
+      ]);
+      await Promise.all([
         saveCache('admin_orders', mergedOrders),
         saveCache('admin_day_comments', mergedComments),
         saveCache('admin_gardeners', dataG.gardeners || []),
@@ -1065,36 +1069,60 @@ export default function AdminDashboard() {
         saveCache('admin_blockedDays', dataB.blockedDays || []),
       ]);
 
-      // 1.3 & 2.1: Heartbeat for adjacent months (previous and next month)
+      // 1.3 & 2.1: Proactively fetch and await adjacent months with 1 retry and incremental save
       const prevMonthDate = new Date(year, month - 1, 1);
       const nextMonthDate = new Date(year, month + 1, 1);
       const adjacentMonths = [
         {
+          label: 'Предыдущий месяц',
           key: `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`,
           start: new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1, 0, 0, 0, 0),
           end: new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0, 23, 59, 59, 999),
         },
         {
+          label: 'Следующий месяц',
           key: `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, '0')}`,
           start: new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth(), 1, 0, 0, 0, 0),
           end: new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0, 23, 59, 59, 999),
         },
       ];
 
+      const failedWarnings = [];
       await Promise.all(adjacentMonths.map(async (adj) => {
+        const fetchAdj = async () => {
+          return apiFetch(`/api/admin/orders?start=${encodeURIComponent(adj.start.toISOString())}&end=${encodeURIComponent(adj.end.toISOString())}`);
+        };
+
+        let adjRes = null;
         try {
-          const adjRes = await apiFetch(`/api/admin/orders?start=${encodeURIComponent(adj.start.toISOString())}&end=${encodeURIComponent(adj.end.toISOString())}`);
-          if (adjRes.ok) {
+          adjRes = await fetchAdj();
+          if (!adjRes || !adjRes.ok) throw new Error('First attempt failed');
+        } catch (firstErr) {
+          // Retry 1 time on failure
+          try {
+            adjRes = await fetchAdj();
+          } catch (retryErr) {
+            adjRes = null;
+          }
+        }
+
+        if (adjRes && adjRes.ok) {
+          try {
             const adjData = await adjRes.json();
+            // Incremental save
             await Promise.all([
               adjData.orders ? saveCache(`admin_orders_${adj.key}`, adjData.orders) : Promise.resolve(),
               adjData.dayComments ? saveCache(`admin_day_comments_${adj.key}`, adjData.dayComments) : Promise.resolve(),
             ]);
+          } catch (e) {
+            failedWarnings.push(`${adj.label} не сохранён`);
           }
-        } catch (adjErr) {
-          console.warn(`Could not preload adjacent month ${adj.key}:`, adjErr);
+        } else {
+          failedWarnings.push(`${adj.label} не сохранён`);
         }
       }));
+
+      setMonthPreloadWarnings(failedWarnings);
 
       touchOfflineSession();
       await requestStoragePersistence().catch(() => {});
@@ -2577,6 +2605,11 @@ export default function AdminDashboard() {
                   </span>
                 );
               })()}
+              {monthPreloadWarnings.length > 0 && monthPreloadWarnings.map((msg, idx) => (
+                <span key={idx} className="bg-red-800 text-red-100 border border-red-400 px-2 py-0.5 rounded-full text-[11px] font-medium">
+                  ⚠️ {msg}
+                </span>
+              ))}
             </div>
             {pendingQueueCount > 0 && (
               <button
@@ -3029,45 +3062,58 @@ export default function AdminDashboard() {
                                 {(() => {
                                   const dateComments = dayComments.filter(c => c.date?.slice(0, 10) === dateStr);
                                   if (dateComments.length === 0) return null;
+                                  const isPopupOpen = activeCommentPopup?.dateStr === dateStr;
+
                                   return (
                                     <div className="flex flex-wrap gap-1 mt-1 relative">
-                                      {dateComments.map(c => {
-                                        const isPopupOpen = activeCommentPopup?.id === c.id;
-                                        return (
-                                          <div key={c.id} className="relative inline-block">
-                                            <button
-                                              type="button"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setActiveCommentPopup(isPopupOpen ? null : { ...c, dateStr });
-                                              }}
-                                              title={`${c.gardenerName || 'Садовник'}: ${c.text}`}
-                                              className="inline-flex items-center gap-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors"
-                                            >
-                                              💬 {c.gardenerName ? c.gardenerName.split(' ')[0] : ''}
-                                            </button>
-                                            {isPopupOpen && (
-                                              <div
-                                                id="active-comment-popup"
-                                                onClick={(e) => e.stopPropagation()}
-                                                className="absolute left-0 top-full mt-1 z-50 w-64 bg-slate-900 text-white rounded-xl p-2.5 shadow-xl border border-slate-700 text-left text-xs"
+                                      <div className="relative inline-block">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveCommentPopup(isPopupOpen ? null : { dateStr, comments: dateComments });
+                                          }}
+                                          title={`Комментарии дня: ${dateComments.length}`}
+                                          className="inline-flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors"
+                                        >
+                                          <span>💬</span>
+                                          {dateComments.length > 1 ? (
+                                            <span className="font-bold bg-emerald-700 text-white px-1 rounded-full text-[9px] leading-tight">
+                                              {dateComments.length}
+                                            </span>
+                                          ) : (
+                                            <span>{dateComments[0].gardenerName ? dateComments[0].gardenerName.split(' ')[0] : 'Садовник'}</span>
+                                          )}
+                                        </button>
+                                        {isPopupOpen && (
+                                          <div
+                                            id="active-comment-popup"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="absolute left-0 top-full mt-1 z-50 w-72 max-w-[85vw] bg-slate-900 text-white rounded-xl p-3 shadow-xl border border-slate-700 text-left text-xs max-h-80 overflow-y-auto"
+                                          >
+                                            <div className="flex items-center justify-between font-bold text-emerald-400 mb-2 pb-1 border-b border-slate-700">
+                                              <span>Комментарии ({dateStr}): {dateComments.length}</span>
+                                              <button
+                                                type="button"
+                                                onClick={() => setActiveCommentPopup(null)}
+                                                className="text-slate-400 hover:text-white font-normal px-1 text-sm"
                                               >
-                                                <div className="flex items-center justify-between font-bold text-emerald-400 mb-1">
-                                                  <span>{c.gardenerName || 'Садовник'} ({dateStr})</span>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setActiveCommentPopup(null)}
-                                                    className="text-slate-400 hover:text-white font-normal px-1"
-                                                  >
-                                                    ✕
-                                                  </button>
+                                                ✕
+                                              </button>
+                                            </div>
+                                            <div className="space-y-2">
+                                              {dateComments.map((c, idx) => (
+                                                <div key={c.id || idx} className="bg-slate-800/80 rounded-lg p-2 border border-slate-700/60">
+                                                  <div className="font-semibold text-emerald-300 text-[11px] mb-0.5">
+                                                    {c.gardenerName || 'Садовник'}
+                                                  </div>
+                                                  <div className="text-slate-200 leading-snug whitespace-pre-wrap text-[11px]">{c.text}</div>
                                                 </div>
-                                                <div className="text-slate-200 leading-snug whitespace-pre-wrap">{c.text}</div>
-                                              </div>
-                                            )}
+                                              ))}
+                                            </div>
                                           </div>
-                                        );
-                                      })}
+                                        )}
+                                      </div>
                                     </div>
                                   );
                                 })()}

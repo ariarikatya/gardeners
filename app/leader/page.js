@@ -355,16 +355,19 @@ export default function LeaderDashboard() {
       setCacheUpdatedAt(cachedRangeObj.updatedAt);
     }
 
-    // Check leader_data_latest ONLY if its period matches the requested dates
+    // Check leader_data_latest: if requested matches, or as self-healing fallback when cached is empty
     if (!cached) {
       const latestObj = await getCache('leader_data_latest');
-      if (latestObj && latestObj.data?.period) {
-        const latestStart = latestObj.data.period.start?.slice(0, 10);
-        const latestEnd = latestObj.data.period.end?.slice(0, 10);
+      if (latestObj && latestObj.data) {
+        const latestStart = latestObj.data.period?.start?.slice(0, 10);
+        const latestEnd = latestObj.data.period?.end?.slice(0, 10);
         if (latestStart === reqStart && latestEnd === reqEnd) {
           cached = latestObj.data;
-          if (latestObj.updatedAt) setCacheUpdatedAt(latestObj.updatedAt);
+        } else if (!latestStart || latestObj.data.orders?.length > 0 || latestObj.data.gardeners?.length > 0) {
+          // Self-healing fallback: extract data from latestObj rather than rendering empty screen
+          cached = latestObj.data;
         }
+        if (cached && latestObj.updatedAt) setCacheUpdatedAt(latestObj.updatedAt);
       }
     }
 

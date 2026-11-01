@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { clientLog } from '@/lib/clientLog';
 import { getQueue } from '@/lib/offlineQueue';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
+import { requestStoragePersistence } from '@/lib/offlineStore';
 
 export default function ServiceWorkerRegister() {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -54,6 +55,7 @@ export default function ServiceWorkerRegister() {
       const swUrl = `/sw.js?v=${encodeURIComponent(CLIENT_VERSION)}`;
       navigator.serviceWorker.register(swUrl, { scope: '/' })
         .then((reg) => {
+          requestStoragePersistence().catch(() => {});
           if (navigator.onLine) {
             try { reg.update(); } catch (e) {}
           }
