@@ -821,6 +821,84 @@ export default function AdminDashboard() {
     };
   }, []);
 
+  // Task 3: 60s background polling + visibilitychange/focus refresh for dayComments without full reload
+  useEffect(() => {
+    const refreshComments = async () => {
+      if (typeof window === 'undefined' || !navigator.onLine) return;
+      try {
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth();
+        const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+        const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const canonicalCommentsKey = `admin_day_comments_${monthKey}`;
+
+        const res = await apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.dayComments)) {
+            setDayComments(json.dayComments);
+            await saveCache(canonicalCommentsKey, json.dayComments);
+
+            const existingComments = (await getCache('admin_day_comments'))?.data || [];
+            const commentMap = new Map();
+            existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+            json.dayComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+            await saveCache('admin_day_comments', Array.from(commentMap.values()).slice(0, 3000));
+          }
+        }
+      } catch (e) {
+        console.warn('Background dayComments refresh error:', e);
+      }
+    };
+
+    const interval = setInterval(refreshComments, 60000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshComments();
+      }
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentMonth]);
+
+  // Task 3: Close active comment popup on outside click or Escape key
+  useEffect(() => {
+    if (!activeCommentPopup) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setActiveCommentPopup(null);
+      }
+    };
+
+    const handleClickOutside = (e) => {
+      const popupEl = document.getElementById('active-comment-popup');
+      if (popupEl && !popupEl.contains(e.target)) {
+        setActiveCommentPopup(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    // Use timeout so current click opening the popup doesn't immediately close it
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+    }, 0);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('click', handleClickOutside);
+      clearTimeout(timer);
+    };
+  }, [activeCommentPopup]);
+
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
     return !navigator.onLine;
@@ -2936,6 +3014,7 @@ export default function AdminDashboard() {
                                             </button>
                                             {isPopupOpen && (
                                               <div
+                                                id="active-comment-popup"
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="absolute left-0 top-full mt-1 z-50 w-64 bg-slate-900 text-white rounded-xl p-2.5 shadow-xl border border-slate-700 text-left text-xs"
                                               >
