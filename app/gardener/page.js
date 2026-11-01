@@ -7,6 +7,7 @@ import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
+import { useOnlineReload } from '@/lib/useOnlineReload';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -319,6 +320,12 @@ export default function GardenerDashboard() {
     return !navigator.onLine;
   };
 
+  useOnlineReload(async () => {
+    await fetchOrders(true);
+    await fetchDayComments();
+    await fetchAuction();
+  }, 1000);
+
   const fetchOrders = async (silent = false) => {
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
@@ -402,6 +409,12 @@ export default function GardenerDashboard() {
 
   const fetchDayComments = async () => {
     if (isOfflineSessionGuard()) {
+      try {
+        const cached = await getCache('day_comments');
+        if (cached && cached.data) {
+          setDayComments(cached.data);
+        }
+      } catch (e) {}
       return;
     }
     try {
@@ -421,7 +434,13 @@ export default function GardenerDashboard() {
         saveCache('day_comments', map);
       }
     } catch (e) {
-      console.warn('fetchDayComments error:', e);
+      console.warn('fetchDayComments error, checking cache:', e);
+      try {
+        const cached = await getCache('day_comments');
+        if (cached && cached.data) {
+          setDayComments(cached.data);
+        }
+      } catch (cErr) {}
     }
   };
 
@@ -494,7 +513,7 @@ export default function GardenerDashboard() {
         actionType: 'GARDENER_DAY_COMMENT_DELETE',
         url: `/api/gardener/day-comment?date=${encodeURIComponent(dateStr)}`,
         method: 'DELETE',
-        payload: { date: dateStr, id: existing.id },
+        payload: { date: dateStr },
         scope: 'gardener'
       });
       const q = await getQueue();
@@ -2473,6 +2492,19 @@ export default function GardenerDashboard() {
 
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
+        ) : isOffline && orders.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500 font-medium space-y-3">
+            <div className="text-4xl">📡</div>
+            <div className="text-base font-semibold text-slate-700">Данных в офлайне нет — подключитесь к интернету</div>
+            <p className="text-xs text-slate-400">При появлении сети данные загрузятся автоматически.</p>
+            <button
+              type="button"
+              onClick={() => fetchOrders()}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            >
+              🔄 Повторить попытку
+            </button>
+          </div>
         ) : orders.length === 0 ? (
           <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
         ) : viewMode === 'list' ? (

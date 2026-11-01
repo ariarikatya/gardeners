@@ -8,6 +8,7 @@ import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
+import { useOnlineReload } from '@/lib/useOnlineReload';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -347,6 +348,8 @@ export default function LeaderDashboard() {
     return !navigator.onLine;
   };
 
+  useOnlineReload(() => fetchData(startDate, endDate), 1000);
+
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
     const seq = ++fetchSeqRef.current;
     const reqStart = nextStart;
@@ -444,6 +447,7 @@ export default function LeaderDashboard() {
       }
 
       touchOfflineSession();
+      requestStoragePersistence().catch(() => {});
       setIsOffline(false);
     } catch (error) {
       console.warn('Network error in leader fetchData, trying cache:', error.message);
@@ -918,6 +922,19 @@ export default function LeaderDashboard() {
 
         {loading ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500">Загрузка данных...</div>
+        ) : isOffline && !data ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500 font-medium space-y-3">
+            <div className="text-4xl">📡</div>
+            <div className="text-base font-semibold text-slate-700">Данных в офлайне нет — подключитесь к интернету</div>
+            <p className="text-xs text-slate-400">При появлении сети данные загрузятся автоматически.</p>
+            <button
+              type="button"
+              onClick={() => fetchData(startDate, endDate)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            >
+              🔄 Повторить попытку
+            </button>
+          </div>
         ) : (
           <>
             <div style={{ fontSize: `${leaderScale}em` }} className="grid grid-cols-1 md:grid-cols-5 gap-2">

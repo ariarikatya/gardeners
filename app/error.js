@@ -33,11 +33,15 @@ export default function Error({ error, reset }) {
         if ('caches' in window) {
           const keys = await caches.keys();
           for (const key of keys) {
-            await caches.delete(key);
+            if (key !== 'anemon-agro-offline-data') {
+              await caches.delete(key);
+            }
           }
         }
         sessionStorage.clear();
-        localStorage.clear();
+        // Keep auth_phone, auth_role, phone_roles_map, offline_session; remove only volatile token
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_session_cached');
       }
     } catch (e) {
       console.error('Failed to clear caches:', e);

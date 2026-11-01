@@ -8,6 +8,7 @@ import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
+import { useOnlineReload } from '@/lib/useOnlineReload';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -828,18 +829,14 @@ export default function AdminDashboard() {
     const month = currentMonth.getMonth();
     const now = new Date();
 
-    let startOfMonth;
-    if (startFromToday && now.getFullYear() === year && now.getMonth() === month) {
-      startOfMonth = new Date(year, month, now.getDate(), 0, 0, 0, 0);
-    } else {
-      startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
-    }
-    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    // Canonical keys based on currentMonth (YYYY-MM), independent of startFromToday
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const canonicalOrdersKey = `admin_orders_${monthKey}`;
+    const canonicalCommentsKey = `admin_day_comments_${monthKey}`;
 
-    const startStr = startOfMonth.toISOString().slice(0, 10);
-    const endStr = endOfMonth.toISOString().slice(0, 10);
-    const rangeOrdersKey = `admin_orders_${startStr}_${endStr}`;
-    const rangeCommentsKey = `admin_day_comments_${startStr}_${endStr}`;
+    // Always fetch full month so switching startFromToday or navigating months in offline has all days
+    const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
@@ -866,22 +863,25 @@ export default function AdminDashboard() {
         return;
       }
 
-      let cachedOrders = (await getCache(rangeOrdersKey))?.data;
-      let cachedDayComments = (await getCache(rangeCommentsKey))?.data;
+      let cachedOrders = (await getCache(canonicalOrdersKey))?.data;
+      let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
       let isStale = false;
 
       if (!cachedOrders) {
-        // Fallback: check month key without startFromToday
-        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-        cachedOrders = (await getCache(`admin_orders_${monthKey}`))?.data;
-      }
-
-      if (!cachedOrders) {
-        // Fallback to generic admin_orders with stale warning flag
-        cachedOrders = (await getCache('admin_orders'))?.data || [];
-        if (cachedOrders && cachedOrders.length > 0) {
+        // Fallback to generic cumulative admin_orders with stale warning flag if month is absent
+        const allCumulative = (await getCache('admin_orders'))?.data || [];
+        // Extract orders matching this month if present
+        const monthOrders = allCumulative.filter(o => o.date && o.date.startsWith(monthKey));
+        if (monthOrders.length > 0) {
+          cachedOrders = monthOrders;
+        } else if (allCumulative.length > 0) {
+          cachedOrders = allCumulative;
           isStale = true;
         }
+      }
+      if (!cachedDayComments) {
+        const allComments = (await getCache('admin_day_comments'))?.data || [];
+        cachedDayComments = allComments.filter(c => c.date && c.date.startsWith(monthKey));
       }
 
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
@@ -944,9 +944,31 @@ export default function AdminDashboard() {
       setServices(dataS.services || []);
       setDayComments(comments);
 
-      saveCache(rangeOrdersKey, allOrd);
-      saveCache(rangeCommentsKey, comments);
-      saveCache('admin_orders', allOrd);
+      // 2.1 - 2.3: Save canonical month keys
+      saveCache(canonicalOrdersKey, allOrd);
+      saveCache(canonicalCommentsKey, comments);
+
+      // Save cumulative admin_orders merged by order.id (max 3000 items)
+      (async () => {
+        try {
+          const existingOrders = (await getCache('admin_orders'))?.data || [];
+          const orderMap = new Map();
+          existingOrders.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
+          allOrd.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
+          const mergedList = Array.from(orderMap.values())
+            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+            .slice(0, 3000);
+          await saveCache('admin_orders', mergedList);
+
+          const existingComments = (await getCache('admin_day_comments'))?.data || [];
+          const commentMap = new Map();
+          existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+          comments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+          const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
+          await saveCache('admin_day_comments', mergedComments);
+        } catch (cumErr) {}
+      })();
+
       saveCache('admin_gardeners', dataG.gardeners || []);
       saveCache('admin_services', dataS.services || []);
       saveCache('admin_dayOffs', dataD.dayOffs || []);
@@ -960,17 +982,23 @@ export default function AdminDashboard() {
       console.warn('Network error during fetchData, using cached offline data:', e);
       setIsOffline(true);
 
-      let cachedOrders = (await getCache(rangeOrdersKey))?.data;
-      let cachedDayComments = (await getCache(rangeCommentsKey))?.data;
+      let cachedOrders = (await getCache(canonicalOrdersKey))?.data;
+      let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
       let isStale = false;
 
       if (!cachedOrders) {
-        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-        cachedOrders = (await getCache(`admin_orders_${monthKey}`))?.data;
+        const allCumulative = (await getCache('admin_orders'))?.data || [];
+        const monthOrders = allCumulative.filter(o => o.date && o.date.startsWith(monthKey));
+        if (monthOrders.length > 0) {
+          cachedOrders = monthOrders;
+        } else if (allCumulative.length > 0) {
+          cachedOrders = allCumulative;
+          isStale = true;
+        }
       }
-      if (!cachedOrders) {
-        cachedOrders = (await getCache('admin_orders'))?.data || [];
-        if (cachedOrders && cachedOrders.length > 0) isStale = true;
+      if (!cachedDayComments) {
+        const allComments = (await getCache('admin_day_comments'))?.data || [];
+        cachedDayComments = allComments.filter(c => c.date && c.date.startsWith(monthKey));
       }
 
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
@@ -1065,6 +1093,8 @@ export default function AdminDashboard() {
       router.push('/login');
     }
   };
+
+  useOnlineReload(fetchData, 1000);
 
   const [syncing, setSyncing] = useState(false);
 
@@ -2768,7 +2798,20 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {isEmptyFilterResult ? (
+              {isOffline && orders.length === 0 && gardeners.length === 0 ? (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center text-slate-500 font-medium space-y-3">
+                  <div className="text-4xl">📡</div>
+                  <div className="text-base font-semibold text-slate-700">Данных в офлайне нет — подключитесь к интернету</div>
+                  <p className="text-xs text-slate-400">При появлении сети данные загрузятся автоматически.</p>
+                  <button
+                    type="button"
+                    onClick={() => fetchData()}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    🔄 Повторить попытку
+                  </button>
+                </div>
+              ) : isEmptyFilterResult ? (
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center text-slate-500 font-medium">
                   <div className="text-4xl mb-3">🔍</div>
                   <div className="text-base font-semibold text-slate-700 mb-1">По выбранным фильтрам ничего не найдено</div>

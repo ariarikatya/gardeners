@@ -40,7 +40,8 @@ export default function ServiceWorkerRegister() {
         if ('caches' in window) {
           const keys = await caches.keys();
           for (const key of keys) {
-            if (key.startsWith('anemon-agro-') && !key.includes(CLIENT_VERSION)) {
+            // Never delete persistent OFFLINE_DATA_CACHE ('anemon-agro-offline-data')
+            if (key.startsWith('anemon-agro-') && key !== 'anemon-agro-offline-data' && !key.includes(CLIENT_VERSION)) {
               await caches.delete(key);
             }
           }

@@ -14,10 +14,19 @@ async function checkGardener(req) {
 
 function parseDateOnly(dateStr) {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
+  const str = String(dateStr).trim().slice(0, 10);
+  const parts = str.split('-');
+  if (parts.length === 3) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+      return new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+    }
+  }
+  const dObj = new Date(dateStr);
+  if (isNaN(dObj.getTime())) return null;
+  return new Date(Date.UTC(dObj.getUTCFullYear(), dObj.getUTCMonth(), dObj.getUTCDate(), 0, 0, 0, 0));
 }
 
 export async function GET(req) {
