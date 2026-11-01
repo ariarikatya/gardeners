@@ -358,6 +358,7 @@ export default function AdminDashboard() {
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
   const [activeCommentPopup, setActiveCommentPopup] = useState(null);
   const [monthPreloadWarnings, setMonthPreloadWarnings] = useState([]);
+  const fetchSeqRef = useRef(0);
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
@@ -768,7 +769,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [currentMonth, startFromToday]);
+  }, [currentMonth]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && navigator.onLine) {
@@ -847,6 +848,8 @@ export default function AdminDashboard() {
             existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
             json.dayComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
             await saveCache('admin_day_comments', Array.from(commentMap.values()).slice(0, 3000));
+            touchOfflineSession();
+            await requestStoragePersistence().catch(() => {});
           }
         }
       } catch (e) {
@@ -907,6 +910,7 @@ export default function AdminDashboard() {
   };
 
   const fetchData = async () => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setMonthLoading(true);
 
@@ -923,38 +927,16 @@ export default function AdminDashboard() {
     const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
     const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
-    if (isOfflineSessionGuard()) {
-      setIsOffline(true);
-      const authPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
-      let storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
-      if (!storedRole) {
-        storedRole = await resolveOfflineRoleFromCaches(authPhone);
-        if (storedRole) {
-          activateOfflineSession(storedRole, authPhone);
-        }
-      }
-      if (!storedRole) {
-        if (navigator.onLine) window.location.assign('/login');
-        setLoading(false);
-        setMonthLoading(false);
-        return;
-      }
-      if (storedRole !== 'ADMIN') {
-        if (storedRole === 'LEADER' || storedRole === 'GARDENER') {
-          window.location.assign(storedRole === 'LEADER' ? '/leader' : '/gardener');
-        } else if (navigator.onLine) {
-          window.location.assign('/login');
-        }
-        return;
-      }
+    const getLocalYearMonth = (dateVal) => {
+      if (!dateVal) return '';
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
 
-      const getLocalYearMonth = (dateVal) => {
-        if (!dateVal) return '';
-        const d = new Date(dateVal);
-        if (isNaN(d.getTime())) return '';
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      };
-
+    // Instant cache display on month change: first show canonical-key; if absent, fall back to cumulative admin_orders
+    let hasImmediateCache = false;
+    try {
       const cachedOrdersObj = await getCache(canonicalOrdersKey);
       let cachedOrders = cachedOrdersObj?.data;
       let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
@@ -986,17 +968,50 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
-      if (cacheTs) setCacheUpdatedAt(cacheTs);
-      setIsStaleOfflineData(isStale);
-      setGardeners(cachedGardeners);
-      setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
-      setAuctionOrders((cachedOrders || []).filter(o => o.status === 'Аукцион' || o.wasAuction));
-      setDayOffs(cachedDayOffs);
-      setBlockedDays(cachedBlockedDays);
-      setServices(cachedServices);
-      setWebLeads(cachedWebLeads);
-      setDayComments(cachedDayComments || []);
-      if (cachedMe) setCurrentUser(cachedMe);
+      if (seq === fetchSeqRef.current && (cachedOrders || cachedGardeners.length > 0)) {
+        hasImmediateCache = true;
+        if (cacheTs) setCacheUpdatedAt(cacheTs);
+        setIsStaleOfflineData(isStale);
+        if (cachedGardeners.length > 0) setGardeners(cachedGardeners);
+        if (cachedOrders) {
+          setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
+          setAuctionOrders((cachedOrders || []).filter(o => o.status === 'Аукцион' || o.wasAuction));
+        }
+        if (cachedDayOffs.length > 0) setDayOffs(cachedDayOffs);
+        if (cachedBlockedDays.length > 0) setBlockedDays(cachedBlockedDays);
+        if (cachedServices.length > 0) setServices(cachedServices);
+        if (cachedWebLeads.length > 0) setWebLeads(cachedWebLeads);
+        if (cachedDayComments) setDayComments(cachedDayComments || []);
+        if (cachedMe) setCurrentUser(cachedMe);
+      }
+    } catch (cacheErr) {
+      console.warn('Error reading instant cache on month switch:', cacheErr);
+    }
+
+    if (isOfflineSessionGuard()) {
+      setIsOffline(true);
+      const authPhone = typeof window !== 'undefined' ? localStorage.getItem('auth_phone') : null;
+      let storedRole = typeof window !== 'undefined' ? localStorage.getItem('auth_role') : null;
+      if (!storedRole) {
+        storedRole = await resolveOfflineRoleFromCaches(authPhone);
+        if (storedRole) {
+          activateOfflineSession(storedRole, authPhone);
+        }
+      }
+      if (!storedRole) {
+        if (navigator.onLine) window.location.assign('/login');
+        setLoading(false);
+        setMonthLoading(false);
+        return;
+      }
+      if (storedRole !== 'ADMIN') {
+        if (storedRole === 'LEADER' || storedRole === 'GARDENER') {
+          window.location.assign(storedRole === 'LEADER' ? '/leader' : '/gardener');
+        } else if (navigator.onLine) {
+          window.location.assign('/login');
+        }
+        return;
+      }
 
       setLoading(false);
       setMonthLoading(false);
@@ -1031,14 +1046,16 @@ export default function AdminDashboard() {
       const allOrd = dataO.orders || [];
       const comments = dataO.dayComments || [];
 
-      setIsStaleOfflineData(false);
-      setGardeners(dataG.gardeners || []);
-      setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
-      setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
-      setDayOffs(dataD.dayOffs || []);
-      setBlockedDays(dataB.blockedDays || []);
-      setServices(dataS.services || []);
-      setDayComments(comments);
+      if (seq === fetchSeqRef.current) {
+        setIsStaleOfflineData(false);
+        setGardeners(dataG.gardeners || []);
+        setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
+        setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
+        setDayOffs(dataD.dayOffs || []);
+        setBlockedDays(dataB.blockedDays || []);
+        setServices(dataS.services || []);
+        setDayComments(comments);
+      }
 
       // 2.1 & 2.2: Await cache saving for canonical and cumulative keys
       const existingOrders = (await getCache('admin_orders'))?.data || [];
@@ -1056,8 +1073,12 @@ export default function AdminDashboard() {
       const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
 
       // 1.3: Save canonical and cumulative cache immediately (incrementally) so data is on disk
+      // Do not overwrite canonical key with empty array if there was already non-empty data in cache
+      const prevCanonicalOrders = (await getCache(canonicalOrdersKey))?.data;
+      const shouldSaveCanonicalOrders = allOrd.length > 0 || !Array.isArray(prevCanonicalOrders) || prevCanonicalOrders.length === 0;
+
       await Promise.all([
-        saveCache(canonicalOrdersKey, allOrd),
+        shouldSaveCanonicalOrders ? saveCache(canonicalOrdersKey, allOrd) : Promise.resolve(),
         saveCache(canonicalCommentsKey, comments),
       ]);
       await Promise.all([
@@ -1181,9 +1202,14 @@ export default function AdminDashboard() {
       setWebLeads(cachedWebLeads);
       setDayComments(cachedDayComments || []);
       if (cachedMe) setCurrentUser(cachedMe);
+
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
     } finally {
-      setLoading(false);
-      setMonthLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+        setMonthLoading(false);
+      }
       await refreshQueueCount();
     }
   };

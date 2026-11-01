@@ -474,6 +474,8 @@ export default function LeaderDashboard() {
     } catch (error) {
       console.warn('Network error in leader fetchData, trying cache:', error.message);
       setIsOffline(true);
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
       if (!cached && seq === fetchSeqRef.current) {
         alert(error.message);
       }

@@ -62,12 +62,10 @@ export default function BuildVersionWatcher() {
     clientLog('user_clicked_version_update_reload', { clientVersion: CLIENT_VERSION, serverVersion });
     try {
       if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        for (const reg of registrations) {
-          await reg.unregister();
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          await reg.update().catch(() => {});
         }
-        const swUrl = `/sw.js?v=${encodeURIComponent(serverVersion || CLIENT_VERSION)}`;
-        await navigator.serviceWorker.register(swUrl, { scope: '/' });
       }
       if ('caches' in window) {
         const keys = await caches.keys();
@@ -76,7 +74,7 @@ export default function BuildVersionWatcher() {
         );
       }
     } catch (e) {
-      console.error('Error unregistering/re-registering service worker on version reload:', e);
+      console.error('Error updating service worker on version reload:', e);
     } finally {
       window.location.reload();
     }
