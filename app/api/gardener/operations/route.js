@@ -33,9 +33,12 @@ export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const startRaw = searchParams.get('start');
   const endRaw = searchParams.get('end');
+  const allRaw = searchParams.get('all');
 
   const where = { gardenerId };
-  if (startRaw || endRaw) {
+  // If all=1 or all=true, or if start and end are omitted, return all operations without date filtering
+  const returnAll = allRaw === '1' || allRaw === 'true' || (!startRaw && !endRaw);
+  if (!returnAll && (startRaw || endRaw)) {
     const { start, end } = getDateRange(startRaw, endRaw);
     where.createdAt = { gte: start, lte: end };
   }

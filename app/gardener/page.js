@@ -392,7 +392,7 @@ export default function GardenerDashboard() {
     try {
       const [resOrders, resOps] = await Promise.all([
         apiFetch('/api/gardener/orders'),
-        apiFetch('/api/gardener/operations')
+        apiFetch('/api/gardener/operations?all=1')
       ]);
 
       if (!resOrders.ok) {

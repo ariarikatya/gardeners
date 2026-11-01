@@ -4137,45 +4137,56 @@ export default function AdminDashboard() {
 
                 {formData.orderMedia && formData.orderMedia.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
-                    {formData.orderMedia.map((item, idx) => {
-                      const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
-                      return (
-                        <div key={idx} className="relative group">
-                          {isVideo ? (
-                            <a
-                              href={item.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1.5 px-2.5 py-2 bg-slate-800 text-white text-xs font-medium rounded-lg h-16 max-w-[140px] pr-6"
+                    {(() => {
+                      const photoItems = (formData.orderMedia || []).filter(item => !(item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i))));
+                      const photoUrls = photoItems.map(p => p.url);
+
+                      return formData.orderMedia.map((item, idx) => {
+                        const isVideo = item.type === 'video' || (item.url && item.url.match(/\.(mp4|webm|mov|mkv|avi|3gp)($|\?)/i));
+                        const photoIndex = !isVideo ? photoUrls.indexOf(item.url) : -1;
+
+                        return (
+                          <div key={idx} className="relative group">
+                            {isVideo ? (
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-2.5 py-2 bg-slate-800 text-white text-xs font-medium rounded-lg h-16 max-w-[140px] pr-6"
+                              >
+                                <span className="text-base">▶️</span>
+                                <span className="truncate text-[11px]">{item.name || `Видео ${idx + 1}`}</span>
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openViewer(photoUrls, Math.max(0, photoIndex))}
+                                className="block cursor-pointer"
+                              >
+                                <img
+                                  src={item.url}
+                                  alt={item.name || `Фото ${idx + 1}`}
+                                  className="w-16 h-16 object-cover rounded-lg border border-slate-300 hover:opacity-90"
+                                />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  orderMedia: (prev.orderMedia || []).filter((_, i) => i !== idx)
+                                }));
+                              }}
+                              className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-7 h-7 min-w-[28px] min-h-[28px] flex items-center justify-center text-xs font-bold shadow-md hover:bg-rose-700 active:scale-95 transition-transform"
+                              title="Удалить"
                             >
-                              <span className="text-base">▶️</span>
-                              <span className="truncate text-[11px]">{item.name || `Видео ${idx + 1}`}</span>
-                            </a>
-                          ) : (
-                            <a href={item.url} target="_blank" rel="noopener noreferrer">
-                              <img
-                                src={item.url}
-                                alt={item.name || `Фото ${idx + 1}`}
-                                className="w-16 h-16 object-cover rounded-lg border border-slate-300"
-                              />
-                            </a>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormData(prev => ({
-                                ...prev,
-                                orderMedia: (prev.orderMedia || []).filter((_, i) => i !== idx)
-                              }));
-                            }}
-                            className="absolute -top-1 -right-1 bg-rose-600 text-white rounded-full w-7 h-7 min-w-[28px] min-h-[28px] flex items-center justify-center text-xs font-bold shadow-md hover:bg-rose-700 active:scale-95 transition-transform"
-                            title="Удалить"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      );
-                    })}
+                              ×
+                            </button>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 )}
 
