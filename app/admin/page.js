@@ -355,6 +355,7 @@ export default function AdminDashboard() {
   const [tableScale, setTableScale] = useState(1);
   const [dayComments, setDayComments] = useState([]);
   const [isStaleOfflineData, setIsStaleOfflineData] = useState(false);
+  const [activeCommentPopup, setActiveCommentPopup] = useState(null);
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
@@ -593,7 +594,11 @@ export default function AdminDashboard() {
     };
 
     initRoleCheck();
-    requestStoragePersistence().catch(() => {});
+    (async () => {
+      try {
+        await requestStoragePersistence();
+      } catch (e) {}
+    })();
     touchOfflineSession();
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
@@ -944,38 +949,67 @@ export default function AdminDashboard() {
       setServices(dataS.services || []);
       setDayComments(comments);
 
-      // 2.1 - 2.3: Save canonical month keys
-      saveCache(canonicalOrdersKey, allOrd);
-      saveCache(canonicalCommentsKey, comments);
+      // 2.1 & 2.2: Await cache saving for canonical and cumulative keys
+      const existingOrders = (await getCache('admin_orders'))?.data || [];
+      const orderMap = new Map();
+      existingOrders.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
+      allOrd.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
+      const mergedOrders = Array.from(orderMap.values())
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+        .slice(0, 3000);
 
-      // Save cumulative admin_orders merged by order.id (max 3000 items)
+      const existingComments = (await getCache('admin_day_comments'))?.data || [];
+      const commentMap = new Map();
+      existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+      comments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+      const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
+
+      await Promise.all([
+        saveCache(canonicalOrdersKey, allOrd),
+        saveCache(canonicalCommentsKey, comments),
+        saveCache('admin_orders', mergedOrders),
+        saveCache('admin_day_comments', mergedComments),
+        saveCache('admin_gardeners', dataG.gardeners || []),
+        saveCache('admin_services', dataS.services || []),
+        saveCache('admin_dayOffs', dataD.dayOffs || []),
+        saveCache('admin_blockedDays', dataB.blockedDays || []),
+      ]);
+
+      // 1.3 & 2.1: Heartbeat for adjacent months (previous and next month)
+      const prevMonthDate = new Date(year, month - 1, 1);
+      const nextMonthDate = new Date(year, month + 1, 1);
+      const adjacentMonths = [
+        {
+          key: `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`,
+          start: new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1, 0, 0, 0, 0),
+          end: new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0, 23, 59, 59, 999),
+        },
+        {
+          key: `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, '0')}`,
+          start: new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth(), 1, 0, 0, 0, 0),
+          end: new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0, 23, 59, 59, 999),
+        },
+      ];
+
       (async () => {
-        try {
-          const existingOrders = (await getCache('admin_orders'))?.data || [];
-          const orderMap = new Map();
-          existingOrders.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
-          allOrd.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
-          const mergedList = Array.from(orderMap.values())
-            .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-            .slice(0, 3000);
-          await saveCache('admin_orders', mergedList);
-
-          const existingComments = (await getCache('admin_day_comments'))?.data || [];
-          const commentMap = new Map();
-          existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
-          comments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
-          const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
-          await saveCache('admin_day_comments', mergedComments);
-        } catch (cumErr) {}
+        for (const adj of adjacentMonths) {
+          try {
+            const adjRes = await apiFetch(`/api/admin/orders?start=${encodeURIComponent(adj.start.toISOString())}&end=${encodeURIComponent(adj.end.toISOString())}`);
+            if (adjRes.ok) {
+              const adjData = await adjRes.json();
+              if (adjData.orders) {
+                await saveCache(`admin_orders_${adj.key}`, adjData.orders);
+              }
+              if (adjData.dayComments) {
+                await saveCache(`admin_day_comments_${adj.key}`, adjData.dayComments);
+              }
+            }
+          } catch (adjErr) {}
+        }
       })();
 
-      saveCache('admin_gardeners', dataG.gardeners || []);
-      saveCache('admin_services', dataS.services || []);
-      saveCache('admin_dayOffs', dataD.dayOffs || []);
-      saveCache('admin_blockedDays', dataB.blockedDays || []);
-
       touchOfflineSession();
-      requestStoragePersistence().catch(() => {});
+      await requestStoragePersistence().catch(() => {});
       setIsOffline(false);
       await loadWebLeads(true);
     } catch (e) {
@@ -2884,16 +2918,43 @@ export default function AdminDashboard() {
                                   const dateComments = dayComments.filter(c => c.date?.slice(0, 10) === dateStr);
                                   if (dateComments.length === 0) return null;
                                   return (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      {dateComments.map(c => (
-                                        <span
-                                          key={c.id}
-                                          title={`${c.gardenerName || 'Садовник'}: ${c.text}`}
-                                          className="inline-flex items-center gap-0.5 bg-emerald-100 text-emerald-800 text-[10px] px-1 py-0.5 rounded cursor-help font-normal"
-                                        >
-                                          💬 {c.gardenerName ? c.gardenerName.split(' ')[0] : ''}
-                                        </span>
-                                      ))}
+                                    <div className="flex flex-wrap gap-1 mt-1 relative">
+                                      {dateComments.map(c => {
+                                        const isPopupOpen = activeCommentPopup?.id === c.id;
+                                        return (
+                                          <div key={c.id} className="relative inline-block">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setActiveCommentPopup(isPopupOpen ? null : { ...c, dateStr });
+                                              }}
+                                              title={`${c.gardenerName || 'Садовник'}: ${c.text}`}
+                                              className="inline-flex items-center gap-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors"
+                                            >
+                                              💬 {c.gardenerName ? c.gardenerName.split(' ')[0] : ''}
+                                            </button>
+                                            {isPopupOpen && (
+                                              <div
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="absolute left-0 top-full mt-1 z-50 w-64 bg-slate-900 text-white rounded-xl p-2.5 shadow-xl border border-slate-700 text-left text-xs"
+                                              >
+                                                <div className="flex items-center justify-between font-bold text-emerald-400 mb-1">
+                                                  <span>{c.gardenerName || 'Садовник'} ({dateStr})</span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setActiveCommentPopup(null)}
+                                                    className="text-slate-400 hover:text-white font-normal px-1"
+                                                  >
+                                                    ✕
+                                                  </button>
+                                                </div>
+                                                <div className="text-slate-200 leading-snug whitespace-pre-wrap">{c.text}</div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   );
                                 })()}

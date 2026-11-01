@@ -212,7 +212,11 @@ export default function LeaderDashboard() {
     };
 
     initRoleCheck();
-    requestStoragePersistence().catch(() => {});
+    (async () => {
+      try {
+        await requestStoragePersistence();
+      } catch (e) {}
+    })();
     touchOfflineSession();
 
     const offlineSess = localStorage.getItem('offline_session') === '1';

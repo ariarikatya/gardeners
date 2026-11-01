@@ -394,11 +394,13 @@ export default function GardenerDashboard() {
 
       // Кэшируем данные
       const ordersToCache = filterOrdersForOffline(incomingOrders);
-      saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] });
-      saveCache('operations', ops.operations || []);
+      await Promise.all([
+        saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] }),
+        saveCache('operations', ops.operations || []),
+      ]);
 
       touchOfflineSession();
-      requestStoragePersistence().catch(() => {});
+      await requestStoragePersistence().catch(() => {});
     } catch (e) {
       console.error('fetchOrders network error:', e);
       setIsOffline(true);
@@ -708,7 +710,11 @@ export default function GardenerDashboard() {
       };
 
       initRoleCheck();
-      requestStoragePersistence().catch(() => {});
+      (async () => {
+        try {
+          await requestStoragePersistence();
+        } catch (e) {}
+      })();
       touchOfflineSession();
 
       const offlineSess = localStorage.getItem('offline_session') === '1';
