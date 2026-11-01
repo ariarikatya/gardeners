@@ -41,24 +41,13 @@ export default function InstallNotificationsGuideModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-slate-800 animate-in fade-in zoom-in duration-200">
-        {/* Верхняя иконка */}
+        {/* Верхняя иконка: колокольчик */}
         <div className="flex justify-center mb-3">
           <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
-            {isIosPlatform ? (
-              // iOS Share icon (квадрат со стрелкой вверх)
-              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                <polyline points="16 6 12 2 8 6" />
-                <line x1="12" y1="2" x2="12" y2="15" />
-              </svg>
-            ) : (
-              // Android three dots icon
-              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="12" cy="19" r="2" />
-              </svg>
-            )}
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
           </div>
         </div>
 
@@ -66,9 +55,6 @@ export default function InstallNotificationsGuideModal() {
         <h3 className="text-lg font-bold text-center text-slate-900 mb-1">
           Как включить уведомления
         </h3>
-        <p className="text-xs text-center text-slate-500 mb-4">
-          Чтобы получать важные оповещения о заказах, установите приложение на домашний экран
-        </p>
 
         {/* Список шагов строго сверху вниз */}
         <div className="space-y-3 mb-5 text-xs text-slate-700">
@@ -131,7 +117,7 @@ export default function InstallNotificationsGuideModal() {
                 </div>
                 <div className="leading-snug">
                   <span className="font-semibold text-slate-900 block">Шаг 1:</span>
-                  Нажмите на меню «⋮» (три точки) в правом верхнем углу браузера
+                  Нажмите на меню «⋮» (три точки) в правом углу браузера
                 </div>
               </div>
 
@@ -142,7 +128,7 @@ export default function InstallNotificationsGuideModal() {
                 </div>
                 <div className="leading-snug">
                   <span className="font-semibold text-slate-900 block">Шаг 2:</span>
-                  Выберите «Добавить на главный экран» или «Установить приложение»
+                  Выберите «Добавить на экран &quot;Домой&quot;» или «Установить приложение»
                 </div>
               </div>
 

@@ -888,7 +888,7 @@ export default function LeaderDashboard() {
         </div>
 
         {leaderTab === 'catalog' ? (
-          <CatalogLeaderSection gardeners={data.gardeners || []} onRefresh={fetchData} />
+          <CatalogLeaderSection gardeners={data.gardeners || []} onRefresh={fetchData} openViewer={openViewer} />
         ) : (
         <>
         <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap gap-3 items-end">
@@ -1458,11 +1458,22 @@ export default function LeaderDashboard() {
         </>
         )}
       </main>
+
+      <InstallNotificationsGuideModal />
+      <EnablePushOnPwaModal />
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-function CatalogLeaderSection({ gardeners, onRefresh }) {
+function CatalogLeaderSection({ gardeners, onRefresh, openViewer }) {
   const [catalogType, setCatalogType] = useState('inventory');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1865,16 +1876,6 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
           </div>
         </div>
       </div>
-      <InstallNotificationsGuideModal />
-      <EnablePushOnPwaModal />
-
-      {isViewerOpen && (
-        <PhotoViewer
-          images={viewerImages}
-          initialIndex={viewerIndex}
-          onClose={() => setIsViewerOpen(false)}
-        />
-      )}
     </div>
   );
 }
