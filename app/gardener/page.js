@@ -4,9 +4,10 @@ import { useRouter } from 'next/navigation';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
+import { useOnlineReload } from '@/lib/useOnlineReload';
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_LABELS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
@@ -174,6 +175,11 @@ export default function GardenerDashboard() {
   const [expenseReceiptBlob, setExpenseReceiptBlob] = useState(null);
   const [submittingExpense, setSubmittingExpense] = useState(false);
 
+  // Комментарии садовника по дням для диспетчера
+  const [dayComments, setDayComments] = useState({});
+  const [dayCommentInput, setDayCommentInput] = useState('');
+  const [savingDayComment, setSavingDayComment] = useState(false);
+
   const ensureFreshUsersList = async () => {
     if (typeof window === 'undefined' || !navigator.onLine) return;
     try {
@@ -188,7 +194,9 @@ export default function GardenerDashboard() {
   const formatLastUpdated = (timestamp) => {
     if (!timestamp) return null;
     const d = new Date(timestamp);
-    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    if (isNaN(d.getTime())) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
   };
 
   const applyQueueToOrders = (ordersList, queueItems) => {
@@ -232,11 +240,12 @@ export default function GardenerDashboard() {
 
   const loadFromCache = async () => {
     try {
-      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, pendingQueue] = await Promise.all([
+      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, cachedCommentsObj, pendingQueue] = await Promise.all([
         getCache('orders'),
         getCache('profile'),
         getCache('operations'),
         getCache('auction'),
+        getCache('day_comments'),
         getQueue(),
       ]);
 
@@ -263,6 +272,10 @@ export default function GardenerDashboard() {
 
       if (cachedAuctionObj && cachedAuctionObj.data) {
         setAuctionOrders(cachedAuctionObj.data || []);
+      }
+
+      if (cachedCommentsObj && cachedCommentsObj.data) {
+        setDayComments(cachedCommentsObj.data || {});
       }
 
       const activeQueue = (pendingQueue || []).filter(i => i.status !== 'conflict');
@@ -292,7 +305,7 @@ export default function GardenerDashboard() {
       const claimIds = new Set(activeQueue.filter(i => i.actionType === 'AUCTION_CLAIM').map(i => i.payload?.orderId));
       setQueuedClaimIds(claimIds);
       if (result.syncedCount > 0) {
-        await Promise.all([fetchOrders(true), fetchProfile(), fetchAuction()]);
+        await Promise.all([fetchOrders(true), fetchProfile(), fetchAuction(), fetchDayComments()]);
         setSyncedToastMsg(`Связь восстановлена, ${result.syncedCount} ${result.syncedCount === 1 ? 'заявка отправлена' : result.syncedCount < 5 ? 'заявки отправлены' : 'заявок отправлено'}`);
         setShowSyncedToast(true);
         setTimeout(() => setShowSyncedToast(false), 4000);
@@ -308,6 +321,12 @@ export default function GardenerDashboard() {
     if (typeof window === 'undefined') return false;
     return !navigator.onLine;
   };
+
+  useOnlineReload(async () => {
+    await fetchOrders(true);
+    await fetchDayComments();
+    await fetchAuction();
+  }, 1000);
 
   const fetchOrders = async (silent = false) => {
     if (isOfflineSessionGuard()) {
@@ -377,13 +396,145 @@ export default function GardenerDashboard() {
 
       // Кэшируем данные
       const ordersToCache = filterOrdersForOffline(incomingOrders);
-      saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] });
-      saveCache('operations', ops.operations || []);
+      await Promise.all([
+        saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] }),
+        saveCache('operations', ops.operations || []),
+      ]);
+
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
     } catch (e) {
       console.error('fetchOrders network error:', e);
       setIsOffline(true);
     } finally {
       if (!silent) setLoading(false);
+    }
+  };
+
+  const fetchDayComments = async () => {
+    if (isOfflineSessionGuard()) {
+      try {
+        const cached = await getCache('day_comments');
+        if (cached && cached.data) {
+          setDayComments(cached.data);
+        }
+      } catch (e) {}
+      return;
+    }
+    try {
+      const res = await apiFetch('/api/gardener/day-comment');
+      if (res.ok) {
+        const json = await res.json();
+        const map = {};
+        if (Array.isArray(json.comments)) {
+          json.comments.forEach((c) => {
+            const dKey = c.date ? c.date.slice(0, 10) : '';
+            if (dKey) {
+              map[dKey] = { id: c.id, text: c.text };
+            }
+          });
+        }
+        setDayComments(map);
+        saveCache('day_comments', map);
+      }
+    } catch (e) {
+      console.warn('fetchDayComments error, checking cache:', e);
+      try {
+        const cached = await getCache('day_comments');
+        if (cached && cached.data) {
+          setDayComments(cached.data);
+        }
+      } catch (cErr) {}
+    }
+  };
+
+  const handleSaveDayComment = async (dateStr, text) => {
+    if (!dateStr) return;
+    const trimmed = (text || '').trim();
+    if (!trimmed) {
+      handleDeleteDayComment(dateStr);
+      return;
+    }
+
+    setSavingDayComment(true);
+    const existing = dayComments[dateStr];
+    const updatedMap = { ...dayComments, [dateStr]: { id: existing?.id || `tmp_c_${Date.now()}`, text: trimmed } };
+    setDayComments(updatedMap);
+    saveCache('day_comments', updatedMap);
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'GARDENER_DAY_COMMENT_POST',
+        url: '/api/gardener/day-comment',
+        method: 'POST',
+        payload: { date: dateStr, text: trimmed },
+        scope: 'gardener'
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      setSavingDayComment(false);
+      return;
+    }
+
+    try {
+      const res = await apiFetch('/api/gardener/day-comment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: dateStr, text: trimmed }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Ошибка сохранения комментария');
+      }
+      const json = await res.json();
+      if (json.dayComment) {
+        const newMap = { ...dayComments, [dateStr]: { id: json.dayComment.id, text: json.dayComment.text } };
+        setDayComments(newMap);
+        saveCache('day_comments', newMap);
+      }
+    } catch (e) {
+      alert(e.message || 'Ошибка сохранения комментария');
+    } finally {
+      setSavingDayComment(false);
+    }
+  };
+
+  const handleDeleteDayComment = async (dateStr) => {
+    if (!dateStr) return;
+    const existing = dayComments[dateStr];
+    if (!existing) return;
+
+    const nextMap = { ...dayComments };
+    delete nextMap[dateStr];
+    setDayComments(nextMap);
+    saveCache('day_comments', nextMap);
+    setDayCommentInput('');
+
+    const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+    if (isOfflineMode) {
+      await enqueueAction({
+        actionType: 'GARDENER_DAY_COMMENT_DELETE',
+        url: `/api/gardener/day-comment?date=${encodeURIComponent(dateStr)}`,
+        method: 'DELETE',
+        payload: { date: dateStr },
+        scope: 'gardener'
+      });
+      const q = await getQueue();
+      setQueueCount(q.filter(i => i.status !== 'conflict').length);
+      return;
+    }
+
+    try {
+      const res = await apiFetch(`/api/gardener/day-comment?date=${encodeURIComponent(dateStr)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Ошибка удаления комментария');
+      }
+    } catch (e) {
+      alert(e.message || 'Ошибка удаления комментария');
     }
   };
 
@@ -561,6 +712,12 @@ export default function GardenerDashboard() {
       };
 
       initRoleCheck();
+      (async () => {
+        try {
+          await requestStoragePersistence();
+        } catch (e) {}
+      })();
+      touchOfflineSession();
 
       const offlineSess = localStorage.getItem('offline_session') === '1';
       const role = localStorage.getItem('auth_role');
@@ -607,6 +764,7 @@ export default function GardenerDashboard() {
     fetchOrders();
     fetchProfile();
     fetchAuction();
+    fetchDayComments();
 
     if ('serviceWorker' in navigator && navigator.onLine) {
       navigator.serviceWorker.ready.then((reg) => {
@@ -639,13 +797,15 @@ export default function GardenerDashboard() {
     const interval = setInterval(() => {
       if (typeof window !== 'undefined' && navigator.onLine) {
         fetchOrders(true);
+        fetchDayComments();
         handleSyncQueue();
       }
-    }, 45000);
+    }, 30000);
 
     const handleOnline = () => {
       setIsOffline(false);
       fetchOrders(true);
+      fetchDayComments();
       handleSyncQueue();
     };
 
@@ -1582,6 +1742,7 @@ export default function GardenerDashboard() {
     const cellDate = new Date(dateStr);
     const wd = cellDate.getDay();
     const isWeekend = wd === 0 || wd === 6;
+    const hasComment = Boolean(dayComments[dateStr]?.text);
 
     const baseBorderBg = isSelected
       ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500'
@@ -1594,10 +1755,23 @@ export default function GardenerDashboard() {
     return (
       <button type="button"
         key={i}
-        onClick={() => setSelectedDateStr(isSelected ? null : dateStr)}
-        className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend && !isDayOff ? 'border-slate-300 bg-slate-50/50' : ''}`}
+        onClick={() => {
+          if (isSelected) {
+            setSelectedDateStr(null);
+            setDayCommentInput('');
+          } else {
+            setSelectedDateStr(dateStr);
+            setDayCommentInput(dayComments[dateStr]?.text || '');
+          }
+        }}
+        className={`relative aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 border ${baseBorderBg} ${isWeekend && !isDayOff ? 'border-slate-300 bg-slate-50/50' : ''}`}
       >
         <span className={`font-medium ${isDayOff ? 'text-slate-700 font-bold' : 'text-slate-700'}`}>{d}</span>
+        {hasComment && (
+          <span className="text-[10px] leading-none absolute top-1 right-1" title={dayComments[dateStr]?.text}>
+            💬
+          </span>
+        )}
         {isDayOff && (
           <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-slate-600 bg-slate-300/80 px-1 py-0.2 rounded truncate max-w-full">
             🏖️ Вых.
@@ -1645,7 +1819,14 @@ export default function GardenerDashboard() {
       {/* Оффлайн баннер */}
       {(isOffline || (typeof window !== 'undefined' && !navigator.onLine)) && (
         <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-2 text-center shadow-inner flex items-center justify-center gap-2 flex-wrap">
-          <span>⚉ Офлайн-режим: показаны сохранённые данные {lastCacheTime ? `от ${lastCacheTime}` : ''}</span>
+          <span>⚉ Офлайн-режим: показаны сохранённые данные</span>
+          {lastCacheTime && (() => {
+            return (
+              <span className="bg-amber-600/90 text-amber-50 px-2 py-0.5 rounded-full text-[11px] font-medium">
+                Данные сохранены: {lastCacheTime}
+              </span>
+            );
+          })()}
           {queueCount > 0 && <span>(в очереди: {queueCount})</span>}
         </div>
       )}
@@ -2326,6 +2507,19 @@ export default function GardenerDashboard() {
 
         {activeSection === 'records' && (loading ? (
           <div className="text-center text-slate-500 py-8">Загрузка...</div>
+        ) : isOffline && orders.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500 font-medium space-y-3">
+            <div className="text-4xl">📡</div>
+            <div className="text-base font-semibold text-slate-700">Данных в офлайне нет — подключитесь к интернету</div>
+            <p className="text-xs text-slate-400">При появлении сети данные загрузятся автоматически.</p>
+            <button
+              type="button"
+              onClick={() => fetchOrders()}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            >
+              🔄 Повторить попытку
+            </button>
+          </div>
         ) : orders.length === 0 ? (
           <div className="text-center text-slate-500 py-8 bg-white border rounded-xl">У вас пока нет назначенных заказов</div>
         ) : viewMode === 'list' ? (
@@ -2365,23 +2559,65 @@ export default function GardenerDashboard() {
             </div>
 
             {selectedDateStr ? (
-              (ordersByDate[selectedDateStr] || []).length === 0 ? (
-                searchQuery.trim() ? (
-                  <div className="text-center text-slate-500 py-8 bg-white border border-slate-200 rounded-xl">
-                    Ничего не найдено по запросу «{searchQuery}»
+              <div className="space-y-3">
+                {/* Блок комментария садовника диспетчеру на выбранный день */}
+                <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                      💬 Комментарий диспетчеру на {selectedDateStr}
+                    </span>
+                    {dayComments[selectedDateStr] && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDayComment(selectedDateStr)}
+                        className="text-[11px] text-rose-600 hover:text-rose-700 font-semibold"
+                      >
+                        Удалить
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={dayCommentInput}
+                      onChange={(e) => setDayCommentInput(e.target.value)}
+                      placeholder="Например: тут нельзя больше заказов или можно в этом районе"
+                      className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={savingDayComment}
+                      onClick={() => handleSaveDayComment(selectedDateStr, dayCommentInput)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-50"
+                    >
+                      {savingDayComment ? '...' : 'Сохранить'}
+                    </button>
+                  </div>
+                  {dayComments[selectedDateStr]?.text && (
+                    <div className="mt-1.5 text-[11px] text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      Сохранено: <span className="font-medium text-slate-700">{dayComments[selectedDateStr].text}</span>
+                    </div>
+                  )}
+                </div>
+
+                {(ordersByDate[selectedDateStr] || []).length === 0 ? (
+                  searchQuery.trim() ? (
+                    <div className="text-center text-slate-500 py-8 bg-white border border-slate-200 rounded-xl">
+                      Ничего не найдено по запросу «{searchQuery}»
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-400 text-center">В этот день заказов нет</p>
+                  )
+                ) : ordersByDate[selectedDateStr].length === 1 ? (
+                  <div className="flex justify-center">
+                    <div className="w-full md:max-w-md">{renderOrderCard(ordersByDate[selectedDateStr][0])}</div>
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-400 text-center">В этот день заказов нет</p>
-                )
-              ) : ordersByDate[selectedDateStr].length === 1 ? (
-                <div className="flex justify-center">
-                  <div className="w-full md:max-w-md">{renderOrderCard(ordersByDate[selectedDateStr][0])}</div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {ordersByDate[selectedDateStr].map(renderOrderCard)}
-                </div>
-              )
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {ordersByDate[selectedDateStr].map(renderOrderCard)}
+                  </div>
+                )}
+              </div>
             ) : searchQuery.trim() && Object.keys(ordersByDate).length === 0 ? (
               <div className="text-center text-slate-500 py-8 bg-white border border-slate-200 rounded-xl">
                 Ничего не найдено по запросу «{searchQuery}»

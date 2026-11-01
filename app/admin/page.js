@@ -5,9 +5,10 @@ import Link from 'next/link';
 import PushButton from '@/components/PushButton';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
-import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
+import { useOnlineReload } from '@/lib/useOnlineReload';
 
 const emptyOrderForm = {
   clientName: '', clientPhone: '', address: '', district: '', description: '',
@@ -352,6 +353,11 @@ export default function AdminDashboard() {
   const [startFromToday, setStartFromToday] = useState(true);
   const [monthLoading, setMonthLoading] = useState(false);
   const [tableScale, setTableScale] = useState(1);
+  const [dayComments, setDayComments] = useState([]);
+  const [isStaleOfflineData, setIsStaleOfflineData] = useState(false);
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
+  const [activeCommentPopup, setActiveCommentPopup] = useState(null);
+  const [monthPreloadWarnings, setMonthPreloadWarnings] = useState([]);
 
   // Добавление / редактирование садовника
   const [newGardener, setNewGardener] = useState({ name: '', phone: '', serviceIds: [] });
@@ -590,6 +596,12 @@ export default function AdminDashboard() {
     };
 
     initRoleCheck();
+    (async () => {
+      try {
+        await requestStoragePersistence();
+      } catch (e) {}
+    })();
+    touchOfflineSession();
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
     const role = localStorage.getItem('auth_role');
@@ -811,6 +823,84 @@ export default function AdminDashboard() {
     };
   }, []);
 
+  // Task 3: 60s background polling + visibilitychange/focus refresh for dayComments without full reload
+  useEffect(() => {
+    const refreshComments = async () => {
+      if (typeof window === 'undefined' || !navigator.onLine) return;
+      try {
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth();
+        const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+        const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const canonicalCommentsKey = `admin_day_comments_${monthKey}`;
+
+        const res = await apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.dayComments)) {
+            setDayComments(json.dayComments);
+            await saveCache(canonicalCommentsKey, json.dayComments);
+
+            const existingComments = (await getCache('admin_day_comments'))?.data || [];
+            const commentMap = new Map();
+            existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+            json.dayComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+            await saveCache('admin_day_comments', Array.from(commentMap.values()).slice(0, 3000));
+          }
+        }
+      } catch (e) {
+        console.warn('Background dayComments refresh error:', e);
+      }
+    };
+
+    const interval = setInterval(refreshComments, 60000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshComments();
+      }
+    };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentMonth]);
+
+  // Task 3: Close active comment popup on outside click or Escape key
+  useEffect(() => {
+    if (!activeCommentPopup) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setActiveCommentPopup(null);
+      }
+    };
+
+    const handleClickOutside = (e) => {
+      const popupEl = document.getElementById('active-comment-popup');
+      if (popupEl && !popupEl.contains(e.target)) {
+        setActiveCommentPopup(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    // Use timeout so current click opening the popup doesn't immediately close it
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+    }, 0);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('click', handleClickOutside);
+      clearTimeout(timer);
+    };
+  }, [activeCommentPopup]);
+
   const isOfflineSessionGuard = () => {
     if (typeof window === 'undefined') return false;
     return !navigator.onLine;
@@ -819,6 +909,19 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setLoading(true);
     setMonthLoading(true);
+
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const now = new Date();
+
+    // Canonical keys based on currentMonth (YYYY-MM), independent of startFromToday
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const canonicalOrdersKey = `admin_orders_${monthKey}`;
+    const canonicalCommentsKey = `admin_day_comments_${monthKey}`;
+
+    // Always fetch full month so switching startFromToday or navigating months in offline has all days
+    const startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
@@ -845,7 +948,37 @@ export default function AdminDashboard() {
         return;
       }
 
-      const cachedOrders = (await getCache('admin_orders'))?.data || [];
+      const getLocalYearMonth = (dateVal) => {
+        if (!dateVal) return '';
+        const d = new Date(dateVal);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      const cachedOrdersObj = await getCache(canonicalOrdersKey);
+      let cachedOrders = cachedOrdersObj?.data;
+      let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
+      let isStale = false;
+      let cacheTs = cachedOrdersObj?.updatedAt || null;
+
+      if (!cachedOrders) {
+        const cumulativeObj = await getCache('admin_orders');
+        const allCumulative = cumulativeObj?.data || [];
+        if (!cacheTs && cumulativeObj?.updatedAt) cacheTs = cumulativeObj.updatedAt;
+
+        const monthOrders = allCumulative.filter(o => o.date && getLocalYearMonth(o.date) === monthKey);
+        if (monthOrders.length > 0) {
+          cachedOrders = monthOrders;
+        } else if (allCumulative.length > 0) {
+          cachedOrders = allCumulative;
+          isStale = true;
+        }
+      }
+      if (!cachedDayComments) {
+        const allComments = (await getCache('admin_day_comments'))?.data || [];
+        cachedDayComments = allComments.filter(c => c.date && getLocalYearMonth(c.date) === monthKey);
+      }
+
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
       const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
@@ -853,13 +986,16 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
+      if (cacheTs) setCacheUpdatedAt(cacheTs);
+      setIsStaleOfflineData(isStale);
       setGardeners(cachedGardeners);
-      setOrders(cachedOrders.filter(o => o.status !== 'Аукцион'));
-      setAuctionOrders(cachedOrders.filter(o => o.status === 'Аукцион' || o.wasAuction));
+      setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders((cachedOrders || []).filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(cachedDayOffs);
       setBlockedDays(cachedBlockedDays);
       setServices(cachedServices);
       setWebLeads(cachedWebLeads);
+      setDayComments(cachedDayComments || []);
       if (cachedMe) setCurrentUser(cachedMe);
 
       setLoading(false);
@@ -869,18 +1005,6 @@ export default function AdminDashboard() {
     }
 
     try {
-      const year = currentMonth.getFullYear();
-      const month = currentMonth.getMonth();
-      const now = new Date();
-
-      let startOfMonth;
-      if (startFromToday && now.getFullYear() === year && now.getMonth() === month) {
-        startOfMonth = new Date(year, month, now.getDate(), 0, 0, 0, 0);
-      } else {
-        startOfMonth = new Date(year, month, 1, 0, 0, 0, 0);
-      }
-      const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
-
       const [resG, resO, resD, resB, resS, resMe] = await Promise.all([
         apiFetch('/api/admin/gardeners'),
         apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
@@ -905,27 +1029,140 @@ export default function AdminDashboard() {
       const dataB = resB.ok ? await resB.json() : {};
       const dataS = resS.ok ? await resS.json() : {};
       const allOrd = dataO.orders || [];
+      const comments = dataO.dayComments || [];
 
+      setIsStaleOfflineData(false);
       setGardeners(dataG.gardeners || []);
       setOrders(allOrd.filter(o => o.status !== 'Аукцион'));
       setAuctionOrders(allOrd.filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(dataD.dayOffs || []);
       setBlockedDays(dataB.blockedDays || []);
       setServices(dataS.services || []);
+      setDayComments(comments);
 
-      saveCache('admin_orders', allOrd);
-      saveCache('admin_gardeners', dataG.gardeners || []);
-      saveCache('admin_services', dataS.services || []);
-      saveCache('admin_dayOffs', dataD.dayOffs || []);
-      saveCache('admin_blockedDays', dataB.blockedDays || []);
+      // 2.1 & 2.2: Await cache saving for canonical and cumulative keys
+      const existingOrders = (await getCache('admin_orders'))?.data || [];
+      const orderMap = new Map();
+      existingOrders.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
+      allOrd.forEach(o => { if (o && o.id) orderMap.set(String(o.id), o); });
+      const mergedOrders = Array.from(orderMap.values())
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+        .slice(0, 3000);
 
+      const existingComments = (await getCache('admin_day_comments'))?.data || [];
+      const commentMap = new Map();
+      existingComments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+      comments.forEach(c => { if (c && c.id) commentMap.set(String(c.id), c); });
+      const mergedComments = Array.from(commentMap.values()).slice(0, 3000);
+
+      // 1.3: Save canonical and cumulative cache immediately (incrementally) so data is on disk
+      await Promise.all([
+        saveCache(canonicalOrdersKey, allOrd),
+        saveCache(canonicalCommentsKey, comments),
+      ]);
+      await Promise.all([
+        saveCache('admin_orders', mergedOrders),
+        saveCache('admin_day_comments', mergedComments),
+        saveCache('admin_gardeners', dataG.gardeners || []),
+        saveCache('admin_services', dataS.services || []),
+        saveCache('admin_dayOffs', dataD.dayOffs || []),
+        saveCache('admin_blockedDays', dataB.blockedDays || []),
+      ]);
+
+      // 1.3 & 2.1: Proactively fetch and await adjacent months with 1 retry and incremental save
+      const prevMonthDate = new Date(year, month - 1, 1);
+      const nextMonthDate = new Date(year, month + 1, 1);
+      const adjacentMonths = [
+        {
+          label: 'Предыдущий месяц',
+          key: `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`,
+          start: new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1, 0, 0, 0, 0),
+          end: new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0, 23, 59, 59, 999),
+        },
+        {
+          label: 'Следующий месяц',
+          key: `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, '0')}`,
+          start: new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth(), 1, 0, 0, 0, 0),
+          end: new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0, 23, 59, 59, 999),
+        },
+      ];
+
+      const failedWarnings = [];
+      await Promise.all(adjacentMonths.map(async (adj) => {
+        const fetchAdj = async () => {
+          return apiFetch(`/api/admin/orders?start=${encodeURIComponent(adj.start.toISOString())}&end=${encodeURIComponent(adj.end.toISOString())}`);
+        };
+
+        let adjRes = null;
+        try {
+          adjRes = await fetchAdj();
+          if (!adjRes || !adjRes.ok) throw new Error('First attempt failed');
+        } catch (firstErr) {
+          // Retry 1 time on failure
+          try {
+            adjRes = await fetchAdj();
+          } catch (retryErr) {
+            adjRes = null;
+          }
+        }
+
+        if (adjRes && adjRes.ok) {
+          try {
+            const adjData = await adjRes.json();
+            // Incremental save
+            await Promise.all([
+              adjData.orders ? saveCache(`admin_orders_${adj.key}`, adjData.orders) : Promise.resolve(),
+              adjData.dayComments ? saveCache(`admin_day_comments_${adj.key}`, adjData.dayComments) : Promise.resolve(),
+            ]);
+          } catch (e) {
+            failedWarnings.push(`${adj.label} не сохранён`);
+          }
+        } else {
+          failedWarnings.push(`${adj.label} не сохранён`);
+        }
+      }));
+
+      setMonthPreloadWarnings(failedWarnings);
+
+      touchOfflineSession();
+      await requestStoragePersistence().catch(() => {});
       setIsOffline(false);
       await loadWebLeads(true);
     } catch (e) {
       console.warn('Network error during fetchData, using cached offline data:', e);
       setIsOffline(true);
 
-      const cachedOrders = (await getCache('admin_orders'))?.data || [];
+      const getLocalYearMonth = (dateVal) => {
+        if (!dateVal) return '';
+        const d = new Date(dateVal);
+        if (isNaN(d.getTime())) return '';
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      };
+
+      const cachedOrdersObj = await getCache(canonicalOrdersKey);
+      let cachedOrders = cachedOrdersObj?.data;
+      let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
+      let isStale = false;
+      let cacheTs = cachedOrdersObj?.updatedAt || null;
+
+      if (!cachedOrders) {
+        const cumulativeObj = await getCache('admin_orders');
+        const allCumulative = cumulativeObj?.data || [];
+        if (!cacheTs && cumulativeObj?.updatedAt) cacheTs = cumulativeObj.updatedAt;
+
+        const monthOrders = allCumulative.filter(o => o.date && getLocalYearMonth(o.date) === monthKey);
+        if (monthOrders.length > 0) {
+          cachedOrders = monthOrders;
+        } else if (allCumulative.length > 0) {
+          cachedOrders = allCumulative;
+          isStale = true;
+        }
+      }
+      if (!cachedDayComments) {
+        const allComments = (await getCache('admin_day_comments'))?.data || [];
+        cachedDayComments = allComments.filter(c => c.date && getLocalYearMonth(c.date) === monthKey);
+      }
+
       const cachedGardeners = (await getCache('admin_gardeners'))?.data || [];
       const cachedServices = (await getCache('admin_services'))?.data || [];
       const cachedDayOffs = (await getCache('admin_dayOffs'))?.data || [];
@@ -933,13 +1170,16 @@ export default function AdminDashboard() {
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
 
+      if (cacheTs) setCacheUpdatedAt(cacheTs);
+      setIsStaleOfflineData(isStale);
       setGardeners(cachedGardeners);
-      setOrders(cachedOrders.filter(o => o.status !== 'Аукцион'));
-      setAuctionOrders(cachedOrders.filter(o => o.status === 'Аукцион' || o.wasAuction));
+      setOrders((cachedOrders || []).filter(o => o.status !== 'Аукцион'));
+      setAuctionOrders((cachedOrders || []).filter(o => o.status === 'Аукцион' || o.wasAuction));
       setDayOffs(cachedDayOffs);
       setBlockedDays(cachedBlockedDays);
       setServices(cachedServices);
       setWebLeads(cachedWebLeads);
+      setDayComments(cachedDayComments || []);
       if (cachedMe) setCurrentUser(cachedMe);
     } finally {
       setLoading(false);
@@ -1016,6 +1256,8 @@ export default function AdminDashboard() {
       router.push('/login');
     }
   };
+
+  useOnlineReload(fetchData, 1000);
 
   const [syncing, setSyncing] = useState(false);
 
@@ -2345,13 +2587,29 @@ export default function AdminDashboard() {
       {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
         <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
               {pendingQueueCount > 0 && (
                 <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
                   В очереди изменений: {pendingQueueCount}
                 </span>
               )}
+              {isOffline && cacheUpdatedAt && (() => {
+                const d = new Date(cacheUpdatedAt);
+                const pad = (n) => String(n).padStart(2, '0');
+                const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+                const isOlder24h = (Date.now() - cacheUpdatedAt) > 24 * 60 * 60 * 1000;
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${isOlder24h ? 'bg-red-700 text-white border border-red-400' : 'bg-amber-600/90 text-amber-50'}`}>
+                    Данные сохранены: {timeStr}{isOlder24h ? ' (старше 24 ч)' : ''}
+                  </span>
+                );
+              })()}
+              {monthPreloadWarnings.length > 0 && monthPreloadWarnings.map((msg, idx) => (
+                <span key={idx} className="bg-red-800 text-red-100 border border-red-400 px-2 py-0.5 rounded-full text-[11px] font-medium">
+                  ⚠️ {msg}
+                </span>
+              ))}
             </div>
             {pendingQueueCount > 0 && (
               <button
@@ -2493,6 +2751,11 @@ export default function AdminDashboard() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
+                  {isStaleOfflineData && (
+                    <span className="bg-amber-100 text-amber-900 border border-amber-300 text-xs font-medium px-2 py-0.5 rounded-full">
+                      ⚠️ Офлайн: показаны сохранённые данные другого периода
+                    </span>
+                  )}
                   <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold px-2 py-0.5 rounded-full">
                     Заказов: {orders.length}
                   </span>
@@ -2714,7 +2977,20 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {isEmptyFilterResult ? (
+              {isOffline && orders.length === 0 && gardeners.length === 0 ? (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center text-slate-500 font-medium space-y-3">
+                  <div className="text-4xl">📡</div>
+                  <div className="text-base font-semibold text-slate-700">Данных в офлайне нет — подключитесь к интернету</div>
+                  <p className="text-xs text-slate-400">При появлении сети данные загрузятся автоматически.</p>
+                  <button
+                    type="button"
+                    onClick={() => fetchData()}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    🔄 Повторить попытку
+                  </button>
+                </div>
+              ) : isEmptyFilterResult ? (
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center text-slate-500 font-medium">
                   <div className="text-4xl mb-3">🔍</div>
                   <div className="text-base font-semibold text-slate-700 mb-1">По выбранным фильтрам ничего не найдено</div>
@@ -2783,6 +3059,64 @@ export default function AdminDashboard() {
                               <span className="flex flex-col gap-0.5">
                                 <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
                                 {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
+                                {(() => {
+                                  const dateComments = dayComments.filter(c => c.date?.slice(0, 10) === dateStr);
+                                  if (dateComments.length === 0) return null;
+                                  const isPopupOpen = activeCommentPopup?.dateStr === dateStr;
+
+                                  return (
+                                    <div className="flex flex-wrap gap-1 mt-1 relative">
+                                      <div className="relative inline-block">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveCommentPopup(isPopupOpen ? null : { dateStr, comments: dateComments });
+                                          }}
+                                          title={`Комментарии дня: ${dateComments.length}`}
+                                          className="inline-flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors"
+                                        >
+                                          <span>💬</span>
+                                          {dateComments.length > 1 ? (
+                                            <span className="font-bold bg-emerald-700 text-white px-1 rounded-full text-[9px] leading-tight">
+                                              {dateComments.length}
+                                            </span>
+                                          ) : (
+                                            <span>{dateComments[0].gardenerName ? dateComments[0].gardenerName.split(' ')[0] : 'Садовник'}</span>
+                                          )}
+                                        </button>
+                                        {isPopupOpen && (
+                                          <div
+                                            id="active-comment-popup"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="absolute left-0 top-full mt-1 z-50 w-72 max-w-[85vw] bg-slate-900 text-white rounded-xl p-3 shadow-xl border border-slate-700 text-left text-xs max-h-80 overflow-y-auto"
+                                          >
+                                            <div className="flex items-center justify-between font-bold text-emerald-400 mb-2 pb-1 border-b border-slate-700">
+                                              <span>Комментарии ({dateStr}): {dateComments.length}</span>
+                                              <button
+                                                type="button"
+                                                onClick={() => setActiveCommentPopup(null)}
+                                                className="text-slate-400 hover:text-white font-normal px-1 text-sm"
+                                              >
+                                                ✕
+                                              </button>
+                                            </div>
+                                            <div className="space-y-2">
+                                              {dateComments.map((c, idx) => (
+                                                <div key={c.id || idx} className="bg-slate-800/80 rounded-lg p-2 border border-slate-700/60">
+                                                  <div className="font-semibold text-emerald-300 text-[11px] mb-0.5">
+                                                    {c.gardenerName || 'Садовник'}
+                                                  </div>
+                                                  <div className="text-slate-200 leading-snug whitespace-pre-wrap text-[11px]">{c.text}</div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </span>
                             </td>
                             {displayGardeners.map(g => {

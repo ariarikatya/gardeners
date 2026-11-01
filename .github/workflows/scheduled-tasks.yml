@@ -23,6 +23,10 @@ jobs:
           npm ci
           npx prisma generate
 
+      - name: Run offline cache reliability tests
+        run: |
+          npm run test:offline-reliability
+
       - name: Run scheduled tasks
         # NOTE: VAPID secrets (NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY) are intentionally
         # NOT passed here. This GitHub Actions workflow performs fine checks ONLY and must NOT generate

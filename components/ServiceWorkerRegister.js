@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { clientLog } from '@/lib/clientLog';
 import { getQueue } from '@/lib/offlineQueue';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
+import { requestStoragePersistence } from '@/lib/offlineStore';
 
 export default function ServiceWorkerRegister() {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -40,7 +41,8 @@ export default function ServiceWorkerRegister() {
         if ('caches' in window) {
           const keys = await caches.keys();
           for (const key of keys) {
-            if (key.startsWith('anemon-agro-') && !key.includes(CLIENT_VERSION)) {
+            // Never delete persistent OFFLINE_DATA_CACHE ('anemon-agro-offline-data')
+            if (key.startsWith('anemon-agro-') && key !== 'anemon-agro-offline-data' && !key.includes(CLIENT_VERSION)) {
               await caches.delete(key);
             }
           }
@@ -53,6 +55,7 @@ export default function ServiceWorkerRegister() {
       const swUrl = `/sw.js?v=${encodeURIComponent(CLIENT_VERSION)}`;
       navigator.serviceWorker.register(swUrl, { scope: '/' })
         .then((reg) => {
+          requestStoragePersistence().catch(() => {});
           if (navigator.onLine) {
             try { reg.update(); } catch (e) {}
           }

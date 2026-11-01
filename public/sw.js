@@ -250,6 +250,32 @@ async function restoreOfflineDataToNewCache() {
       }
     } catch (e) {}
   }
+
+  // 1.1: Migrate all successful /api/* responses and pages/chunks from old caches into OFFLINE_DATA_CACHE and CACHE_NAME
+  for (const cName of allCacheKeys) {
+    if (cName === CACHE_NAME || cName === OFFLINE_DATA_CACHE) continue;
+    try {
+      const oldC = await caches.open(cName);
+      const requests = await oldC.keys();
+      for (const req of requests) {
+        try {
+          const reqUrl = new URL(req.url);
+          // Migrate /api/* GET responses, pages and static chunks
+          if (reqUrl.pathname.startsWith('/api/') || reqUrl.pathname.startsWith('/_next/') || ['/', '/admin', '/leader', '/gardener', '/login'].includes(reqUrl.pathname)) {
+            const alreadyInCache = await cache.match(req);
+            const alreadyInPCache = await pCache.match(req);
+            if (!alreadyInCache || !alreadyInPCache) {
+              const res = await oldC.match(req);
+              if (res && res.ok && res.status === 200 && !res.redirected) {
+                if (!alreadyInCache) await cache.put(req, res.clone());
+                if (!alreadyInPCache) await pCache.put(req, res.clone());
+              }
+            }
+          }
+        } catch (itemErr) {}
+      }
+    } catch (oldErr) {}
+  }
 }
 
 async function deleteOldCaches() {
@@ -860,6 +886,29 @@ self.addEventListener('message', (event) => {
       } catch (e) {}
     })();
 
+    if (event.waitUntil) event.waitUntil(promise);
+    promise.then(() => reply(true)).catch(() => reply(false));
+    return;
+  }
+
+  if (event.data.type === 'TOUCH_SESSION') {
+    const promise = (async () => {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const pCache = await caches.open(OFFLINE_DATA_CACHE);
+        let sessionRes = await cache.match('/offline-session') || await pCache.match('/offline-session');
+        if (sessionRes) {
+          const data = await sessionRes.json();
+          if (data && data.active) {
+            data.ts = Date.now();
+            const res1 = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+            const res2 = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+            await cache.put('/offline-session', res1);
+            await pCache.put('/offline-session', res2);
+          }
+        }
+      } catch (e) {}
+    })();
     if (event.waitUntil) event.waitUntil(promise);
     promise.then(() => reply(true)).catch(() => reply(false));
     return;

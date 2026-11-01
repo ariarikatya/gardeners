@@ -44,16 +44,28 @@ export async function GET(req) {
     include: { services: true },
   });
 
-  const orders = await prisma.order.findMany({
-    where: {
-      date: {
-        gte: start,
-        lte: end,
+  const [orders, dayComments] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        date: {
+          gte: start,
+          lte: end,
+        },
       },
-    },
-    include: { gardener: true, service: true },
-    orderBy: { date: 'asc' },
-  });
+      include: { gardener: true, service: true },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.gardenerDayComment.findMany({
+      where: {
+        date: {
+          gte: start,
+          lte: end,
+        },
+      },
+      include: { gardener: true },
+      orderBy: { date: 'asc' },
+    }),
+  ]);
 
   const normalizePaidTargets = (paidTo) => {
     if (!paidTo) return [];
@@ -212,6 +224,15 @@ export async function GET(req) {
       pendingExpenses: perGardener.reduce((sum, item) => sum + Number(item.pendingExpenses || 0), 0),
     },
     gardeners: perGardener,
+    dayComments: dayComments.map((c) => ({
+      id: c.id,
+      date: c.date.toISOString(),
+      gardenerId: c.gardenerId,
+      gardenerName: c.gardener?.name || null,
+      text: c.text,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+    })),
   });
 }
 

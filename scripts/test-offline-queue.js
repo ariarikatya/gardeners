@@ -10,17 +10,17 @@ async function runTests() {
   console.log('🧪 Starting tests for offline store, queue, and idempotency...\n');
 
   // Test 1: Order filtering for offline cache
-  console.log('Test 1: filterOrdersForOffline keeps active orders and recent 3-day completed orders');
+  console.log('Test 1: filterOrdersForOffline keeps active orders and orders from prev/curr/next month');
   const now = new Date();
-  const date2DaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2).toISOString();
-  const date20DaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 20).toISOString();
+  const dateCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 15).toISOString();
+  const date2MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString();
   const dateIn5Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5).toISOString();
 
   const mockOrders = [
-    { id: '1', status: 'Новый заказ', date: date20DaysAgo }, // Active status -> keep
-    { id: '2', status: 'Выполнен', date: date2DaysAgo },    // Recent completed -> keep
-    { id: '3', status: 'Выполнен', date: date20DaysAgo },   // Old completed -> exclude
-    { id: '4', status: 'Аукцион', date: dateIn5Days },     // Auction -> keep
+    { id: '1', status: 'Новый заказ', date: date2MonthsAgo }, // Active status -> keep
+    { id: '2', status: 'Выполнен', date: dateCurrentMonth },    // Current month completed -> keep
+    { id: '3', status: 'Выполнен', date: date2MonthsAgo },      // Old completed outside 3-month window -> exclude
+    { id: '4', status: 'Аукцион', date: dateIn5Days },        // Auction -> keep
   ];
 
   const filtered = filterOrdersForOffline(mockOrders);

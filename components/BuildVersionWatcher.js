@@ -71,7 +71,9 @@ export default function BuildVersionWatcher() {
       }
       if ('caches' in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map((k) => caches.delete(k)));
+        await Promise.all(
+          keys.filter((k) => k !== 'anemon-agro-offline-data').map((k) => caches.delete(k))
+        );
       }
     } catch (e) {
       console.error('Error unregistering/re-registering service worker on version reload:', e);

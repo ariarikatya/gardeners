@@ -51,6 +51,7 @@ model Gardener {
   orders           Order[]
   dayOffs          DayOff[]
   blockedDays      BlockedDay[]
+  dayComments      GardenerDayComment[]
   services         Service[]         @relation("GardenerServices")
   inventoryItems   InventoryItem[]   @relation("GardenerInventory")
   preparationItems PreparationItem[] @relation("GardenerPreparations")
@@ -136,6 +137,20 @@ model BlockedDay {
   createdAt  DateTime @default(now())
 
   @@unique([date, gardenerId])
+}
+
+model GardenerDayComment {
+  id         String   @id @default(uuid())
+  date       DateTime // Только дата (YYYY-MM-DD)
+  gardenerId String
+  gardener   Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+  text       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([date, gardenerId])
+  @@index([gardenerId])
+  @@index([date])
 }
 
 model InventoryItem {

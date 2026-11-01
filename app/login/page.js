@@ -12,6 +12,8 @@ import {
   notifySwOfflinePhone,
   notifySwOfflineSession,
   syncUsersToPhoneRoleMap,
+  requestStoragePersistence,
+  touchOfflineSession,
 } from '@/lib/offlineStore';
 
 import React from 'react';
@@ -157,6 +159,8 @@ export default function LoginPage() {
 
   const redirectByRole = (role, isOffline = false, targetPhone = null) => {
     if (!role) return;
+    requestStoragePersistence().catch(() => {});
+    touchOfflineSession();
     const phoneToUse = targetPhone || savedPhone || phone;
     activateOfflineSession(role, phoneToUse);
     const rolePath = role === 'ADMIN' ? '/admin' : role === 'LEADER' ? '/leader' : '/gardener';

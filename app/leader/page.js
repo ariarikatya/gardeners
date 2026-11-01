@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
-import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid } from '@/lib/offlineStore';
+import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, getQueueStats, retryConflicts, removeFromQueue } from '@/lib/offlineQueue';
 import { compressImage } from '@/lib/imageCompress';
+import { useOnlineReload } from '@/lib/useOnlineReload';
 
 const currency = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 });
 
@@ -78,6 +79,7 @@ export default function LeaderDashboard() {
   const [endDate, setEndDate] = useState(getDefaultRange().end);
   const [data, setData] = useState({ totals: {}, gardeners: [] });
   const [loading, setLoading] = useState(true);
+  const fetchSeqRef = useRef(0);
   const [savingId, setSavingId] = useState(null);
   const [opsModalGardener, setOpsModalGardener] = useState(null);
   const [opsList, setOpsList] = useState([]);
@@ -94,6 +96,7 @@ export default function LeaderDashboard() {
   const pendingCountRef = useRef(0);
   const [conflictItems, setConflictItems] = useState([]);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
 
   const summary = useMemo(() => {
     const revenue = Number(data.totals?.revenue || 0);
@@ -210,6 +213,12 @@ export default function LeaderDashboard() {
     };
 
     initRoleCheck();
+    (async () => {
+      try {
+        await requestStoragePersistence();
+      } catch (e) {}
+    })();
+    touchOfflineSession();
 
     const offlineSess = localStorage.getItem('offline_session') === '1';
     const role = localStorage.getItem('auth_role');
@@ -262,9 +271,10 @@ export default function LeaderDashboard() {
       }).catch(() => {});
     }
 
-    const handleOnline = () => {
+    const handleOnline = async () => {
       setIsOffline(false);
       handleSyncQueue();
+      await fetchData(startDate, endDate);
     };
 
     const handleOfflineStatus = () => {
@@ -277,6 +287,7 @@ export default function LeaderDashboard() {
     const interval = setInterval(() => {
       if (navigator.onLine) {
         handleSyncQueue();
+        fetchData(startDate, endDate);
       }
     }, 30000);
 
@@ -329,8 +340,40 @@ export default function LeaderDashboard() {
     return !navigator.onLine;
   };
 
+  useOnlineReload(() => fetchData(startDate, endDate), 1000);
+
   const fetchData = async (nextStart = startDate, nextEnd = endDate) => {
-    setLoading(true);
+    const seq = ++fetchSeqRef.current;
+    const reqStart = nextStart;
+    const reqEnd = nextEnd;
+
+    // 1. Immediately inspect cache for this exact date range and display it if present
+    const rangeCacheKey = `leader_data_${reqStart}_${reqEnd}`;
+    const cachedRangeObj = await getCache(rangeCacheKey);
+    let cached = cachedRangeObj?.data;
+    if (cachedRangeObj?.updatedAt) {
+      setCacheUpdatedAt(cachedRangeObj.updatedAt);
+    }
+
+    // Check leader_data_latest: if requested matches, or as self-healing fallback when cached is empty
+    if (!cached) {
+      const latestObj = await getCache('leader_data_latest');
+      if (latestObj && latestObj.data) {
+        const latestStart = latestObj.data.period?.start?.slice(0, 10);
+        const latestEnd = latestObj.data.period?.end?.slice(0, 10);
+        if (latestStart === reqStart && latestEnd === reqEnd) {
+          cached = latestObj.data;
+        } else if (!latestStart || latestObj.data.orders?.length > 0 || latestObj.data.gardeners?.length > 0) {
+          // Self-healing fallback: extract data from latestObj rather than rendering empty screen
+          cached = latestObj.data;
+        }
+        if (cached && latestObj.updatedAt) setCacheUpdatedAt(latestObj.updatedAt);
+      }
+    }
+
+    if (seq === fetchSeqRef.current && cached) {
+      setData(cached);
+    }
 
     if (isOfflineSessionGuard()) {
       setIsOffline(true);
@@ -356,19 +399,17 @@ export default function LeaderDashboard() {
         return;
       }
 
-      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
-      if (cached) {
-        setData(cached);
-      }
       setLoading(false);
       await refreshQueueCount();
       return;
     }
 
+    setLoading(true);
+
     try {
       const params = new URLSearchParams();
-      if (nextStart) params.set('start', nextStart);
-      if (nextEnd) params.set('end', nextEnd);
+      if (reqStart) params.set('start', reqStart);
+      if (reqEnd) params.set('end', reqEnd);
       const res = await apiFetch(`/api/leader?${params.toString()}`);
       if (!res.ok) {
         const errorText = await res.text();
@@ -377,21 +418,69 @@ export default function LeaderDashboard() {
         throw new Error((errorJson && errorJson.error) || `Ошибка сервера (${res.status}): ${errorText.slice(0, 100)}`);
       }
       const json = await res.json();
-      setData(json);
-      saveCache(`leader_data_${nextStart}_${nextEnd}`, json);
-      saveCache('leader_data_latest', json);
+
+      // Verify that the response period matches the requested period before saving
+      const respStart = json.period?.start?.slice(0, 10);
+      const respEnd = json.period?.end?.slice(0, 10);
+      if (!respStart || !respEnd || (respStart === reqStart && respEnd === reqEnd)) {
+        await saveCache(rangeCacheKey, json);
+        await saveCache('leader_data_latest', json);
+      }
+
+      if (seq === fetchSeqRef.current) {
+        setData(json);
+      }
+
+      // Guarantee 3-month cache: current, previous, and next month relative to getDefaultRange()
+      const nowD = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const getMonthRange = (year, month) => {
+        const dt = new Date(year, month, 1);
+        const y = dt.getFullYear();
+        const m = dt.getMonth();
+        const lastDay = new Date(y, m + 1, 0).getDate();
+        return {
+          start: `${y}-${pad2(m + 1)}-01`,
+          end: `${y}-${pad2(m + 1)}-${pad2(lastDay)}`,
+        };
+      };
+
+      const threeMonthRanges = [
+        getMonthRange(nowD.getFullYear(), nowD.getMonth() - 1),
+        getMonthRange(nowD.getFullYear(), nowD.getMonth()),
+        getMonthRange(nowD.getFullYear(), nowD.getMonth() + 1),
+      ];
+
+      const rangesToPreload = threeMonthRanges.filter(r => r.start !== reqStart || r.end !== reqEnd);
+
+      if (rangesToPreload.length > 0) {
+        await Promise.all(rangesToPreload.map(async (r) => {
+          try {
+            const bgParams = new URLSearchParams({ start: r.start, end: r.end });
+            const bgRes = await apiFetch(`/api/leader?${bgParams.toString()}`);
+            if (bgRes.ok) {
+              const bgJson = await bgRes.json();
+              await saveCache(`leader_data_${r.start}_${r.end}`, bgJson);
+            }
+          } catch (e) {
+            console.warn(`Could not preload leader range ${r.start}..${r.end}:`, e);
+          }
+        }));
+      }
+
+      touchOfflineSession();
+      requestStoragePersistence().catch(() => {});
       setIsOffline(false);
     } catch (error) {
       console.warn('Network error in leader fetchData, trying cache:', error.message);
       setIsOffline(true);
-      const cached = (await getCache(`leader_data_${nextStart}_${nextEnd}`))?.data || (await getCache('leader_data_latest'))?.data;
-      if (cached) {
-        setData(cached);
-      } else {
+      if (!cached && seq === fetchSeqRef.current) {
         alert(error.message);
       }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
       await refreshQueueCount();
     }
   };
@@ -698,13 +787,24 @@ export default function LeaderDashboard() {
       {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (
         <div className="bg-amber-500 text-white px-4 py-2.5 text-xs font-semibold shadow-sm space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span>⚡ {isOffline ? 'Оффлайн-режим — показаны сохранённые данные' : 'Соединение восстановлено'}</span>
               {pendingQueueCount > 0 && (
                 <span className="bg-amber-700/80 px-2 py-0.5 rounded-full text-[11px]">
                   В очереди изменений: {pendingQueueCount}
                 </span>
               )}
+              {isOffline && cacheUpdatedAt && (() => {
+                const d = new Date(cacheUpdatedAt);
+                const pad = (n) => String(n).padStart(2, '0');
+                const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+                const isOlder24h = (Date.now() - cacheUpdatedAt) > 24 * 60 * 60 * 1000;
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${isOlder24h ? 'bg-red-700 text-white border border-red-400' : 'bg-amber-600/90 text-amber-50'}`}>
+                    Данные сохранены: {timeStr}{isOlder24h ? ' (старше 24 ч)' : ''}
+                  </span>
+                );
+              })()}
             </div>
             {pendingQueueCount > 0 && (
               <button
@@ -855,6 +955,19 @@ export default function LeaderDashboard() {
 
         {loading ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-500">Загрузка данных...</div>
+        ) : isOffline && !data ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500 font-medium space-y-3">
+            <div className="text-4xl">📡</div>
+            <div className="text-base font-semibold text-slate-700">Данных в офлайне нет — подключитесь к интернету</div>
+            <p className="text-xs text-slate-400">При появлении сети данные загрузятся автоматически.</p>
+            <button
+              type="button"
+              onClick={() => fetchData(startDate, endDate)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            >
+              🔄 Повторить попытку
+            </button>
+          </div>
         ) : (
           <>
             <div style={{ fontSize: `${leaderScale}em` }} className="grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -896,6 +1009,7 @@ export default function LeaderDashboard() {
                   <thead>
                     <tr className="bg-slate-50 text-slate-600 text-left">
                       <th className="px-2 py-1.5 font-semibold">Садовник</th>
+                      <th className="px-2 py-1.5 font-semibold">Комментарии по дням</th>
                       <th className="px-2 py-1.5 font-semibold">Заказы</th>
                       <th className="px-2 py-1.5 font-semibold">Заработано</th>
                       <th className="px-2 py-1.5 font-semibold">Долг фирме</th>
@@ -909,11 +1023,29 @@ export default function LeaderDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(data.gardeners || []).map((g) => (
+                    {(data.gardeners || []).map((g) => {
+                      const gardenerComments = (data.dayComments || []).filter(c => c.gardenerId === g.id);
+                      return (
                       <tr key={g.id} className="border-t border-slate-100 align-top">
                         <td className="px-2 py-2">
                           <div className="font-semibold text-slate-800">{g.name}</div>
                           <div className="text-xs text-slate-500">{g.phone}</div>
+                        </td>
+                        <td className="px-2 py-2 max-w-xs">
+                          {gardenerComments.length === 0 ? (
+                            <span className="text-slate-400 text-[11px]">—</span>
+                          ) : (
+                            <div className="space-y-1 max-h-24 overflow-y-auto">
+                              {gardenerComments.map((c) => (
+                                <div key={c.id} className="bg-emerald-50 text-emerald-950 p-1.5 rounded border border-emerald-200 text-[11px]">
+                                  <span className="font-bold text-emerald-800">
+                                    📅 {c.date ? new Date(c.date).toLocaleDateString('ru-RU') : ''}:
+                                  </span>{' '}
+                                  <span>{c.text}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2">{g.totalOrders}</td>
                         <td className="px-2 py-2 text-emerald-700 font-semibold">{formatMoney(g.revenue)}</td>
@@ -1058,7 +1190,8 @@ export default function LeaderDashboard() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 </div>
