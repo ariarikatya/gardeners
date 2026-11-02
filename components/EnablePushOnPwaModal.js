@@ -42,18 +42,29 @@ export default function EnablePushOnPwaModal() {
         // Show ONLY in PWA installed mode
         if (!isPwa) return;
 
+        // Check user DB state: if notificationsEnabled === true, do not show
+        try {
+          const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+          if (meRes.ok) {
+            const meData = await meRes.json();
+            if (meData?.user?.notificationsEnabled === true) {
+              return;
+            }
+          }
+        } catch (meErr) {}
+
         if (typeof Notification !== 'undefined') {
-          if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+          if (Notification.permission === 'denied') {
             return;
           }
         }
 
         // If PushManager & SW exist, check subscription status
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
+        if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           try {
             const reg = await navigator.serviceWorker.ready;
             const sub = await reg.pushManager.getSubscription();
-            if (sub) return; // already subscribed
+            if (sub) return; // already subscribed and permission granted
           } catch (e) {}
         }
 

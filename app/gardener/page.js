@@ -392,7 +392,7 @@ export default function GardenerDashboard() {
     try {
       const [resOrders, resOps] = await Promise.all([
         apiFetch('/api/gardener/orders'),
-        apiFetch('/api/gardener/operations?all=1')
+        apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' })
       ]);
 
       if (!resOrders.ok) {
@@ -2503,32 +2503,8 @@ export default function GardenerDashboard() {
 
                 if (allExpenses.length === 0) {
                   return (
-                    <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50 flex flex-col items-center justify-center gap-2">
-                      <span>Трат пока нет</span>
-                      {typeof navigator !== 'undefined' && navigator.onLine && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const res = await fetch('/api/gardener/operations?all=1', { credentials: 'include' });
-                              if (res.ok) {
-                                const json = await res.json();
-                                const opsList = json.operations || [];
-                                setOperations(opsList);
-                                await saveCache('operations', opsList);
-                                alert(`Загружено операций: ${opsList.length} (статус ${res.status})`);
-                              } else {
-                                alert(`Ошибка обновления: HTTP ${res.status}`);
-                              }
-                            } catch (e) {
-                              alert(`Ошибка сети: ${e.message}`);
-                            }
-                          }}
-                          className="mt-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium cursor-pointer"
-                        >
-                          🔄 Проверить траты
-                        </button>
-                      )}
+                    <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">
+                      Трат пока нет
                     </div>
                   );
                 }

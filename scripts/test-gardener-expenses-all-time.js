@@ -30,13 +30,11 @@ async function testGardenerExpensesAllTime() {
   assert(swContent.includes('api/gardener/operations'), 'sw.js must reference gardener operations cache purging');
   console.log('  ✓ sw.js has cache version bump and purge logic');
 
-  // 3. Assert app/gardener/page.js still uses `?all=1` and has the empty-state retry path
+  // 3. Assert app/gardener/page.js still uses `all=1` and saves full operations cache
   const gardenerPageContent = fs.readFileSync(path.join(__dirname, '..', 'app', 'gardener', 'page.js'), 'utf8');
-  assert(gardenerPageContent.includes('/api/gardener/operations?all=1'), 'app/gardener/page.js must query /api/gardener/operations?all=1');
-  assert(gardenerPageContent.includes('fetch(\'/api/gardener/operations?all=1\''), 'Empty state retry button must fetch /api/gardener/operations?all=1 directly');
-  assert(gardenerPageContent.includes('Проверить траты'), 'Empty state must have retry button');
+  assert(gardenerPageContent.includes('api/gardener/operations?all=1'), 'app/gardener/page.js must query /api/gardener/operations?all=1');
   assert(gardenerPageContent.includes("saveCache('operations', operationsList)"), 'Must save all operations list into IndexedDB operations cache');
-  console.log('  ✓ app/gardener/page.js uses ?all=1, IndexedDB fallback, and empty-state retry');
+  console.log('  ✓ app/gardener/page.js uses all=1 and IndexedDB fallback');
 
   console.log('🎉 All gardener expenses tests passed successfully!');
 }

@@ -1254,13 +1254,22 @@ export default function LeaderDashboard() {
                   </h3>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openOpsModal(opsModalGardener, startDate, endDate, !opsModalAllTime)}
-                    className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded cursor-pointer"
-                  >
-                    {opsModalAllTime ? 'За период' : 'За всё время'}
-                  </button>
+                  <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => openOpsModal(opsModalGardener, startDate, endDate, false)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${!opsModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      Текущий период
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openOpsModal(opsModalGardener, startDate, endDate, true)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${opsModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      За всё время
+                    </button>
+                  </div>
                   <button onClick={closeOpsModal} className="text-slate-500 hover:text-slate-700 text-sm">Закрыть</button>
                 </div>
               </div>
@@ -1443,13 +1452,22 @@ export default function LeaderDashboard() {
                   </h3>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openOrdersModal(ordersModalGardener, startDate, endDate, !ordersModalAllTime)}
-                    className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded cursor-pointer"
-                  >
-                    {ordersModalAllTime ? 'За период' : 'За всё время'}
-                  </button>
+                  <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => openOrdersModal(ordersModalGardener, startDate, endDate, false)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${!ordersModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      Текущий период
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openOrdersModal(ordersModalGardener, startDate, endDate, true)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${ordersModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      За всё время
+                    </button>
+                  </div>
                   <button onClick={closeOrdersModal} className="text-slate-500 hover:text-slate-700 text-sm">Закрыть</button>
                 </div>
               </div>
