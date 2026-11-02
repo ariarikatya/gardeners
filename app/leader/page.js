@@ -3,6 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
+import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
+import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
+import PhotoViewer from '@/components/PhotoViewer';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -74,6 +77,19 @@ const getPaymentTargetLabel = (paidTo, paid) => {
 
 export default function LeaderDashboard() {
   const router = useRouter();
+
+  // Полноэкранный просмотр фото
+  const [viewerImages, setViewerImages] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  const openViewer = (images, index = 0) => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setViewerImages(list);
+    setViewerIndex(index);
+    setIsViewerOpen(true);
+  };
   const [range, setRange] = useState('month');
   const [startDate, setStartDate] = useState(getDefaultRange().start);
   const [endDate, setEndDate] = useState(getDefaultRange().end);
@@ -872,7 +888,7 @@ export default function LeaderDashboard() {
         </div>
 
         {leaderTab === 'catalog' ? (
-          <CatalogLeaderSection gardeners={data.gardeners || []} onRefresh={fetchData} />
+          <CatalogLeaderSection gardeners={data.gardeners || []} onRefresh={fetchData} openViewer={openViewer} />
         ) : (
         <>
         <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap gap-3 items-end">
@@ -1294,7 +1310,15 @@ export default function LeaderDashboard() {
                             <div className="text-sm font-medium">{getOperationTypeLabel(op.type)} — {formatMoney(op.amount)} {op.type === 'expense' && (op.approved ? <span className="text-[11px] ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded">Утверждён{op.approvedAmount && op.approvedAmount !== op.amount ? `: ${formatMoney(op.approvedAmount)}` : ''}</span> : <span className="text-[11px] ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 rounded">Новая</span>)}</div>
                             {op.description && <div className="text-xs text-slate-500">{renderOperationDescription(op)}</div>}
                             <div className="text-xs text-slate-400">{new Date(op.createdAt).toLocaleString('ru-RU')}</div>
-                            {op.receiptUrl && <a href={op.receiptUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-1"><img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200" /></a>}
+                            {op.receiptUrl && (
+                              <button
+                                type="button"
+                                onClick={() => openViewer(op.receiptUrl)}
+                                className="inline-block mt-1 cursor-pointer block"
+                              >
+                                <img src={op.receiptUrl} alt="Чек" className="w-20 h-20 object-cover rounded border border-slate-200 hover:opacity-90" />
+                              </button>
+                            )}
                           </div>
 
                           {op.type === 'expense' && <div className="flex items-center gap-2">
@@ -1434,11 +1458,22 @@ export default function LeaderDashboard() {
         </>
         )}
       </main>
+
+      <InstallNotificationsGuideModal />
+      <EnablePushOnPwaModal />
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-function CatalogLeaderSection({ gardeners, onRefresh }) {
+function CatalogLeaderSection({ gardeners, onRefresh, openViewer }) {
   const [catalogType, setCatalogType] = useState('inventory');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1697,7 +1732,9 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
             <div className="flex items-center gap-2">
               {image ? (
                 <div className="relative group flex-shrink-0">
-                  <img src={image} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+                  <button type="button" onClick={() => openViewer(image)} className="block">
+                    <img src={image} alt="Превью" className="w-16 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => setImage('')}
@@ -1766,7 +1803,9 @@ function CatalogLeaderSection({ gardeners, onRefresh }) {
                         className="rounded text-emerald-600 flex-shrink-0"
                       />
                       {it.image ? (
-                        <img src={it.image} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                        <span onClick={(e) => { e.preventDefault(); e.stopPropagation(); openViewer(it.image); }}>
+                          <img src={it.image} alt={it.name} className="w-12 h-12 object-cover rounded-lg border border-slate-200 flex-shrink-0 cursor-pointer hover:opacity-80" />
+                        </span>
                       ) : (
                         <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-[9px] text-slate-400 flex-shrink-0 text-center px-1">
                           Без фото

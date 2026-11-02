@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import GardenerModalEditor from '@/components/GardenerModalEditor';
+import PhotoViewer from '@/components/PhotoViewer';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 
 export default function LeaderUsersPage() {
@@ -18,6 +19,19 @@ export default function LeaderUsersPage() {
   const [savingGardenerId, setSavingGardenerId] = useState(null);
   const [warnings, setWarnings] = useState({});
   const [pendingUploads, setPendingUploads] = useState({});
+
+  // Полноэкранный просмотр фото
+  const [viewerImages, setViewerImages] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  const openViewer = (images, index = 0) => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setViewerImages(list);
+    setViewerIndex(index);
+    setIsViewerOpen(true);
+  };
 
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -430,7 +444,9 @@ export default function LeaderUsersPage() {
                     </td>
                     <td className="p-2">
                       {photo ? (
-                        <img src={photo} alt={g.name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 mb-1" />
+                        <button type="button" onClick={() => openViewer(photo)} className="block">
+                          <img src={photo} alt={g.name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 mb-1 cursor-pointer hover:opacity-80" />
+                        </button>
                       ) : null}
                       <input
                         type="file"
@@ -513,6 +529,14 @@ export default function LeaderUsersPage() {
           />
         )}
       </div>
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
+        />
+      )}
     </div>
   );
 }

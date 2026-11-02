@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import GardenerModalEditor from '@/components/GardenerModalEditor';
+import PhotoViewer from '@/components/PhotoViewer';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 
 export default function AdminGardenersPage() {
@@ -12,6 +13,19 @@ export default function AdminGardenersPage() {
   const [activeModal, setActiveModal] = useState(null); // { gardener, type }
   const [editingGardener, setEditingGardener] = useState(null);
   const [pendingUploads, setPendingUploads] = useState({}); // gardenerId/key => { base64, loading, retryable, error }
+
+  // Полноэкранный просмотр фото
+  const [viewerImages, setViewerImages] = useState([]);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  const openViewer = (images, index = 0) => {
+    const list = (Array.isArray(images) ? images : [images]).filter(Boolean);
+    if (!list.length) return;
+    setViewerImages(list);
+    setViewerIndex(index);
+    setIsViewerOpen(true);
+  };
 
   useEffect(() => {
     fetchData();
@@ -285,7 +299,9 @@ export default function AdminGardenersPage() {
                     </td>
                     <td className="p-2">
                       {photo ? (
-                        <img src={photo} alt={g.name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 mb-1" />
+                        <button type="button" onClick={() => openViewer(photo)} className="block">
+                          <img src={photo} alt={g.name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 mb-1 cursor-pointer hover:opacity-80" />
+                        </button>
                       ) : null}
                       <input
                         type="file"
@@ -432,7 +448,9 @@ export default function AdminGardenersPage() {
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Фото садовника</label>
                 <div className="flex items-center gap-2">
                   {editingGardener.photoUrl && (
-                    <img src={editingGardener.photoUrl} alt={editingGardener.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                    <button type="button" onClick={() => openViewer(editingGardener.photoUrl)} className="block">
+                      <img src={editingGardener.photoUrl} alt={editingGardener.name} className="w-10 h-10 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-80" />
+                    </button>
                   )}
                   <input
                     type="file"
@@ -477,6 +495,14 @@ export default function AdminGardenersPage() {
           onSave={async (gardenerId, dataObj) => {
             await handleGardenerUpdate(gardenerId, dataObj);
           }}
+        />
+      )}
+
+      {isViewerOpen && (
+        <PhotoViewer
+          images={viewerImages}
+          initialIndex={viewerIndex}
+          onClose={() => setIsViewerOpen(false)}
         />
       )}
     </div>
