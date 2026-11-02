@@ -1,14 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { detectPwaEnv } from '@/lib/pwa-env';
+import { apiFetch } from '@/lib/apiFetch';
 
 export default function InstallNotificationsGuideModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isIosPlatform, setIsIosPlatform] = useState(true);
+  const checkingRef = useRef(false);
 
-  useEffect(() => {
+  const checkModalState = useCallback(async () => {
     if (typeof window === 'undefined') return;
+    if (checkingRef.current) return;
+    checkingRef.current = true;
 
     try {
       const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
@@ -17,10 +21,18 @@ export default function InstallNotificationsGuideModal() {
       if (dismissedAt) {
         const timePassed = Date.now() - Number(dismissedAt);
         if (timePassed < 24 * 60 * 60 * 1000) {
+          checkingRef.current = false;
           return;
         }
       } else if (dismissed === '1') {
-        // legacy flag fallback
+        checkingRef.current = false;
+        return;
+      }
+
+      // Check user authentication
+      const hasToken = localStorage.getItem('auth_token') || localStorage.getItem('auth_role');
+      if (!hasToken) {
+        checkingRef.current = false;
         return;
       }
 
@@ -29,14 +41,82 @@ export default function InstallNotificationsGuideModal() {
       const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
       // Do not display if already in PWA or not a mobile device
-      if (isMobile && !isPwa) {
+      if (!isMobile || isPwa) {
+        checkingRef.current = false;
+        return;
+      }
+
+      // Criterion «уведомления не включены»:
+      // Notification.permission !== 'granted' ИЛИ в базе notificationsEnabled !== true
+      let notifEnabledInDb = false;
+      try {
+        const meRes = await apiFetch('/api/auth/me');
+        if (!meRes.ok) {
+          // If not authenticated or 401, do not show until login
+          checkingRef.current = false;
+          return;
+        }
+        const meData = await meRes.json();
+        notifEnabledInDb = meData?.user?.notificationsEnabled === true;
+      } catch (meErr) {
+        // network issue: if not authenticated, do not show
+        checkingRef.current = false;
+        return;
+      }
+
+      const isPermissionGranted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+
+      // Both must be true for notifications to be considered enabled
+      const notificationsAreEnabled = isPermissionGranted && notifEnabledInDb;
+
+      if (!notificationsAreEnabled) {
         setIsIosPlatform(Boolean(env.isIos));
         setIsOpen(true);
+      } else {
+        setIsOpen(false);
       }
     } catch (e) {
       console.warn('InstallNotificationsGuideModal check error:', e);
+    } finally {
+      checkingRef.current = false;
     }
   }, []);
+
+  useEffect(() => {
+    checkModalState();
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        checkModalState();
+      }
+    };
+
+    const handleFocus = () => {
+      checkModalState();
+    };
+
+    const handlePageShow = () => {
+      checkModalState();
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('pageshow', handlePageShow);
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('pageshow', handlePageShow);
+      }
+    };
+  }, [checkModalState]);
 
   const handleDismiss = () => {
     try {
@@ -116,7 +196,7 @@ export default function InstallNotificationsGuideModal() {
                 <img
                   src="/icon-192.png"
                   alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0 shadow-xs"
+                  className="w-7 h-7 flex-shrink-0"
                 />
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
@@ -157,7 +237,7 @@ export default function InstallNotificationsGuideModal() {
                 <img
                   src="/icon-192.png"
                   alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0 shadow-xs"
+                  className="w-7 h-7 flex-shrink-0"
                 />
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.

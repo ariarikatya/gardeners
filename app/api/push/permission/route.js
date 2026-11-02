@@ -4,12 +4,15 @@ import { verifyToken } from '@/lib/jwt';
 
 export async function POST(req) {
   try {
-    const token = req.cookies.get('token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authHeader = req.headers?.get ? req.headers.get('authorization') : null;
+    const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const cookieToken = req.cookies?.get ? req.cookies.get('token')?.value : null;
+
+    let payload = cookieToken ? await verifyToken(cookieToken) : null;
+    if (!payload && bearerToken) {
+      payload = await verifyToken(bearerToken);
     }
 
-    const payload = await verifyToken(token);
     if (!payload?.userId && !payload?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

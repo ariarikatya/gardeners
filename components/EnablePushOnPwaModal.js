@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { detectPwaEnv, CLIENT_VERSION } from '@/lib/pwa-env';
 import { clientLog } from '@/lib/clientLog';
+import { apiFetch } from '@/lib/apiFetch';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -15,79 +16,146 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// In-memory flag for active window session (reset when PWA is closed and reopened)
+let inMemoryDismissed = false;
+
 export default function EnablePushOnPwaModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
+  const checkingRef = useRef(false);
 
-  useEffect(() => {
+  const checkModal = useCallback(async () => {
     if (typeof window === 'undefined') return;
+    if (checkingRef.current) return;
+    checkingRef.current = true;
 
-    let isCancelled = false;
-
-    const checkModal = async () => {
+    try {
+      // Remove legacy sessionStorage flag so iOS PWA relaunch is not blocked
       try {
-        const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
-        const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
-        if (dismissedSession === '1') return;
+        sessionStorage.removeItem('pwa_push_dismissed');
+      } catch (e) {}
 
-        // 24-hour temporary dismissal check
-        if (dismissedAt) {
-          const timePassed = Date.now() - Number(dismissedAt);
-          if (timePassed < 24 * 60 * 60 * 1000) return;
+      if (inMemoryDismissed) {
+        checkingRef.current = false;
+        return;
+      }
+
+      const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
+      // 24-hour temporary dismissal check
+      if (dismissedAt) {
+        const timePassed = Date.now() - Number(dismissedAt);
+        if (timePassed < 24 * 60 * 60 * 1000) {
+          checkingRef.current = false;
+          return;
         }
+      }
 
-        const env = detectPwaEnv();
-        const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
+      const env = detectPwaEnv();
+      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-        // Show ONLY in PWA installed mode
-        if (!isPwa) return;
+      // Show ONLY in PWA installed (standalone) mode
+      if (!isPwa) {
+        checkingRef.current = false;
+        return;
+      }
 
-        // Check user DB state: if notificationsEnabled === true, do not show
+      // Check authentication: user must be logged in
+      const hasAuth = localStorage.getItem('auth_token') || localStorage.getItem('auth_role');
+      if (!hasAuth) {
+        checkingRef.current = false;
+        return;
+      }
+
+      let meData = null;
+      try {
+        const meRes = await apiFetch('/api/auth/me');
+        if (!meRes.ok) {
+          checkingRef.current = false;
+          return;
+        }
+        meData = await meRes.json();
+      } catch (meErr) {
+        checkingRef.current = false;
+        return;
+      }
+
+      // If user has notificationsEnabled === true in DB, notifications are connected -> do not show
+      if (meData?.user?.notificationsEnabled === true) {
+        setIsOpen(false);
+        checkingRef.current = false;
+        return;
+      }
+
+      // If user explicitly denied notifications in browser, cannot show dialog
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        checkingRef.current = false;
+        return;
+      }
+
+      // If Notification.permission === 'granted' AND push subscription already exists AND notificationsEnabled in DB
+      // (checked above for DB). If subscription exists but DB says false, we still need to prompt user to link/enable.
+      if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
-          const meRes = await fetch('/api/auth/me', { credentials: 'include' });
-          if (meRes.ok) {
-            const meData = await meRes.json();
-            if (meData?.user?.notificationsEnabled === true) {
-              return;
-            }
-          }
-        } catch (meErr) {}
-
-        if (typeof Notification !== 'undefined') {
-          if (Notification.permission === 'denied') {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          if (sub && meData?.user?.notificationsEnabled === true) {
+            setIsOpen(false);
+            checkingRef.current = false;
             return;
           }
-        }
+        } catch (e) {}
+      }
 
-        // If PushManager & SW exist, check subscription status
-        if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          try {
-            const reg = await navigator.serviceWorker.ready;
-            const sub = await reg.pushManager.getSubscription();
-            if (sub) return; // already subscribed and permission granted
-          } catch (e) {}
-        }
+      // Notifications are not fully connected -> show modal
+      setIsOpen(true);
+    } catch (err) {
+      console.warn('EnablePushOnPwaModal init error:', err);
+    } finally {
+      checkingRef.current = false;
+    }
+  }, []);
 
-        if (!isCancelled) {
-          setIsOpen(true);
-        }
-      } catch (err) {
-        console.warn('EnablePushOnPwaModal init error:', err);
+  useEffect(() => {
+    checkModal();
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        checkModal();
       }
     };
 
-    checkModal();
+    const handleFocus = () => {
+      checkModal();
+    };
+
+    const handlePageShow = () => {
+      checkModal();
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('pageshow', handlePageShow);
+    }
 
     return () => {
-      isCancelled = true;
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('pageshow', handlePageShow);
+      }
     };
-  }, []);
+  }, [checkModal]);
 
   const handleDismiss = () => {
     try {
       localStorage.setItem('pwa_push_dismissed_at', String(Date.now()));
-      sessionStorage.setItem('pwa_push_dismissed', '1');
     } catch (e) {}
+    inMemoryDismissed = true;
     setSubscribing(false);
     setIsOpen(false);
   };
@@ -109,10 +177,9 @@ export default function EnablePushOnPwaModal() {
       const permission = await Notification.requestPermission();
       clientLog('pwa_modal_permission_result', { permission });
 
-      // Save permission state to server
-      fetch('/api/push/permission', {
+      // Save permission state to server using apiFetch (includes Bearer + credentials)
+      await apiFetch('/api/push/permission', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notifPermission: permission, notificationsEnabled: permission === 'granted' }),
       }).catch(() => {});
@@ -122,7 +189,7 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      const vapidRes = await fetch('/api/push/vapid-public-key', { credentials: 'include' });
+      const vapidRes = await apiFetch('/api/push/vapid-public-key');
       const vapidData = await vapidRes.json().catch(() => ({}));
       if (!vapidData.key) {
         handleDismiss();
@@ -135,9 +202,8 @@ export default function EnablePushOnPwaModal() {
         applicationServerKey: urlBase64ToUint8Array(vapidData.key),
       });
 
-      const subRes = await fetch('/api/push/subscribe', {
+      const subRes = await apiFetch('/api/push/subscribe', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
       });

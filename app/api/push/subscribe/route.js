@@ -17,12 +17,16 @@ export async function POST(req) {
     }
 
     let userId = body.userId || null;
-    const token = req.cookies.get('token')?.value;
-    if (token) {
-      const payload = await verifyToken(token);
-      if (payload?.userId || payload?.id) {
-        userId = payload.userId || payload.id;
-      }
+    const authHeader = req.headers?.get ? req.headers.get('authorization') : null;
+    const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const cookieToken = req.cookies?.get ? req.cookies.get('token')?.value : null;
+
+    let payload = cookieToken ? await verifyToken(cookieToken) : null;
+    if (!payload && bearerToken) {
+      payload = await verifyToken(bearerToken);
+    }
+    if (payload?.userId || payload?.id) {
+      userId = payload.userId || payload.id;
     }
 
     let savedSub;

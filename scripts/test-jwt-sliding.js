@@ -19,6 +19,7 @@ class MockNextResponse {
       },
       get: (name) => this.cookiesMap.get(name)
     };
+    this.headers = new Headers();
   }
 
   static next() {

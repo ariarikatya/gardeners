@@ -8,12 +8,14 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req) {
   try {
-    const token = req.cookies.get('token')?.value;
-    if (!token) {
-      return NextResponse.json({ ok: false, error: 'Нет cookie авторизации' }, { status: 401 });
-    }
+    const authHeader = req.headers?.get ? req.headers.get('authorization') : null;
+    const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    const cookieToken = req.cookies?.get ? req.cookies.get('token')?.value : null;
 
-    const payload = await verifyToken(token).catch(() => null);
+    let payload = cookieToken ? await verifyToken(cookieToken).catch(() => null) : null;
+    if (!payload && bearerToken) {
+      payload = await verifyToken(bearerToken).catch(() => null);
+    }
     const userId = payload?.userId || payload?.id;
 
     if (!userId) {
