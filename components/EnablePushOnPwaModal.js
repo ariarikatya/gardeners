@@ -82,22 +82,16 @@ export default function EnablePushOnPwaModal() {
       const permission = await Notification.requestPermission();
       clientLog('pwa_modal_permission_result', { permission });
 
-      if (permission === 'denied') {
-        alert('Уведомления заблокированы. Вы можете включить их в настройках телефона.');
+      if (permission !== 'granted') {
+        // При 'denied' или 'default' тихо закрываем окно без alert, запоминая dismiss
         handleDismiss();
         return;
       }
 
-      if (permission !== 'granted') {
-        setSubscribing(false);
-        return;
-      }
-
       const vapidRes = await fetch('/api/push/vapid-public-key', { credentials: 'include' });
-      const vapidData = await vapidRes.json();
+      const vapidData = await vapidRes.json().catch(() => ({}));
       if (!vapidData.key) {
-        alert('VAPID публичный ключ не настроен на сервере.');
-        setSubscribing(false);
+        handleDismiss();
         return;
       }
 
@@ -114,17 +108,13 @@ export default function EnablePushOnPwaModal() {
         body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
       });
 
-      const subData = await subRes.json().catch(() => ({}));
-      if (subRes.ok && subData.ok !== false) {
-        // Успешно сохранено
+      if (subRes.ok) {
         clientLog('pwa_modal_subscribe_success');
-        setIsOpen(false);
-      } else {
-        alert('Ошибка при сохранении подписки на сервере: ' + (subData.error || 'Неизвестная ошибка'));
       }
+      setIsOpen(false);
     } catch (err) {
       console.error('Error enabling push in modal:', err);
-      alert('Ошибка при включении уведомлений: ' + err.message);
+      handleDismiss();
     } finally {
       setSubscribing(false);
     }

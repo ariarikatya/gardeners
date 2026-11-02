@@ -18,9 +18,12 @@ export default function InstallNotificationsGuideModal() {
 
       const env = detectPwaEnv();
       const isMobile = env.isMobile || env.isIos || env.isAndroid;
-      const isPwa = env.isStandalone || env.probableStandalone;
+      // Use rawIsStandalone to avoid false negatives when Notification API is missing on iOS
+      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
+      // Do not display if already in PWA or not a mobile device
       if (isMobile && !isPwa) {
+        // Also ensure PWA push modal was not dismissed in this session as a secondary guard
         setIsIosPlatform(env.isIos);
         setIsOpen(true);
       }
