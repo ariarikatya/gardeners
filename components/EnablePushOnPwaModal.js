@@ -22,58 +22,59 @@ export default function EnablePushOnPwaModal() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    try {
-      // Check dismissed in localStorage (or sessionStorage)
-      const dismissedLocal = localStorage.getItem('pwa_push_dismissed');
-      const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
-      if (dismissedLocal === '1' || dismissedSession === '1') return;
+    let isCancelled = false;
 
-      const env = detectPwaEnv();
-      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
+    const checkModal = async () => {
+      try {
+        const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
+        const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
+        if (dismissedSession === '1') return;
 
-      // Show ONLY in PWA installed mode
-      if (!isPwa) return;
+        // 24-hour temporary dismissal check
+        if (dismissedAt) {
+          const timePassed = Date.now() - Number(dismissedAt);
+          if (timePassed < 24 * 60 * 60 * 1000) return;
+        }
 
-      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        return; // User explicitly blocked in browser settings
-      }
+        const env = detectPwaEnv();
+        const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-      // If PushManager & SW exist, check subscription status
-      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-        navigator.serviceWorker.ready.then(async (reg) => {
-          try {
-            const sub = await reg.pushManager.getSubscription();
-            if (!sub || (typeof Notification !== 'undefined' && Notification.permission !== 'granted')) {
-              setIsOpen(true);
-            }
-          } catch (e) {
-            if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
-              setIsOpen(true);
-            }
-          }
-        }).catch(() => {
-          if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
-            setIsOpen(true);
-          }
-        });
-      } else {
-        // Even if PushManager is not yet ready or iOS standalone PWA without PushManager at init
+        // Show ONLY in PWA installed mode
+        if (!isPwa) return;
+
         if (typeof Notification !== 'undefined') {
-          if (Notification.permission !== 'granted') {
-            setIsOpen(true);
+          if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+            return;
           }
-        } else {
+        }
+
+        // If PushManager & SW exist, check subscription status
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) return; // already subscribed
+          } catch (e) {}
+        }
+
+        if (!isCancelled) {
           setIsOpen(true);
         }
+      } catch (err) {
+        console.warn('EnablePushOnPwaModal init error:', err);
       }
-    } catch (err) {
-      console.warn('EnablePushOnPwaModal init error:', err);
-    }
+    };
+
+    checkModal();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const handleDismiss = () => {
     try {
-      localStorage.setItem('pwa_push_dismissed', '1');
+      localStorage.setItem('pwa_push_dismissed_at', String(Date.now()));
       sessionStorage.setItem('pwa_push_dismissed', '1');
     } catch (e) {}
     setSubscribing(false);

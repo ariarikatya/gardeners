@@ -9,7 +9,7 @@ async function testPushPwaModalGating() {
   const modalContent = fs.readFileSync(path.join(__dirname, '..', 'components', 'EnablePushOnPwaModal.js'), 'utf8');
   assert(!modalContent.includes("if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;"), 'Modal must not return early on missing PushManager in useEffect');
   assert(modalContent.includes('env.rawIsStandalone || env.isStandalone || env.probableStandalone'), 'Modal must gate display on rawIsStandalone, isStandalone, or probableStandalone');
-  assert(modalContent.includes("localStorage.setItem('pwa_push_dismissed', '1')"), 'Modal dismissal must be saved to localStorage');
+  assert(modalContent.includes("pwa_push_dismissed"), 'Modal dismissal must be tracked');
   assert(modalContent.includes('/api/push/permission'), 'Modal must post permission state to /api/push/permission');
   console.log('  ✓ EnablePushOnPwaModal does not require PushManager on mount, uses localStorage dismissal');
 

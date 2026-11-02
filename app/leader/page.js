@@ -730,6 +730,16 @@ export default function LeaderDashboard() {
 
   const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); setOrdersModalAllTime(false); };
 
+  // Автоматическая синхронизация открытых модалок при смене диапазона дат
+  useEffect(() => {
+    if (opsModalGardener && !opsModalAllTime) {
+      openOpsModal(opsModalGardener, startDate, endDate, false);
+    }
+    if (ordersModalGardener && !ordersModalAllTime) {
+      openOrdersModal(ordersModalGardener, startDate, endDate, false);
+    }
+  }, [startDate, endDate]);
+
   const toggleOrderPaid = async (orderId, paidTo) => {
     const nextValue = Array.isArray(paidTo) ? paidTo : (paidTo ? [paidTo] : []);
     const previousOrder = ordersList.find((o) => o.id === orderId);
