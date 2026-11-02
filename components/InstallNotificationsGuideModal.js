@@ -59,7 +59,7 @@ export default function InstallNotificationsGuideModal() {
         </h3>
 
         {/* Список шагов строго сверху вниз без подписей Шаг N */}
-        <div className="space-y-3 mb-5 text-xs text-slate-700">
+        <div className="space-y-3 text-xs text-slate-700">
           {isIosPlatform ? (
             <>
               {/* iOS: три точки */}
@@ -105,12 +105,8 @@ export default function InstallNotificationsGuideModal() {
 
               {/* iOS: иконка приложения */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="4" />
-                    <path d="M8 12c1.5-2 4-2 5.5 0" />
-                    <path d="M12 12v4" />
-                  </svg>
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <img src="/icon-192.png" alt="Иконка приложения Anemon Agro" className="w-4 h-4 rounded object-cover flex-shrink-0" />
                 </div>
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
@@ -148,12 +144,8 @@ export default function InstallNotificationsGuideModal() {
 
               {/* Android: иконка приложения */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="4" />
-                    <path d="M8 12c1.5-2 4-2 5.5 0" />
-                    <path d="M12 12v4" />
-                  </svg>
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <img src="/icon-192.png" alt="Иконка приложения Anemon Agro" className="w-4 h-4 rounded object-cover flex-shrink-0" />
                 </div>
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
@@ -164,13 +156,15 @@ export default function InstallNotificationsGuideModal() {
         </div>
 
         {/* Кнопка Напомнить позже */}
-        <button
-          type="button"
-          onClick={handleDismiss}
-          className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
-        >
-          Напомнить позже
-        </button>
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={handleDismiss}
+            className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+          >
+            Напомнить позже
+          </button>
+        </div>
       </div>
     </div>
   );

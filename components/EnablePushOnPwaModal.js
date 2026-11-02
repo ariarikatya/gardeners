@@ -23,41 +23,49 @@ export default function EnablePushOnPwaModal() {
     if (typeof window === 'undefined') return;
 
     try {
-      // Проверяем флаг в sessionStorage, чтобы не показывать в текущую сессию
+      // Check dismissed in localStorage (or sessionStorage)
+      const dismissedLocal = localStorage.getItem('pwa_push_dismissed');
       const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
-      if (dismissedSession === '1') return;
+      if (dismissedLocal === '1' || dismissedSession === '1') return;
 
       const env = detectPwaEnv();
-      const isPwa = Boolean(env.isStandalone || env.probableStandalone);
+      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-      // Показываем ТОЛЬКО в PWA
+      // Show ONLY in PWA installed mode
       if (!isPwa) return;
 
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        return;
-      }
-
       if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        return; // Пользователь явно заблокировал в настройках браузера
+        return; // User explicitly blocked in browser settings
       }
 
-      // Проверяем наличие активной подписки
-      navigator.serviceWorker.ready.then(async (reg) => {
-        try {
-          const sub = await reg.pushManager.getSubscription();
-          if (!sub || Notification.permission !== 'granted') {
-            setIsOpen(true);
+      // If PushManager & SW exist, check subscription status
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+        navigator.serviceWorker.ready.then(async (reg) => {
+          try {
+            const sub = await reg.pushManager.getSubscription();
+            if (!sub || (typeof Notification !== 'undefined' && Notification.permission !== 'granted')) {
+              setIsOpen(true);
+            }
+          } catch (e) {
+            if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+              setIsOpen(true);
+            }
           }
-        } catch (e) {
+        }).catch(() => {
           if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
             setIsOpen(true);
           }
-        }
-      }).catch(() => {
-        if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+        });
+      } else {
+        // Even if PushManager is not yet ready or iOS standalone PWA without PushManager at init
+        if (typeof Notification !== 'undefined') {
+          if (Notification.permission !== 'granted') {
+            setIsOpen(true);
+          }
+        } else {
           setIsOpen(true);
         }
-      });
+      }
     } catch (err) {
       console.warn('EnablePushOnPwaModal init error:', err);
     }
@@ -65,6 +73,7 @@ export default function EnablePushOnPwaModal() {
 
   const handleDismiss = () => {
     try {
+      localStorage.setItem('pwa_push_dismissed', '1');
       sessionStorage.setItem('pwa_push_dismissed', '1');
     } catch (e) {}
     setSubscribing(false);
@@ -74,6 +83,12 @@ export default function EnablePushOnPwaModal() {
   const handleEnablePush = async () => {
     setSubscribing(true);
     try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        alert('Push-уведомления не поддерживаются на этом устройстве или в этой версии браузера.');
+        handleDismiss();
+        return;
+      }
+
       if (typeof Notification === 'undefined') {
         handleDismiss();
         return;
@@ -82,8 +97,15 @@ export default function EnablePushOnPwaModal() {
       const permission = await Notification.requestPermission();
       clientLog('pwa_modal_permission_result', { permission });
 
+      // Save permission state to server
+      fetch('/api/push/permission', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifPermission: permission, notificationsEnabled: permission === 'granted' }),
+      }).catch(() => {});
+
       if (permission !== 'granted') {
-        // При 'denied' или закрытии диалога сохраняем dismiss в sessionStorage
         handleDismiss();
         return;
       }

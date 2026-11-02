@@ -400,7 +400,18 @@ export default function GardenerDashboard() {
       }
 
       const data = await resOrders.json();
-      const ops = resOps.ok ? await resOps.json() : {};
+      let operationsList = [];
+      if (resOps.ok) {
+        const ops = await resOps.json();
+        operationsList = ops.operations || [];
+      } else {
+        const cachedOps = await getCache('operations').catch(() => null);
+        if (cachedOps && Array.isArray(cachedOps.data)) {
+          operationsList = cachedOps.data;
+        } else if (Array.isArray(cachedOps)) {
+          operationsList = cachedOps;
+        }
+      }
       const incomingOrders = data.orders || [];
 
       if (silent && orders.length > 0) {
@@ -421,7 +432,7 @@ export default function GardenerDashboard() {
 
       setOrders(merged);
       setMyDayOffs(data.dayOffs || []);
-      setOperations(ops.operations || []);
+      setOperations(operationsList);
       setIsOffline(false);
 
       const now = Date.now();
@@ -431,7 +442,7 @@ export default function GardenerDashboard() {
       const ordersToCache = filterOrdersForOffline(incomingOrders);
       await Promise.all([
         saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] }),
-        saveCache('operations', ops.operations || []),
+        saveCache('operations', operationsList),
       ]);
 
       touchOfflineSession();
@@ -2491,7 +2502,35 @@ export default function GardenerDashboard() {
                   .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
                 if (allExpenses.length === 0) {
-                  return <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">Трат пока нет</div>;
+                  return (
+                    <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50 flex flex-col items-center justify-center gap-2">
+                      <span>Трат пока нет</span>
+                      {typeof navigator !== 'undefined' && navigator.onLine && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await fetch('/api/gardener/operations?all=1', { credentials: 'include' });
+                              if (res.ok) {
+                                const json = await res.json();
+                                const opsList = json.operations || [];
+                                setOperations(opsList);
+                                await saveCache('operations', opsList);
+                                alert(`Загружено операций: ${opsList.length} (статус ${res.status})`);
+                              } else {
+                                alert(`Ошибка обновления: HTTP ${res.status}`);
+                              }
+                            } catch (e) {
+                              alert(`Ошибка сети: ${e.message}`);
+                            }
+                          }}
+                          className="mt-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium cursor-pointer"
+                        >
+                          🔄 Проверить траты
+                        </button>
+                      )}
+                    </div>
+                  );
                 }
 
                 // Группировка по месяцам

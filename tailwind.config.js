@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ['./app/**/*.{js,jsx}', './lib/**/*.{js,jsx}'],
+  content: ['./app/**/*.{js,jsx}', './lib/**/*.{js,jsx}', './components/**/*.{js,jsx}'],
   theme: {
     extend: {
       // Палитра под фирменные цвета сайта Анемон Агро (тёмно-оливковый шапка + светло-оливковый акцент).

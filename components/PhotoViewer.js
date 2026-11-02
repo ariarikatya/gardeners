@@ -89,6 +89,17 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
       {/* Верхняя панель: счётчик и кнопка закрытия */}
       <div
         className="absolute top-4 left-4 right-4 flex items-center justify-between text-white z-10"
+        style={{
+          position: 'absolute',
+          top: '16px',
+          left: '16px',
+          right: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          zIndex: 10,
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="bg-black/50 backdrop-blur-xs px-3 py-1.5 rounded-full text-xs font-semibold tracking-wider">
@@ -99,7 +110,16 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
           type="button"
           onClick={onClose}
           aria-label="Закрыть"
-          className="w-10 h-10 rounded-full bg-black/50 hover:bg-black/80 flex items-center justify-center text-white text-xl font-bold transition-transform active:scale-95 shadow-lg border border-white/20 cursor-pointer"
+          style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '9999px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+          className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 flex items-center justify-center text-white text-xl font-bold transition-transform active:scale-95 shadow-lg border border-white/20 cursor-pointer"
         >
           ✕
         </button>
@@ -111,6 +131,20 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
           type="button"
           onClick={goToPrev}
           aria-label="Предыдущее фото"
+          style={{
+            position: 'absolute',
+            left: '8px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 10,
+            width: '44px',
+            height: '44px',
+            borderRadius: '9999px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
           className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-white flex items-center justify-center text-2xl font-bold transition-all active:scale-95 z-10 border border-white/20 shadow-lg cursor-pointer"
         >
           ‹
@@ -137,6 +171,20 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
           type="button"
           onClick={goToNext}
           aria-label="Следующее фото"
+          style={{
+            position: 'absolute',
+            right: '8px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 10,
+            width: '44px',
+            height: '44px',
+            borderRadius: '9999px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
           className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-white flex items-center justify-center text-2xl font-bold transition-all active:scale-95 z-10 border border-white/20 shadow-lg cursor-pointer"
         >
           ›
