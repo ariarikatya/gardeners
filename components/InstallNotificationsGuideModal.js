@@ -67,7 +67,7 @@ export default function InstallNotificationsGuideModal() {
         </h3>
 
         {/* Список шагов строго сверху вниз без подписей Шаг N */}
-        <div className="space-y-3.5 text-xs text-slate-700" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div className="space-y-4 text-xs text-slate-700">
           {isIosPlatform ? (
             <>
               {/* iOS: три точки */}
@@ -168,7 +168,7 @@ export default function InstallNotificationsGuideModal() {
         </div>
 
         {/* Кнопка Напомнить позже */}
-        <div className="mt-6 pt-4 border-t border-slate-100" style={{ marginTop: '24px', paddingTop: '16px' }}>
+        <div className="mt-6 pt-4 border-t border-slate-100">
           <button
             type="button"
             onClick={handleDismiss}
