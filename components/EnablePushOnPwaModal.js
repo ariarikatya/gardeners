@@ -23,10 +23,9 @@ export default function EnablePushOnPwaModal() {
     if (typeof window === 'undefined') return;
 
     try {
-      // Проверяем флаг: не показывать повторно до следующего входа
+      // Проверяем флаг в sessionStorage, чтобы не показывать в текущую сессию
       const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
-      const dismissedLocal = localStorage.getItem('pwa_push_dismissed');
-      if (dismissedSession === '1' || dismissedLocal === '1') return;
+      if (dismissedSession === '1') return;
 
       const env = detectPwaEnv();
       const isPwa = Boolean(env.isStandalone || env.probableStandalone);
@@ -39,10 +38,10 @@ export default function EnablePushOnPwaModal() {
       }
 
       if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        return; // Пользователь явно заблокировал в настройках
+        return; // Пользователь явно заблокировал в настройках браузера
       }
 
-      // Проверяем есть ли подписка
+      // Проверяем наличие активной подписки
       navigator.serviceWorker.ready.then(async (reg) => {
         try {
           const sub = await reg.pushManager.getSubscription();
@@ -67,7 +66,6 @@ export default function EnablePushOnPwaModal() {
   const handleDismiss = () => {
     try {
       sessionStorage.setItem('pwa_push_dismissed', '1');
-      localStorage.setItem('pwa_push_dismissed', '1');
     } catch (e) {}
     setSubscribing(false);
     setIsOpen(false);
@@ -77,8 +75,7 @@ export default function EnablePushOnPwaModal() {
     setSubscribing(true);
     try {
       if (typeof Notification === 'undefined') {
-        alert('Уведомления не поддерживаются на этом устройстве');
-        setSubscribing(false);
+        handleDismiss();
         return;
       }
 
@@ -86,7 +83,7 @@ export default function EnablePushOnPwaModal() {
       clientLog('pwa_modal_permission_result', { permission });
 
       if (permission !== 'granted') {
-        // При 'denied' или 'default' тихо закрываем окно без alert, запоминая dismiss
+        // При 'denied' или закрытии диалога сохраняем dismiss в sessionStorage
         handleDismiss();
         return;
       }
@@ -128,8 +125,11 @@ export default function EnablePushOnPwaModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in duration-200">
-        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 text-2xl shadow-inner">
-          🔔
+        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
+          <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
         </div>
 
         <h3 className="text-lg font-bold text-slate-900 mb-2">
