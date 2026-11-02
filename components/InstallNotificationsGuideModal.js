@@ -43,22 +43,13 @@ export default function InstallNotificationsGuideModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-slate-800 animate-in fade-in zoom-in duration-200">
-        {/* Верхняя иконка: «Поделиться» (iOS) или «три точки» (Android) */}
+        {/* Верхняя иконка: колокольчик (bell SVG) для обеих платформ */}
         <div className="flex justify-center mb-3">
           <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
-            {isIosPlatform ? (
-              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                <polyline points="16 6 12 2 8 6" />
-                <line x1="12" y1="2" x2="12" y2="15" />
-              </svg>
-            ) : (
-              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="12" cy="19" r="2" />
-              </svg>
-            )}
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
           </div>
         </div>
 
@@ -67,11 +58,11 @@ export default function InstallNotificationsGuideModal() {
           Как включить уведомления
         </h3>
 
-        {/* Список шагов строго сверху вниз */}
+        {/* Список шагов строго сверху вниз без подписей Шаг N */}
         <div className="space-y-3 mb-5 text-xs text-slate-700">
           {isIosPlatform ? (
             <>
-              {/* Шаг 1 */}
+              {/* iOS: три точки */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-slate-600">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -81,12 +72,11 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 1:</span>
                   Нажмите на три точки внизу экрана. Если их нет — сразу на следующий шаг
                 </div>
               </div>
 
-              {/* Шаг 2 */}
+              {/* iOS: поделиться */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -96,12 +86,11 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 2:</span>
                   Выберите «Поделиться»
                 </div>
               </div>
 
-              {/* Шаг 3 */}
+              {/* iOS: плюс */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -110,12 +99,11 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 3:</span>
                   Добавьте на экран «Домой»
                 </div>
               </div>
 
-              {/* Шаг 4 */}
+              {/* iOS: иконка приложения */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -125,14 +113,13 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 4:</span>
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
               </div>
             </>
           ) : (
             <>
-              {/* Шаг 1 Android */}
+              {/* Android: меню */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-slate-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
@@ -142,12 +129,11 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 1:</span>
                   Нажмите на меню «⋮» (три точки) в углу браузера
                 </div>
               </div>
 
-              {/* Шаг 2 Android */}
+              {/* Android: плюс */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -156,12 +142,11 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 2:</span>
                   Выберите «Добавить на главный экран» или «Установить»
                 </div>
               </div>
 
-              {/* Шаг 3 Android */}
+              {/* Android: иконка приложения */}
               <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -171,7 +156,6 @@ export default function InstallNotificationsGuideModal() {
                   </svg>
                 </div>
                 <div className="leading-snug pt-0.5">
-                  <span className="font-semibold text-slate-900 block">Шаг 3:</span>
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
               </div>
