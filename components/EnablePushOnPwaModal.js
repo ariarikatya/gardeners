@@ -49,12 +49,6 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      // If user explicitly denied notifications in browser, cannot show dialog
-      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        checkingRef.current = false;
-        return;
-      }
-
       let meData = null;
       try {
         const meRes = await apiFetch('/api/auth/me');
@@ -150,6 +144,12 @@ export default function EnablePushOnPwaModal() {
   const handleEnablePush = async () => {
     setSubscribing(true);
     try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        alert('Уведомления заблокированы. Откройте Настройки устройства → Уведомления и разрешите их для приложения.');
+        handleDismiss();
+        return;
+      }
+
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         alert('Push-уведомления не поддерживаются на этом устройстве или в этой версии браузера.');
         handleDismiss();

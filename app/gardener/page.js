@@ -403,7 +403,15 @@ export default function GardenerDashboard() {
       let operationsList = [];
       if (resOps.ok) {
         const ops = await resOps.json();
-        operationsList = ops.operations || [];
+        const incomingOps = ops.operations || [];
+        if (incomingOps.length > 0) {
+          operationsList = incomingOps;
+        } else {
+          // If server returned empty operations, check if cached operations exist and keep them
+          const cachedOps = await getCache('operations').catch(() => null);
+          const cachedList = (cachedOps && Array.isArray(cachedOps.data)) ? cachedOps.data : (Array.isArray(cachedOps) ? cachedOps : []);
+          operationsList = cachedList.length > 0 ? cachedList : incomingOps;
+        }
       } else {
         console.error('Failed to fetch gardener operations:', resOps.status);
         const cachedOps = await getCache('operations').catch(() => null);

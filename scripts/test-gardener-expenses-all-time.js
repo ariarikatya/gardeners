@@ -148,29 +148,39 @@ async function testGardenerExpensesAllTime() {
   assert.strictEqual(resUnauth.status, 401, 'Request without credentials must return 401');
   console.log('  ✓ (c) Request without cookie or Bearer correctly returns 401');
 
-  // 5. Regression Test: empty API response must not overwrite non-empty cached operations
+  // 5. Regression Test: empty API response must not overwrite non-empty cached operations or displayed state
   const mockStorage = {
     operations: [
       { id: 'op_cached_1', type: 'expense', amount: 1200, description: 'Ранее сохраненная трата' }
     ]
   };
 
+  let displayedOperations = [];
+
   async function simulateFetchOperations(emptyApiResponse) {
-    const operationsList = emptyApiResponse.operations || [];
+    const incomingOps = emptyApiResponse.operations || [];
+    let operationsList = [];
+    if (incomingOps.length > 0) {
+      operationsList = incomingOps;
+    } else {
+      const cachedOps = mockStorage.operations;
+      const cachedList = (cachedOps && Array.isArray(cachedOps.data)) ? cachedOps.data : (Array.isArray(cachedOps) ? cachedOps : []);
+      operationsList = cachedList.length > 0 ? cachedList : incomingOps;
+    }
+
+    displayedOperations = operationsList;
+
     if (operationsList.length > 0) {
       mockStorage.operations = operationsList;
-    } else {
-      const prevCached = mockStorage.operations;
-      if (!prevCached || (Array.isArray(prevCached) && prevCached.length === 0)) {
-        mockStorage.operations = operationsList;
-      }
     }
   }
 
   await simulateFetchOperations({ operations: [] });
   assert.strictEqual(mockStorage.operations.length, 1, 'Empty API response must not clear cached operations');
   assert.strictEqual(mockStorage.operations[0].id, 'op_cached_1', 'Cached operation must remain intact');
-  console.log('  ✓ (d) Empty operations API response preserves existing non-empty cache');
+  assert.strictEqual(displayedOperations.length, 1, 'Displayed operations state must preserve cached operations');
+  assert.strictEqual(displayedOperations[0].id, 'op_cached_1', 'Displayed operation matches cached operation');
+  console.log('  ✓ (d) Empty operations API response preserves existing non-empty cache and displayed state');
 
   console.log('🎉 All gardener expenses tests passed successfully!');
 }

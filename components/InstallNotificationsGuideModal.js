@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { detectPwaEnv } from '@/lib/pwa-env';
 import { apiFetch } from '@/lib/apiFetch';
 
@@ -10,6 +11,7 @@ let inMemoryDismissed = false;
 export default function InstallNotificationsGuideModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isIosPlatform, setIsIosPlatform] = useState(true);
+  const pathname = usePathname();
   const checkingRef = useRef(false);
   const isOpenRef = useRef(false);
 
@@ -25,14 +27,7 @@ export default function InstallNotificationsGuideModal() {
     checkingRef.current = true;
 
     try {
-      // 1. Permanent dismissal flag takes precedence: dismissed === '1' => never show
-      const dismissed = localStorage.getItem('notif_guide_dismissed');
-      if (dismissed === '1') {
-        checkingRef.current = false;
-        return;
-      }
-
-      // 2. 24-hour temporary dismissal check
+      // 24-hour temporary dismissal check (not permanent)
       const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
       if (dismissedAt) {
         const timePassed = Date.now() - Number(dismissedAt);
@@ -131,7 +126,7 @@ export default function InstallNotificationsGuideModal() {
         window.removeEventListener('pageshow', handlePageShow);
       }
     };
-  }, [checkModalState]);
+  }, [checkModalState, pathname]);
 
   const handleDismiss = () => {
     try {

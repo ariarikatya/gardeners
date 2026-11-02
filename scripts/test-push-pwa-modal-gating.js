@@ -35,7 +35,6 @@ function evaluatePwaModalState({ isPwa, isAuthenticated, notificationsEnabled, p
   if (inMemoryDismissed) return false;
   if (!isPwa) return false;
   if (!isAuthenticated) return false;
-  if (permission === 'denied') return false;
 
   const isFullyConnected = (notificationsEnabled === true) && (hasSubscription === true);
   return !isFullyConnected;
@@ -60,6 +59,14 @@ console.log('  ✓ Test (2) passed: permission=granted but subscription=null and
 // Test (2b): granted without subscription and without notificationsEnabled: modal open, requestPermission not called until click
 assert(modalContent.includes('auto_permission_detected'), 'Must log auto_permission_detected when granted without DB enabled or subscription');
 console.log('  ✓ Test (2b) passed: auto_permission_detected logged and modal open when granted without subscription/DB state');
+
+// Test (2c): denied permission on iOS/standalone -> modal still opens to guide user
+assert.strictEqual(
+  evaluatePwaModalState({ isPwa: true, isAuthenticated: true, notificationsEnabled: false, permission: 'denied', hasSubscription: false }),
+  true,
+  'Test (2c): Modal must open in standalone PWA even when permission is denied so user can be guided'
+);
+console.log('  ✓ Test (2c) passed: denied permission opens modal in standalone PWA');
 
 // Test (3): notificationsEnabled=true and subscription exists -> modal closed
 assert.strictEqual(

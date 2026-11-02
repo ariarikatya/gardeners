@@ -30,6 +30,10 @@ assert(content.includes('rounded-[22%]'), 'Must wrap icon in rounded-[22%] squir
 assert(content.includes('w-12 h-12'), 'Must size icon wrapper to w-12 h-12');
 assert(content.includes('object-cover'), 'Must use object-cover inside squircle container');
 
+// 5b. Verify route change tracking and lack of permanent notif_guide_dismissed check
+assert(content.includes('usePathname'), 'Must use usePathname to trigger check on route change');
+assert(!content.includes("localStorage.getItem('notif_guide_dismissed')"), 'Must NOT permanently block via notif_guide_dismissed');
+
 const layoutContent = fs.readFileSync(path.join(__dirname, '..', 'app', 'layout.js'), 'utf8');
 assert(layoutContent.includes('rel="apple-touch-icon" href="/icon-192.png"'), 'layout.js apple-touch-icon must match /icon-192.png');
 
