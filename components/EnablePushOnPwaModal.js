@@ -40,16 +40,6 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
-      // 24-hour temporary dismissal check
-      if (dismissedAt) {
-        const timePassed = Date.now() - Number(dismissedAt);
-        if (timePassed < 24 * 60 * 60 * 1000) {
-          checkingRef.current = false;
-          return;
-        }
-      }
-
       const env = detectPwaEnv();
       const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
@@ -59,9 +49,8 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      // Check authentication: user must be logged in
-      const hasAuth = localStorage.getItem('auth_token') || localStorage.getItem('auth_role');
-      if (!hasAuth) {
+      // If user explicitly denied notifications in browser, cannot show dialog
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
         checkingRef.current = false;
         return;
       }
@@ -79,31 +68,34 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      // If user has notificationsEnabled === true in DB, notifications are connected -> do not show
-      if (meData?.user?.notificationsEnabled === true) {
+      // Check if user is fully connected in DB AND has active push subscription
+      const isDbEnabled = meData?.user?.notificationsEnabled === true;
+
+      let hasActiveSubscription = false;
+      if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          hasActiveSubscription = Boolean(sub);
+        } catch (e) {}
+      }
+
+      const isFullyConnected = isDbEnabled && hasActiveSubscription;
+
+      if (isFullyConnected) {
         setIsOpen(false);
         checkingRef.current = false;
         return;
       }
 
-      // If user explicitly denied notifications in browser, cannot show dialog
-      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        checkingRef.current = false;
-        return;
-      }
-
-      // If Notification.permission === 'granted' AND push subscription already exists AND notificationsEnabled in DB
-      // (checked above for DB). If subscription exists but DB says false, we still need to prompt user to link/enable.
-      if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const sub = await reg.pushManager.getSubscription();
-          if (sub && meData?.user?.notificationsEnabled === true) {
-            setIsOpen(false);
-            checkingRef.current = false;
-            return;
-          }
-        } catch (e) {}
+      // 24-hour temporary dismissal check when user clicked "Напомнить позже"
+      const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
+      if (dismissedAt) {
+        const timePassed = Date.now() - Number(dismissedAt);
+        if (timePassed < 24 * 60 * 60 * 1000) {
+          checkingRef.current = false;
+          return;
+        }
       }
 
       // Notifications are not fully connected -> show modal
@@ -174,7 +166,10 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      const permission = await Notification.requestPermission();
+      let permission = Notification.permission;
+      if (permission !== 'granted') {
+        permission = await Notification.requestPermission();
+      }
       clientLog('pwa_modal_permission_result', { permission });
 
       // Save permission state to server using apiFetch (includes Bearer + credentials)
