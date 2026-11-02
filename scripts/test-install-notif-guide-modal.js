@@ -22,13 +22,13 @@ assert(content.includes('Выберите «Добавить на главный
 
 // 4. Verify dismissal button and storage flag
 assert(content.includes('Напомнить позже'), 'Must have "Напомнить позже" button');
-assert(content.includes("sessionStorage.setItem('notif_guide_dismissed_session', '1')"), 'Must store session dismissal');
-assert(!content.includes("notif_guide_dismissed_at"), 'Must NOT contain 24-hour localStorage suppression');
+assert(content.includes("localStorage.setItem('notif_guide_dismissed_at'"), 'Must store notif_guide_dismissed_at on dismiss');
 
-// 5. Verify real PWA icon is used and matches manifest / apple-touch-icon without rounded-lg/object-cover distortion
+// 5. Verify real PWA icon is wrapped in iOS squircle container (rounded-[22%] w-12 h-12)
 assert(content.includes('/icon-192.png'), 'Must render real PWA icon /icon-192.png');
-assert(!content.includes('rounded-lg object-cover flex-shrink-0'), 'Must remove rounded-lg object-cover to prevent icon clipping/distortion');
-assert(content.includes('className="w-7 h-7 object-contain flex-shrink-0"'), 'Must render icon cleanly with w-7 h-7 object-contain flex-shrink-0');
+assert(content.includes('rounded-[22%]'), 'Must wrap icon in rounded-[22%] squircle container');
+assert(content.includes('w-12 h-12'), 'Must size icon wrapper to w-12 h-12');
+assert(content.includes('object-cover'), 'Must use object-cover inside squircle container');
 
 const layoutContent = fs.readFileSync(path.join(__dirname, '..', 'app', 'layout.js'), 'utf8');
 assert(layoutContent.includes('rel="apple-touch-icon" href="/icon-192.png"'), 'layout.js apple-touch-icon must match /icon-192.png');
@@ -48,10 +48,10 @@ assert(content.includes('notificationsEnabled === true'), 'Must check notificati
 assert(content.includes("Notification.permission === 'granted'"), 'Must check Notification.permission');
 
 // 8. Simulation test: verify open/close logic for mobile browser and PWA
-function evaluateModalState({ isMobile, isPwa, isAuthenticated, permission, notificationsEnabled, inMemoryDismissed, sessionDismissed }) {
-  if (inMemoryDismissed || sessionDismissed) return false;
+function evaluateModalState({ isMobile, isPwa, isAuthenticated, permission, notificationsEnabled, dismissedAt }) {
+  if (dismissedAt && (Date.now() - dismissedAt < 24 * 60 * 60 * 1000)) return false;
   if (!isAuthenticated) return false;
-  if (!isMobile) return false;
+  if (!isMobile || isPwa) return false;
   const isPermissionGranted = permission === 'granted';
   const notificationsAreEnabled = isPermissionGranted && notificationsEnabled;
   return !notificationsAreEnabled;
@@ -64,11 +64,11 @@ assert.strictEqual(
   'Case A: Modal must be open in mobile browser without PWA when notifications are default'
 );
 
-// Case B: In PWA (standalone), notifications not enabled -> ALSO open
+// Case B: In PWA (standalone) -> closed (EnablePushOnPwaModal takes precedence in standalone)
 assert.strictEqual(
   evaluateModalState({ isMobile: true, isPwa: true, isAuthenticated: true, permission: 'default', notificationsEnabled: false }),
-  true,
-  'Case B: Modal must be open in standalone PWA when notifications are default'
+  false,
+  'Case B: Guide modal must be closed in standalone PWA'
 );
 
 // Case C: Mobile browser, permission granted but notificationsEnabled in DB is false -> open
@@ -83,11 +83,6 @@ assert.strictEqual(
   evaluateModalState({ isMobile: true, isPwa: false, isAuthenticated: true, permission: 'granted', notificationsEnabled: true }),
   false,
   'Case D: Modal must be closed when notifications are fully enabled'
-);
-assert.strictEqual(
-  evaluateModalState({ isMobile: true, isPwa: true, isAuthenticated: true, permission: 'granted', notificationsEnabled: true }),
-  false,
-  'Case D2: Modal must be closed in PWA when notifications are fully enabled'
 );
 
 // Case E: Visibilitychange simulation: document hidden -> becomes visible (not hidden)

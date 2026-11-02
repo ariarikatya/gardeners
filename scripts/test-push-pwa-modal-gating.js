@@ -57,6 +57,10 @@ assert.strictEqual(
 );
 console.log('  ✓ Test (2) passed: permission=granted but subscription=null and notificationsEnabled=false -> modal open');
 
+// Test (2b): granted without subscription and without notificationsEnabled: modal open, requestPermission not called until click
+assert(modalContent.includes('auto_permission_detected'), 'Must log auto_permission_detected when granted without DB enabled or subscription');
+console.log('  ✓ Test (2b) passed: auto_permission_detected logged and modal open when granted without subscription/DB state');
+
 // Test (3): notificationsEnabled=true and subscription exists -> modal closed
 assert.strictEqual(
   evaluatePwaModalState({ isPwa: true, isAuthenticated: true, notificationsEnabled: true, permission: 'granted', hasSubscription: true }),

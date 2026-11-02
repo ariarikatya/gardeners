@@ -88,6 +88,14 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && (!isDbEnabled || !hasActiveSubscription)) {
+        clientLog('auto_permission_detected', {
+          permission: Notification.permission,
+          isDbEnabled,
+          hasActiveSubscription,
+        });
+      }
+
       // Notifications are not fully connected -> show modal
       setIsOpen(true);
     } catch (err) {
@@ -205,7 +213,7 @@ export default function EnablePushOnPwaModal() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in duration-200">
         <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
           <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

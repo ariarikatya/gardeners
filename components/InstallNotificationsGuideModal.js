@@ -25,23 +25,34 @@ export default function InstallNotificationsGuideModal() {
     checkingRef.current = true;
 
     try {
-      // 1. Session / in-memory dismissal: suppressed only until next reload/restart
+      // 1. Permanent dismissal flag takes precedence: dismissed === '1' => never show
+      const dismissed = localStorage.getItem('notif_guide_dismissed');
+      if (dismissed === '1') {
+        checkingRef.current = false;
+        return;
+      }
+
+      // 2. 24-hour temporary dismissal check
+      const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
+      if (dismissedAt) {
+        const timePassed = Date.now() - Number(dismissedAt);
+        if (timePassed < 24 * 60 * 60 * 1000) {
+          checkingRef.current = false;
+          return;
+        }
+      }
+
       if (inMemoryDismissed) {
         checkingRef.current = false;
         return;
       }
-      try {
-        if (sessionStorage.getItem('notif_guide_dismissed_session') === '1') {
-          checkingRef.current = false;
-          return;
-        }
-      } catch (e) {}
 
       const env = detectPwaEnv();
       const isMobile = env.isMobile || env.isIos || env.isAndroid;
+      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-      // Only display on mobile devices, but display in both regular browser and PWA standalone
-      if (!isMobile) {
+      // Display only in regular mobile browser, never inside standalone PWA (where EnablePushOnPwaModal runs)
+      if (!isMobile || isPwa) {
         checkingRef.current = false;
         return;
       }
@@ -124,7 +135,7 @@ export default function InstallNotificationsGuideModal() {
 
   const handleDismiss = () => {
     try {
-      sessionStorage.setItem('notif_guide_dismissed_session', '1');
+      localStorage.setItem('notif_guide_dismissed_at', String(Date.now()));
     } catch (e) {}
     inMemoryDismissed = true;
     isOpenRef.current = false;
@@ -136,13 +147,14 @@ export default function InstallNotificationsGuideModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-slate-800 animate-in fade-in zoom-in duration-200">
-        {/* Верхняя иконка: колокольчик (bell SVG) для обеих платформ */}
+        {/* Верхняя иконка: реальная иконка приложения в нативном скруглённом контейнере */}
         <div className="flex justify-center mb-3">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
+          <div className="w-14 h-14 rounded-[22%] overflow-hidden bg-white shadow-md ring-1 ring-slate-200 flex items-center justify-center flex-shrink-0">
+            <img
+              src="/icon-192.png"
+              alt="Anemon Agro"
+              className="w-full h-full object-cover"
+            />
           </div>
         </div>
 
@@ -198,11 +210,13 @@ export default function InstallNotificationsGuideModal() {
 
               {/* iOS: иконка приложения */}
               <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <img
-                  src="/icon-192.png"
-                  alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 object-contain flex-shrink-0"
-                />
+                <div className="w-12 h-12 rounded-[22%] overflow-hidden bg-white shadow-sm ring-1 ring-slate-200 flex-shrink-0">
+                  <img
+                    src="/icon-192.png"
+                    alt="Иконка приложения Anemon Agro"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
@@ -239,11 +253,13 @@ export default function InstallNotificationsGuideModal() {
 
               {/* Android: иконка приложения */}
               <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <img
-                  src="/icon-192.png"
-                  alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 object-contain flex-shrink-0"
-                />
+                <div className="w-12 h-12 rounded-[22%] overflow-hidden bg-white shadow-sm ring-1 ring-slate-200 flex-shrink-0">
+                  <img
+                    src="/icon-192.png"
+                    alt="Иконка приложения Anemon Agro"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
