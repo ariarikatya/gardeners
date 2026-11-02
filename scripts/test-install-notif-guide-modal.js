@@ -30,7 +30,7 @@ assert(content.includes('Нажмите на меню «⋮» (три точки
 
 // 5. Verify dismissal button and storage flag
 assert(content.includes('Напомнить позже'), 'Must have "Напомнить позже" button');
-assert(content.includes("localStorage.setItem('notif_guide_dismissed', '1')"), 'Must store notif_guide_dismissed on dismiss');
+assert(content.includes("localStorage.setItem('notif_guide_dismissed_at'"), 'Must store notif_guide_dismissed_at on dismiss');
 
 // 6. Verify real PWA icon is used and matches manifest / apple-touch-icon without rounded-lg/object-cover distortion
 assert(content.includes('/icon-192.png'), 'Must render real PWA icon /icon-192.png');

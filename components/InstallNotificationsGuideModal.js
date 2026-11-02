@@ -8,32 +8,35 @@ export default function InstallNotificationsGuideModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isIosPlatform, setIsIosPlatform] = useState(true);
   const checkingRef = useRef(false);
+  const isOpenRef = useRef(false);
+
+  // Keep isOpenRef strictly in sync with isOpen state
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
 
   const checkModalState = useCallback(async () => {
     if (typeof window === 'undefined') return;
-    if (checkingRef.current) return;
+    // Guard: skip re-checking/re-fetching if already open or already checking
+    if (isOpenRef.current || checkingRef.current) return;
     checkingRef.current = true;
 
     try {
-      const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
+      // 1. Permanent dismissal flag takes precedence: dismissed === '1' => never show
       const dismissed = localStorage.getItem('notif_guide_dismissed');
-      // 24-hour temporary dismissal check
+      if (dismissed === '1') {
+        checkingRef.current = false;
+        return;
+      }
+
+      // 2. 24-hour temporary dismissal check when permanent flag absent
+      const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
       if (dismissedAt) {
         const timePassed = Date.now() - Number(dismissedAt);
         if (timePassed < 24 * 60 * 60 * 1000) {
           checkingRef.current = false;
           return;
         }
-      } else if (dismissed === '1') {
-        checkingRef.current = false;
-        return;
-      }
-
-      // Check user authentication
-      const hasToken = localStorage.getItem('auth_token') || localStorage.getItem('auth_role');
-      if (!hasToken) {
-        checkingRef.current = false;
-        return;
       }
 
       const env = detectPwaEnv();
@@ -46,20 +49,22 @@ export default function InstallNotificationsGuideModal() {
         return;
       }
 
-      // Criterion «уведомления не включены»:
-      // Notification.permission !== 'granted' ИЛИ в базе notificationsEnabled !== true
+      // Check user authentication via /api/auth/me (rely on GET /api/auth/me, not just localStorage tokens)
       let notifEnabledInDb = false;
       try {
         const meRes = await apiFetch('/api/auth/me');
         if (!meRes.ok) {
-          // If not authenticated or 401, do not show until login
+          // If not authenticated, do not show until login
           checkingRef.current = false;
           return;
         }
         const meData = await meRes.json();
-        notifEnabledInDb = meData?.user?.notificationsEnabled === true;
+        if (!meData?.user) {
+          checkingRef.current = false;
+          return;
+        }
+        notifEnabledInDb = meData.user.notificationsEnabled === true;
       } catch (meErr) {
-        // network issue: if not authenticated, do not show
         checkingRef.current = false;
         return;
       }
@@ -71,8 +76,10 @@ export default function InstallNotificationsGuideModal() {
 
       if (!notificationsAreEnabled) {
         setIsIosPlatform(Boolean(env.isIos));
+        isOpenRef.current = true;
         setIsOpen(true);
       } else {
+        isOpenRef.current = false;
         setIsOpen(false);
       }
     } catch (e) {
@@ -120,9 +127,10 @@ export default function InstallNotificationsGuideModal() {
 
   const handleDismiss = () => {
     try {
+      // "Напомнить позже" records dismissed_at timestamp (suppress for 24 hours) without permanent dismissal flag
       localStorage.setItem('notif_guide_dismissed_at', String(Date.now()));
-      localStorage.setItem('notif_guide_dismissed', '1');
     } catch (e) {}
+    isOpenRef.current = false;
     setIsOpen(false);
   };
 

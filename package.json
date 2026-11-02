@@ -34,6 +34,8 @@
     "test:logout": "node scripts/test-logout.js",
     "test:login-flow": "node scripts/test-login-flow.js",
     "test:gardener-expenses": "node scripts/test-gardener-expenses-all-time.js",
+    "test:gardener-all-operations": "node scripts/test-gardener-all-operations.js",
+    "test:install-notif-guide-modal": "node scripts/test-install-notif-guide-modal.js",
     "test:leader-period-filter": "node scripts/test-leader-period-filter.js",
     "test:offline-login": "node scripts/test-offline-saved-phone-login.js",
     "test:month-cache": "node scripts/test-month-cache-persistence.js",

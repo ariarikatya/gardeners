@@ -64,8 +64,9 @@ async function runPwaEnvTests() {
   assert.strictEqual(iosStandaloneEnv.displayMode, 'standalone');
   console.log('✅ Test 3 passed!\n');
 
-  // 4. Mock probableStandalone Fallback
-  console.log('Test 4: probableStandalone Fallback (SW active, Notification granted)');
+  // 4. Strict check: Regular iOS browser tab with SW active and notification permission granted
+  // must NOT be classified as standalone or probableStandalone.
+  console.log('Test 4: iOS browser tab with SW active and Notification granted is NOT standalone');
   setMockEnv({
     ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15',
     platform: 'iPhone',
@@ -78,7 +79,7 @@ async function runPwaEnvTests() {
   const probableEnv = detectPwaEnv();
   assert.strictEqual(probableEnv.isIos, true);
   assert.strictEqual(probableEnv.isStandalone, false);
-  assert.strictEqual(probableEnv.probableStandalone, true);
+  assert.strictEqual(probableEnv.probableStandalone, false);
   console.log('✅ Test 4 passed!\n');
 
   // Cleanup globals
