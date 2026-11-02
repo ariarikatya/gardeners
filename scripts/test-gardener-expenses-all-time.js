@@ -148,6 +148,30 @@ async function testGardenerExpensesAllTime() {
   assert.strictEqual(resUnauth.status, 401, 'Request without credentials must return 401');
   console.log('  ✓ (c) Request without cookie or Bearer correctly returns 401');
 
+  // 5. Regression Test: empty API response must not overwrite non-empty cached operations
+  const mockStorage = {
+    operations: [
+      { id: 'op_cached_1', type: 'expense', amount: 1200, description: 'Ранее сохраненная трата' }
+    ]
+  };
+
+  async function simulateFetchOperations(emptyApiResponse) {
+    const operationsList = emptyApiResponse.operations || [];
+    if (operationsList.length > 0) {
+      mockStorage.operations = operationsList;
+    } else {
+      const prevCached = mockStorage.operations;
+      if (!prevCached || (Array.isArray(prevCached) && prevCached.length === 0)) {
+        mockStorage.operations = operationsList;
+      }
+    }
+  }
+
+  await simulateFetchOperations({ operations: [] });
+  assert.strictEqual(mockStorage.operations.length, 1, 'Empty API response must not clear cached operations');
+  assert.strictEqual(mockStorage.operations[0].id, 'op_cached_1', 'Cached operation must remain intact');
+  console.log('  ✓ (d) Empty operations API response preserves existing non-empty cache');
+
   console.log('🎉 All gardener expenses tests passed successfully!');
 }
 

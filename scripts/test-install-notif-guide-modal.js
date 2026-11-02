@@ -28,7 +28,7 @@ assert(!content.includes("notif_guide_dismissed_at"), 'Must NOT contain 24-hour 
 // 5. Verify real PWA icon is used and matches manifest / apple-touch-icon without rounded-lg/object-cover distortion
 assert(content.includes('/icon-192.png'), 'Must render real PWA icon /icon-192.png');
 assert(!content.includes('rounded-lg object-cover flex-shrink-0'), 'Must remove rounded-lg object-cover to prevent icon clipping/distortion');
-assert(content.includes('className="w-7 h-7 flex-shrink-0"'), 'Must render icon cleanly with w-7 h-7 flex-shrink-0');
+assert(content.includes('className="w-7 h-7 object-contain flex-shrink-0"'), 'Must render icon cleanly with w-7 h-7 object-contain flex-shrink-0');
 
 const layoutContent = fs.readFileSync(path.join(__dirname, '..', 'app', 'layout.js'), 'utf8');
 assert(layoutContent.includes('rel="apple-touch-icon" href="/icon-192.png"'), 'layout.js apple-touch-icon must match /icon-192.png');

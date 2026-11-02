@@ -201,7 +201,7 @@ export default function InstallNotificationsGuideModal() {
                 <img
                   src="/icon-192.png"
                   alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 flex-shrink-0"
+                  className="w-7 h-7 object-contain flex-shrink-0"
                 />
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
@@ -242,7 +242,7 @@ export default function InstallNotificationsGuideModal() {
                 <img
                   src="/icon-192.png"
                   alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 flex-shrink-0"
+                  className="w-7 h-7 object-contain flex-shrink-0"
                 />
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
