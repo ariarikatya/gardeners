@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { detectPwaEnv } from '@/lib/pwa-env';
 import { apiFetch } from '@/lib/apiFetch';
 
+// In-memory flag for active window session
+let inMemoryDismissed = false;
+
 export default function InstallNotificationsGuideModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isIosPlatform, setIsIosPlatform] = useState(true);
@@ -22,34 +25,28 @@ export default function InstallNotificationsGuideModal() {
     checkingRef.current = true;
 
     try {
-      // 1. Permanent dismissal flag takes precedence: dismissed === '1' => never show
-      const dismissed = localStorage.getItem('notif_guide_dismissed');
-      if (dismissed === '1') {
+      // 1. Session / in-memory dismissal: suppressed only until next reload/restart
+      if (inMemoryDismissed) {
         checkingRef.current = false;
         return;
       }
-
-      // 2. 24-hour temporary dismissal check when permanent flag absent
-      const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
-      if (dismissedAt) {
-        const timePassed = Date.now() - Number(dismissedAt);
-        if (timePassed < 24 * 60 * 60 * 1000) {
+      try {
+        if (sessionStorage.getItem('notif_guide_dismissed_session') === '1') {
           checkingRef.current = false;
           return;
         }
-      }
+      } catch (e) {}
 
       const env = detectPwaEnv();
       const isMobile = env.isMobile || env.isIos || env.isAndroid;
-      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-      // Do not display if already in PWA or not a mobile device
-      if (!isMobile || isPwa) {
+      // Only display on mobile devices, but display in both regular browser and PWA standalone
+      if (!isMobile) {
         checkingRef.current = false;
         return;
       }
 
-      // Check user authentication via /api/auth/me (rely on GET /api/auth/me, not just localStorage tokens)
+      // Check user authentication via /api/auth/me
       let notifEnabledInDb = false;
       try {
         const meRes = await apiFetch('/api/auth/me');
@@ -127,9 +124,9 @@ export default function InstallNotificationsGuideModal() {
 
   const handleDismiss = () => {
     try {
-      // "Напомнить позже" records dismissed_at timestamp (suppress for 24 hours) without permanent dismissal flag
-      localStorage.setItem('notif_guide_dismissed_at', String(Date.now()));
+      sessionStorage.setItem('notif_guide_dismissed_session', '1');
     } catch (e) {}
+    inMemoryDismissed = true;
     isOpenRef.current = false;
     setIsOpen(false);
   };

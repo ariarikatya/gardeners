@@ -88,16 +88,6 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      // 24-hour temporary dismissal check when user clicked "Напомнить позже"
-      const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
-      if (dismissedAt) {
-        const timePassed = Date.now() - Number(dismissedAt);
-        if (timePassed < 24 * 60 * 60 * 1000) {
-          checkingRef.current = false;
-          return;
-        }
-      }
-
       // Notifications are not fully connected -> show modal
       setIsOpen(true);
     } catch (err) {
@@ -144,9 +134,6 @@ export default function EnablePushOnPwaModal() {
   }, [checkModal]);
 
   const handleDismiss = () => {
-    try {
-      localStorage.setItem('pwa_push_dismissed_at', String(Date.now()));
-    } catch (e) {}
     inMemoryDismissed = true;
     setSubscribing(false);
     setIsOpen(false);
