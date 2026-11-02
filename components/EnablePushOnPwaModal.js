@@ -23,9 +23,10 @@ export default function EnablePushOnPwaModal() {
     if (typeof window === 'undefined') return;
 
     try {
-      // Проверяем флаг сессии: не показывать повторно в эту сессию, если уже закрыли
-      const dismissed = sessionStorage.getItem('pwa_push_dismissed');
-      if (dismissed === '1') return;
+      // Проверяем флаг: не показывать повторно до следующего входа
+      const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
+      const dismissedLocal = localStorage.getItem('pwa_push_dismissed');
+      if (dismissedSession === '1' || dismissedLocal === '1') return;
 
       const env = detectPwaEnv();
       const isPwa = Boolean(env.isStandalone || env.probableStandalone);
@@ -66,7 +67,9 @@ export default function EnablePushOnPwaModal() {
   const handleDismiss = () => {
     try {
       sessionStorage.setItem('pwa_push_dismissed', '1');
+      localStorage.setItem('pwa_push_dismissed', '1');
     } catch (e) {}
+    setSubscribing(false);
     setIsOpen(false);
   };
 

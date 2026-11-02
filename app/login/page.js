@@ -301,7 +301,11 @@ export default function LoginPage() {
       }
       if (data.role) {
         localStorage.setItem('auth_role', data.role);
-        try { localStorage.removeItem('notif_guide_dismissed'); } catch (e) {}
+        try {
+          localStorage.removeItem('notif_guide_dismissed');
+          localStorage.removeItem('pwa_push_dismissed');
+          sessionStorage.removeItem('pwa_push_dismissed');
+        } catch (e) {}
         if (cleanPhone) {
           savePhoneRoleMap(cleanPhone, data.role, data.name || data.userName || null, 'login');
           await recordIdentityToSw(cleanPhone, data.role, data.name || data.userName || null);
