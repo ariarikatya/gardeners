@@ -430,9 +430,22 @@ export default function GardenerDashboard() {
       const pendingQueue = await getQueue();
       const merged = applyQueueToOrders(incomingOrders, pendingQueue);
 
+      const pendingExpenses = (pendingQueue || [])
+        .filter(i => i.actionType === 'EXPENSE_POST' && i.payload)
+        .map(i => ({
+          id: 'pending_' + (i.id || Math.random().toString(36).slice(2)),
+          type: 'expense',
+          amount: Number(i.payload.amount || 0),
+          description: i.payload.description || '',
+          receiptUrl: i.payload.receiptUrl || null,
+          approved: false,
+          createdAt: i.createdAt ? new Date(i.createdAt).toISOString() : new Date().toISOString(),
+          isPendingSync: true,
+        }));
+
       setOrders(merged);
       setMyDayOffs(data.dayOffs || []);
-      setOperations(operationsList);
+      setOperations([...pendingExpenses, ...operationsList]);
       setIsOffline(false);
 
       const now = Date.now();
