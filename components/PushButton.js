@@ -124,17 +124,8 @@ export default function PushButton({ className = '' }) {
                 setPushState('enabled');
                 setShowIosPushHint(false);
                 clientLog('mount', { state: 'enabled', synced: true, endpointPrefix: sub.endpoint.slice(0, 40) });
-              } else if (Notification.permission === 'granted') {
-                clientLog('mount_rebind_start');
-                const reboundSub = await performSilentReSubscribe(reg, sub.endpoint);
-                if (reboundSub) {
-                  setPushState('enabled');
-                  setShowIosPushHint(false);
-                } else {
-                  setPushState('orphan');
-                }
               } else {
-                setPushState('disabled');
+                setPushState('orphan');
               }
             } else {
               setPushState('enabled');
@@ -143,17 +134,9 @@ export default function PushButton({ className = '' }) {
             }
           } else {
             if (Notification.permission === 'granted') {
-              const reboundSub = await performSilentReSubscribe(reg, null);
-              if (reboundSub) {
-                setPushState('enabled');
-                setShowIosPushHint(false);
-              } else {
-                setPushState('orphan');
-                clientLog('orphan_subscription_detected', {
-                  notifPerm: Notification.permission,
-                  displayMode: envInfo.displayMode,
-                });
-              }
+              // Do not automatically create a subscription without user gesture
+              setPushState('disabled');
+              clientLog('mount', { state: 'disabled', perm: 'granted_no_sub' });
             } else {
               setPushState('disabled');
               clientLog('mount', { state: 'disabled' });
@@ -348,6 +331,14 @@ export default function PushButton({ className = '' }) {
 
         const permission = await Notification.requestPermission();
         clientLog('permission_result', { permBefore, permissionResult: permission });
+
+        // Save permission state to server
+        fetch('/api/push/permission', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notifPermission: permission, notificationsEnabled: permission === 'granted' }),
+        }).catch(() => {});
 
         if (permission === 'denied') {
           setPushState('denied');

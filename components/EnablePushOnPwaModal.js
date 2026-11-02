@@ -22,49 +22,70 @@ export default function EnablePushOnPwaModal() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    try {
-      // Проверяем флаг в sessionStorage, чтобы не показывать в текущую сессию
-      const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
-      if (dismissedSession === '1') return;
+    let isCancelled = false;
 
-      const env = detectPwaEnv();
-      const isPwa = Boolean(env.isStandalone || env.probableStandalone);
+    const checkModal = async () => {
+      try {
+        const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
+        const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
+        if (dismissedSession === '1') return;
 
-      // Показываем ТОЛЬКО в PWA
-      if (!isPwa) return;
+        // 24-hour temporary dismissal check
+        if (dismissedAt) {
+          const timePassed = Date.now() - Number(dismissedAt);
+          if (timePassed < 24 * 60 * 60 * 1000) return;
+        }
 
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        return;
-      }
+        const env = detectPwaEnv();
+        const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        return; // Пользователь явно заблокировал в настройках браузера
-      }
+        // Show ONLY in PWA installed mode
+        if (!isPwa) return;
 
-      // Проверяем наличие активной подписки
-      navigator.serviceWorker.ready.then(async (reg) => {
+        // Check user DB state: if notificationsEnabled === true, do not show
         try {
-          const sub = await reg.pushManager.getSubscription();
-          if (!sub || Notification.permission !== 'granted') {
-            setIsOpen(true);
+          const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+          if (meRes.ok) {
+            const meData = await meRes.json();
+            if (meData?.user?.notificationsEnabled === true) {
+              return;
+            }
           }
-        } catch (e) {
-          if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
-            setIsOpen(true);
+        } catch (meErr) {}
+
+        if (typeof Notification !== 'undefined') {
+          if (Notification.permission === 'denied') {
+            return;
           }
         }
-      }).catch(() => {
-        if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+
+        // If PushManager & SW exist, check subscription status
+        if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) return; // already subscribed and permission granted
+          } catch (e) {}
+        }
+
+        if (!isCancelled) {
           setIsOpen(true);
         }
-      });
-    } catch (err) {
-      console.warn('EnablePushOnPwaModal init error:', err);
-    }
+      } catch (err) {
+        console.warn('EnablePushOnPwaModal init error:', err);
+      }
+    };
+
+    checkModal();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const handleDismiss = () => {
     try {
+      localStorage.setItem('pwa_push_dismissed_at', String(Date.now()));
       sessionStorage.setItem('pwa_push_dismissed', '1');
     } catch (e) {}
     setSubscribing(false);
@@ -74,6 +95,12 @@ export default function EnablePushOnPwaModal() {
   const handleEnablePush = async () => {
     setSubscribing(true);
     try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        alert('Push-уведомления не поддерживаются на этом устройстве или в этой версии браузера.');
+        handleDismiss();
+        return;
+      }
+
       if (typeof Notification === 'undefined') {
         handleDismiss();
         return;
@@ -82,8 +109,15 @@ export default function EnablePushOnPwaModal() {
       const permission = await Notification.requestPermission();
       clientLog('pwa_modal_permission_result', { permission });
 
+      // Save permission state to server
+      fetch('/api/push/permission', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifPermission: permission, notificationsEnabled: permission === 'granted' }),
+      }).catch(() => {});
+
       if (permission !== 'granted') {
-        // При 'denied' или закрытии диалога сохраняем dismiss в sessionStorage
         handleDismiss();
         return;
       }

@@ -392,7 +392,7 @@ export default function GardenerDashboard() {
     try {
       const [resOrders, resOps] = await Promise.all([
         apiFetch('/api/gardener/orders'),
-        apiFetch('/api/gardener/operations?all=1')
+        apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' })
       ]);
 
       if (!resOrders.ok) {
@@ -400,7 +400,18 @@ export default function GardenerDashboard() {
       }
 
       const data = await resOrders.json();
-      const ops = resOps.ok ? await resOps.json() : {};
+      let operationsList = [];
+      if (resOps.ok) {
+        const ops = await resOps.json();
+        operationsList = ops.operations || [];
+      } else {
+        const cachedOps = await getCache('operations').catch(() => null);
+        if (cachedOps && Array.isArray(cachedOps.data)) {
+          operationsList = cachedOps.data;
+        } else if (Array.isArray(cachedOps)) {
+          operationsList = cachedOps;
+        }
+      }
       const incomingOrders = data.orders || [];
 
       if (silent && orders.length > 0) {
@@ -419,9 +430,22 @@ export default function GardenerDashboard() {
       const pendingQueue = await getQueue();
       const merged = applyQueueToOrders(incomingOrders, pendingQueue);
 
+      const pendingExpenses = (pendingQueue || [])
+        .filter(i => i.actionType === 'EXPENSE_POST' && i.payload)
+        .map(i => ({
+          id: 'pending_' + (i.id || Math.random().toString(36).slice(2)),
+          type: 'expense',
+          amount: Number(i.payload.amount || 0),
+          description: i.payload.description || '',
+          receiptUrl: i.payload.receiptUrl || null,
+          approved: false,
+          createdAt: i.createdAt ? new Date(i.createdAt).toISOString() : new Date().toISOString(),
+          isPendingSync: true,
+        }));
+
       setOrders(merged);
       setMyDayOffs(data.dayOffs || []);
-      setOperations(ops.operations || []);
+      setOperations([...pendingExpenses, ...operationsList]);
       setIsOffline(false);
 
       const now = Date.now();
@@ -431,7 +455,7 @@ export default function GardenerDashboard() {
       const ordersToCache = filterOrdersForOffline(incomingOrders);
       await Promise.all([
         saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] }),
-        saveCache('operations', ops.operations || []),
+        saveCache('operations', operationsList),
       ]);
 
       touchOfflineSession();
@@ -2491,7 +2515,11 @@ export default function GardenerDashboard() {
                   .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
                 if (allExpenses.length === 0) {
-                  return <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">Трат пока нет</div>;
+                  return (
+                    <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">
+                      Трат пока нет
+                    </div>
+                  );
                 }
 
                 // Группировка по месяцам

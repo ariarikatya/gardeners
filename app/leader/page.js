@@ -100,9 +100,11 @@ export default function LeaderDashboard() {
   const [opsModalGardener, setOpsModalGardener] = useState(null);
   const [opsList, setOpsList] = useState([]);
   const [loadingOps, setLoadingOps] = useState(false);
+  const [opsModalAllTime, setOpsModalAllTime] = useState(false);
   const [ordersModalGardener, setOrdersModalGardener] = useState(null);
   const [ordersList, setOrdersList] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [ordersModalAllTime, setOrdersModalAllTime] = useState(false);
   const [leaderScale, setLeaderScale] = useState(1);
   const [leaderTab, setLeaderTab] = useState('finance');
 
@@ -648,12 +650,19 @@ export default function LeaderDashboard() {
     }));
   };
 
-  const openOpsModal = async (gardenerId) => {
+  const openOpsModal = async (gardenerId, start = startDate, end = endDate, isAll = false) => {
     setOpsModalGardener(gardenerId);
+    setOpsModalAllTime(isAll);
     setLoadingOps(true);
     try {
       const params = new URLSearchParams();
       params.set('gardenerId', gardenerId);
+      if (isAll) {
+        params.set('all', '1');
+      } else {
+        if (start) params.set('start', start);
+        if (end) params.set('end', end);
+      }
       const res = await apiFetch(`/api/leader/operations?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
@@ -665,7 +674,7 @@ export default function LeaderDashboard() {
     }
   };
 
-  const closeOpsModal = () => { setOpsModalGardener(null); setOpsList([]); };
+  const closeOpsModal = () => { setOpsModalGardener(null); setOpsList([]); setOpsModalAllTime(false); };
 
   const deleteOperation = async (id, confirmMsg = 'Удалить операцию?') => {
     if (!confirm(confirmMsg)) return;
@@ -688,19 +697,26 @@ export default function LeaderDashboard() {
       const res = await apiFetch(`/api/leader/operations?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка удаления');
-      if (opsModalGardener) await openOpsModal(opsModalGardener);
+      if (opsModalGardener) await openOpsModal(opsModalGardener, startDate, endDate, opsModalAllTime);
       await fetchData();
     } catch (err) {
       alert(err.message || 'Ошибка удаления');
     }
   };
 
-  const openOrdersModal = async (gardenerId) => {
+  const openOrdersModal = async (gardenerId, start = startDate, end = endDate, isAll = false) => {
     setOrdersModalGardener(gardenerId);
+    setOrdersModalAllTime(isAll);
     setLoadingOrders(true);
     try {
       const params = new URLSearchParams();
       params.set('gardenerId', gardenerId);
+      if (isAll) {
+        params.set('all', '1');
+      } else {
+        if (start) params.set('start', start);
+        if (end) params.set('end', end);
+      }
       const res = await apiFetch(`/api/leader/orders?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка');
@@ -712,7 +728,17 @@ export default function LeaderDashboard() {
     }
   };
 
-  const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); };
+  const closeOrdersModal = () => { setOrdersModalGardener(null); setOrdersList([]); setOrdersModalAllTime(false); };
+
+  // Автоматическая синхронизация открытых модалок при смене диапазона дат
+  useEffect(() => {
+    if (opsModalGardener && !opsModalAllTime) {
+      openOpsModal(opsModalGardener, startDate, endDate, false);
+    }
+    if (ordersModalGardener && !ordersModalAllTime) {
+      openOrdersModal(ordersModalGardener, startDate, endDate, false);
+    }
+  }, [startDate, endDate]);
 
   const toggleOrderPaid = async (orderId, paidTo) => {
     const nextValue = Array.isArray(paidTo) ? paidTo : (paidTo ? [paidTo] : []);
@@ -1221,9 +1247,31 @@ export default function LeaderDashboard() {
         {opsModalGardener && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-4 max-w-lg w-full">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-bold">Операции садовника</h3>
-                <button onClick={closeOpsModal} className="text-slate-500">Закрыть</button>
+              <div className="flex justify-between items-center mb-2 gap-2">
+                <div>
+                  <h3 className="font-bold">
+                    Операции · {opsModalAllTime ? 'За всё время' : `${startDate ? new Date(startDate).toLocaleDateString('ru-RU') : ''} – ${endDate ? new Date(endDate).toLocaleDateString('ru-RU') : ''}`}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => openOpsModal(opsModalGardener, startDate, endDate, false)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${!opsModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      Текущий период
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openOpsModal(opsModalGardener, startDate, endDate, true)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${opsModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      За всё время
+                    </button>
+                  </div>
+                  <button onClick={closeOpsModal} className="text-slate-500 hover:text-slate-700 text-sm">Закрыть</button>
+                </div>
               </div>
               {loadingOps ? (
                 <div className="text-center text-slate-500 py-4">Загрузка...</div>
@@ -1289,7 +1337,7 @@ export default function LeaderDashboard() {
                                   });
                                   const json = await res.json();
                                   if (!res.ok) throw new Error(json.error || 'Ошибка');
-                                  if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                  if (opsModalGardener) await openOpsModal(opsModalGardener, startDate, endDate, opsModalAllTime);
                                   await fetchData();
                                 } catch (err) {
                                   alert(err.message || 'Ошибка');
@@ -1346,7 +1394,7 @@ export default function LeaderDashboard() {
                                   const res = await apiFetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: true, approvedAmount: val }) });
                                   const json = await res.json();
                                   if (!res.ok) throw new Error(json.error || 'Ошибка');
-                                  if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                  if (opsModalGardener) await openOpsModal(opsModalGardener, startDate, endDate, opsModalAllTime);
                                   await fetchData();
                                   if (json.operation && json.operation.approved) alert('Трата утверждена');
                                 } catch (err) { alert(err.message || 'Ошибка'); }
@@ -1375,7 +1423,7 @@ export default function LeaderDashboard() {
                                   const res = await apiFetch('/api/leader/operations', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: op.id, approved: false, approvedAmount: null }) });
                                   const json = await res.json();
                                   if (!res.ok) throw new Error(json.error || 'Ошибка');
-                                  if (opsModalGardener) await openOpsModal(opsModalGardener);
+                                  if (opsModalGardener) await openOpsModal(opsModalGardener, startDate, endDate, opsModalAllTime);
                                   await fetchData();
                                 } catch (err) { alert(err.message || 'Ошибка'); }
                               }}
@@ -1397,9 +1445,31 @@ export default function LeaderDashboard() {
         {ordersModalGardener && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-4 max-w-2xl w-full">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-bold">Заказы садовника</h3>
-                <button onClick={closeOrdersModal} className="text-slate-500">Закрыть</button>
+              <div className="flex justify-between items-center mb-2 gap-2">
+                <div>
+                  <h3 className="font-bold">
+                    Заказы · {ordersModalAllTime ? 'За всё время' : `${startDate ? new Date(startDate).toLocaleDateString('ru-RU') : ''} – ${endDate ? new Date(endDate).toLocaleDateString('ru-RU') : ''}`}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => openOrdersModal(ordersModalGardener, startDate, endDate, false)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${!ordersModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      Текущий период
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openOrdersModal(ordersModalGardener, startDate, endDate, true)}
+                      className={`px-2 py-1 rounded-md cursor-pointer font-medium transition-colors ${ordersModalAllTime ? 'bg-white shadow-xs text-emerald-800' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      За всё время
+                    </button>
+                  </div>
+                  <button onClick={closeOrdersModal} className="text-slate-500 hover:text-slate-700 text-sm">Закрыть</button>
+                </div>
               </div>
               {loadingOrders ? (
                 <div className="text-center text-slate-500 py-4">Загрузка...</div>

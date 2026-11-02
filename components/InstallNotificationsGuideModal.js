@@ -11,14 +11,21 @@ export default function InstallNotificationsGuideModal() {
     if (typeof window === 'undefined') return;
 
     try {
+      const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
       const dismissed = localStorage.getItem('notif_guide_dismissed');
-      if (dismissed === '1') {
+      // 24-hour temporary dismissal check
+      if (dismissedAt) {
+        const timePassed = Date.now() - Number(dismissedAt);
+        if (timePassed < 24 * 60 * 60 * 1000) {
+          return;
+        }
+      } else if (dismissed === '1') {
+        // legacy flag fallback
         return;
       }
 
       const env = detectPwaEnv();
       const isMobile = env.isMobile || env.isIos || env.isAndroid;
-      // Use rawIsStandalone to avoid false negatives when Notification API is missing on iOS
       const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
       // Do not display if already in PWA or not a mobile device
@@ -33,6 +40,7 @@ export default function InstallNotificationsGuideModal() {
 
   const handleDismiss = () => {
     try {
+      localStorage.setItem('notif_guide_dismissed_at', String(Date.now()));
       localStorage.setItem('notif_guide_dismissed', '1');
     } catch (e) {}
     setIsOpen(false);
@@ -59,11 +67,11 @@ export default function InstallNotificationsGuideModal() {
         </h3>
 
         {/* Список шагов строго сверху вниз без подписей Шаг N */}
-        <div className="space-y-3 mb-5 text-xs text-slate-700">
+        <div className="space-y-4 text-xs text-slate-700">
           {isIosPlatform ? (
             <>
               {/* iOS: три точки */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-slate-600">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="12" cy="5" r="2" />
@@ -77,7 +85,7 @@ export default function InstallNotificationsGuideModal() {
               </div>
 
               {/* iOS: поделиться */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
@@ -91,7 +99,7 @@ export default function InstallNotificationsGuideModal() {
               </div>
 
               {/* iOS: плюс */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="12" y1="5" x2="12" y2="19" />
@@ -104,14 +112,12 @@ export default function InstallNotificationsGuideModal() {
               </div>
 
               {/* iOS: иконка приложения */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="4" />
-                    <path d="M8 12c1.5-2 4-2 5.5 0" />
-                    <path d="M12 12v4" />
-                  </svg>
-                </div>
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                <img
+                  src="/icon-192.png"
+                  alt="Иконка приложения Anemon Agro"
+                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0 shadow-xs"
+                />
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
@@ -120,7 +126,7 @@ export default function InstallNotificationsGuideModal() {
           ) : (
             <>
               {/* Android: меню */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-slate-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="12" cy="5" r="2" />
@@ -134,7 +140,7 @@ export default function InstallNotificationsGuideModal() {
               </div>
 
               {/* Android: плюс */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                 <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 text-emerald-700">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="12" y1="5" x2="12" y2="19" />
@@ -147,14 +153,12 @@ export default function InstallNotificationsGuideModal() {
               </div>
 
               {/* Android: иконка приложения */}
-              <div className="flex items-start gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="4" />
-                    <path d="M8 12c1.5-2 4-2 5.5 0" />
-                    <path d="M12 12v4" />
-                  </svg>
-                </div>
+              <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                <img
+                  src="/icon-192.png"
+                  alt="Иконка приложения Anemon Agro"
+                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0 shadow-xs"
+                />
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
@@ -164,13 +168,15 @@ export default function InstallNotificationsGuideModal() {
         </div>
 
         {/* Кнопка Напомнить позже */}
-        <button
-          type="button"
-          onClick={handleDismiss}
-          className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
-        >
-          Напомнить позже
-        </button>
+        <div className="mt-8 pt-4 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={handleDismiss}
+            className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
+          >
+            Напомнить позже
+          </button>
+        </div>
       </div>
     </div>
   );

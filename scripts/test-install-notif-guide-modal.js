@@ -32,4 +32,12 @@ assert(content.includes('Нажмите на меню «⋮» (три точки
 assert(content.includes('Напомнить позже'), 'Must have "Напомнить позже" button');
 assert(content.includes("localStorage.setItem('notif_guide_dismissed', '1')"), 'Must store notif_guide_dismissed on dismiss');
 
+// 6. Verify real PWA icon is used instead of fake SVG rect
+assert(!content.includes('<rect x="3" y="3"'), 'Must NOT contain fake hand-drawn <rect x="3" y="3"');
+assert(content.includes('/icon-192.png'), 'Must render real PWA icon /icon-192.png');
+
+// 7. Verify spacing fix: button wrapper with mt-6 / border-t and step gaps
+assert(content.includes('border-t border-slate-100'), 'Must wrap button block in border-t border-slate-100');
+assert(!content.includes('space-y-3 mb-5 text-xs text-slate-700'), 'Must remove mb-5 from steps list container to avoid collapsed margin');
+
 console.log('🎉 All InstallNotificationsGuideModal checks passed successfully!');

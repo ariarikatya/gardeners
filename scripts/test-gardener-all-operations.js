@@ -37,7 +37,9 @@ async function runTest() {
   // 2. With all=1
   const resAll = filterOps(new URLSearchParams('all=1'), mockOperations);
   assert.strictEqual(resAll.length, 3, 'Expected all 3 operations with all=1');
-  console.log('  ✓ all=1 returns all operations');
+  const past3MonthsOp = resAll.find(o => o.id === 'op_past_1');
+  assert(past3MonthsOp, 'Must include past month operations with all=1');
+  console.log('  ✓ all=1 returns all operations including past months');
 
   // 3. With explicit start/end
   const currStartStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();

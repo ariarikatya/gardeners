@@ -8,7 +8,7 @@ function getCacheName() {
       }
     }
   } catch (e) {}
-  return 'anemon-agro-v1.0.0';
+  return 'anemon-agro-v1.0.1';
 }
 
 let CACHE_NAME = getCacheName();
@@ -524,6 +524,23 @@ self.addEventListener('activate', (event) => {
         await Promise.all(
           keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_DATA_CACHE).map((k) => caches.delete(k))
         );
+      }
+
+      // Purge legacy/broken operations entries from current and persistent caches
+      try {
+        const currentC = await caches.open(CACHE_NAME);
+        const pC = await caches.open(OFFLINE_DATA_CACHE);
+        for (const targetCache of [currentC, pC]) {
+          const reqs = await targetCache.keys();
+          for (const r of reqs) {
+            const parsedUrl = new URL(r.url);
+            if (parsedUrl.pathname.includes('/api/gardener/operations') && !parsedUrl.search.includes('all=1')) {
+              await targetCache.delete(r);
+            }
+          }
+        }
+      } catch (purgeErr) {
+        console.warn('[sw_activate] Error purging legacy operations cache:', purgeErr);
       }
 
       try {

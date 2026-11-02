@@ -303,7 +303,9 @@ export default function LoginPage() {
         localStorage.setItem('auth_role', data.role);
         try {
           localStorage.removeItem('notif_guide_dismissed');
+          localStorage.removeItem('notif_guide_dismissed_at');
           localStorage.removeItem('pwa_push_dismissed');
+          localStorage.removeItem('pwa_push_dismissed_at');
           sessionStorage.removeItem('pwa_push_dismissed');
         } catch (e) {}
         if (cleanPhone) {
