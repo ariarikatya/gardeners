@@ -63,12 +63,17 @@ function testPhotoViewer() {
   assert(pvCode.includes("width: '44px'") && pvCode.includes("height: '44px'"), 'Controls must have inline width/height 44px');
   assert(pvCode.includes("borderRadius: '9999px'"), 'Controls must have inline borderRadius 9999px');
 
-  // Verify prev arrow style
+  // Verify prev arrow style and positioning wrapper
   assert(pvCode.includes("left: '8px'"), 'Prev button must have inline left 8px');
   assert(pvCode.includes("transform: 'translateY(-50%)'"), 'Arrows must have inline translateY(-50%)');
+  assert(pvCode.includes('left-2 sm:left-6 top-1/2 -translate-y-1/2'), 'Prev button wrapper must have left-2 sm:left-6 top-1/2 -translate-y-1/2');
 
-  // Verify next arrow style
+  // Verify next arrow style and positioning wrapper
   assert(pvCode.includes("right: '8px'"), 'Next button must have inline right 8px');
+  assert(pvCode.includes('right-2 sm:right-6 top-1/2 -translate-y-1/2'), 'Next button wrapper must have right-2 sm:right-6 top-1/2 -translate-y-1/2');
+
+  // Verify no layout clumping classes on buttons
+  assert(pvCode.includes('inline-flex items-center justify-center'), 'Buttons must use inline-flex for content centering without clumping outer layout');
 
   console.log('  ✓ Static JSX inline style assertions for PhotoViewer controls verified');
   console.log('🎉 PhotoViewer navigation tests passed!');

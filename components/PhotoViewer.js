@@ -83,12 +83,12 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md select-none touch-none p-2 sm:p-4"
+      className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md select-none touch-none"
       onClick={onClose}
     >
-      {/* Верхняя панель: счётчик и кнопка закрытия */}
+      {/* Верхняя панель: счётчик слева, кнопка закрытия справа */}
       <div
-        className="absolute top-4 left-4 right-4 flex items-center justify-between text-white z-10"
+        className="absolute top-4 left-4 right-4 flex items-center justify-between text-white z-10 pointer-events-none"
         style={{
           position: 'absolute',
           top: '16px',
@@ -102,7 +102,7 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="bg-black/50 backdrop-blur-xs px-3 py-1.5 rounded-full text-xs font-semibold tracking-wider">
+        <div className="bg-black/50 backdrop-blur-xs px-3 py-1.5 rounded-full text-xs font-semibold tracking-wider pointer-events-auto">
           {currentIndex + 1} / {total}
         </div>
 
@@ -114,12 +114,12 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
             width: '44px',
             height: '44px',
             borderRadius: '9999px',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
           }}
-          className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 flex items-center justify-center text-white text-xl font-bold transition-transform active:scale-95 shadow-lg border border-white/20 cursor-pointer"
+          className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 inline-flex items-center justify-center text-white text-xl font-bold transition-transform active:scale-95 shadow-lg border border-white/20 cursor-pointer pointer-events-auto"
         >
           ✕
         </button>
@@ -127,33 +127,39 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
 
       {/* Стрелка влево */}
       {total > 1 && (
-        <button
-          type="button"
-          onClick={goToPrev}
-          aria-label="Предыдущее фото"
+        <div
+          className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 z-10"
           style={{
             position: 'absolute',
             left: '8px',
             top: '50%',
             transform: 'translateY(-50%)',
             zIndex: 10,
-            width: '44px',
-            height: '44px',
-            borderRadius: '9999px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
           }}
-          className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-white flex items-center justify-center text-2xl font-bold transition-all active:scale-95 z-10 border border-white/20 shadow-lg cursor-pointer"
         >
-          ‹
-        </button>
+          <button
+            type="button"
+            onClick={goToPrev}
+            aria-label="Предыдущее фото"
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '9999px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-white inline-flex items-center justify-center text-2xl font-bold transition-all active:scale-95 border border-white/20 shadow-lg cursor-pointer"
+          >
+            ‹
+          </button>
+        </div>
       )}
 
-      {/* Контейнер текущего изображения со свайпом */}
+      {/* Центрированный контейнер изображения */}
       <div
-        className="max-w-full max-h-[85vh] flex items-center justify-center p-2 relative"
+        className="w-full h-full flex items-center justify-center p-2 sm:p-4"
         onClick={(e) => e.stopPropagation()}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -167,28 +173,34 @@ export default function PhotoViewer({ images = [], initialIndex = 0, onClose }) 
 
       {/* Стрелка вправо */}
       {total > 1 && (
-        <button
-          type="button"
-          onClick={goToNext}
-          aria-label="Следующее фото"
+        <div
+          className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-10"
           style={{
             position: 'absolute',
             right: '8px',
             top: '50%',
             transform: 'translateY(-50%)',
             zIndex: 10,
-            width: '44px',
-            height: '44px',
-            borderRadius: '9999px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
           }}
-          className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-white flex items-center justify-center text-2xl font-bold transition-all active:scale-95 z-10 border border-white/20 shadow-lg cursor-pointer"
         >
-          ›
-        </button>
+          <button
+            type="button"
+            onClick={goToNext}
+            aria-label="Следующее фото"
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '9999px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 text-white inline-flex items-center justify-center text-2xl font-bold transition-all active:scale-95 border border-white/20 shadow-lg cursor-pointer"
+          >
+            ›
+          </button>
+        </div>
       )}
     </div>
   );
