@@ -282,8 +282,10 @@ export default function GardenerDashboard() {
         setMyWorks(cachedProfileObj.data.works || []);
       }
 
-      if (cachedOpsObj && cachedOpsObj.data) {
-        const rawOps = cachedOpsObj.data || [];
+      if (cachedOpsObj) {
+        const rawOps = Array.isArray(cachedOpsObj.data)
+          ? cachedOpsObj.data
+          : (Array.isArray(cachedOpsObj) ? cachedOpsObj : []);
         // Добавляем несинхронизированные траты из очереди
         const pendingExpenses = (pendingQueue || [])
           .filter(i => i.actionType === 'EXPENSE_POST' && i.payload)

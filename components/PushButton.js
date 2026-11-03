@@ -84,79 +84,90 @@ export default function PushButton({ className = '' }) {
       }
     };
 
-    updateEnvStatus();
+    const refreshPushState = () => {
+      updateEnvStatus();
+
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        setPushState('unsupported');
+        clientLog('mount', { state: 'unsupported' });
+        return;
+      }
+
+      if (Notification.permission === 'denied') {
+        setPushState('denied');
+        clientLog('mount', { state: 'denied' });
+      } else {
+        navigator.serviceWorker.ready.then(async (reg) => {
+          try {
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              const subRes = await fetch('/api/push/subscribe', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
+              }).catch(() => null);
+
+              if (subRes && subRes.ok) {
+                const subData = await subRes.json().catch(() => ({}));
+                if (subData.ok && subData.hasUserId !== false) {
+                  setPushState('enabled');
+                  setShowIosPushHint(false);
+                  clientLog('mount', { state: 'enabled', synced: true, endpointPrefix: sub.endpoint.slice(0, 40) });
+                } else {
+                  setPushState('orphan');
+                }
+              } else {
+                setPushState('enabled');
+                setShowIosPushHint(false);
+                clientLog('mount', { state: 'enabled', offline: true, endpointPrefix: sub.endpoint.slice(0, 40) });
+              }
+            } else {
+              if (Notification.permission === 'granted') {
+                // Do not automatically create a subscription without user gesture
+                setPushState('disabled');
+                clientLog('mount', { state: 'disabled', perm: 'granted_no_sub' });
+              } else {
+                setPushState('disabled');
+                clientLog('mount', { state: 'disabled' });
+              }
+            }
+          } catch (err) {
+            console.error('[PushButton] Error checking push subscription:', err);
+            setPushState('disabled');
+            clientLog('mount', { state: 'disabled', checkError: err.message });
+          }
+        }).catch((swErr) => {
+          setPushState('disabled');
+          clientLog('mount', { state: 'disabled', swReadyError: swErr?.message });
+        });
+      }
+    };
+
+    refreshPushState();
 
     const unsubscribeMq = subscribeToDisplayModeChange(() => {
       updateEnvStatus();
     });
 
+    const handleSubscriptionChange = (e) => {
+      if (e?.detail?.state === 'enabled') {
+        setPushState('enabled');
+      } else if (e?.detail?.state === 'disabled') {
+        setPushState('disabled');
+      }
+      refreshPushState();
+    };
+
     window.addEventListener('focus', updateEnvStatus);
     document.addEventListener('visibilitychange', updateEnvStatus);
-
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      setPushState('unsupported');
-      clientLog('mount', { state: 'unsupported' });
-      return () => {
-        unsubscribeMq();
-        window.removeEventListener('focus', updateEnvStatus);
-        document.removeEventListener('visibilitychange', updateEnvStatus);
-      };
-    }
-
-    if (Notification.permission === 'denied') {
-      setPushState('denied');
-      clientLog('mount', { state: 'denied' });
-    } else {
-      navigator.serviceWorker.ready.then(async (reg) => {
-        try {
-          const sub = await reg.pushManager.getSubscription();
-          if (sub) {
-            const subRes = await fetch('/api/push/subscribe', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
-            }).catch(() => null);
-
-            if (subRes && subRes.ok) {
-              const subData = await subRes.json().catch(() => ({}));
-              if (subData.ok && subData.hasUserId !== false) {
-                setPushState('enabled');
-                setShowIosPushHint(false);
-                clientLog('mount', { state: 'enabled', synced: true, endpointPrefix: sub.endpoint.slice(0, 40) });
-              } else {
-                setPushState('orphan');
-              }
-            } else {
-              setPushState('enabled');
-              setShowIosPushHint(false);
-              clientLog('mount', { state: 'enabled', offline: true, endpointPrefix: sub.endpoint.slice(0, 40) });
-            }
-          } else {
-            if (Notification.permission === 'granted') {
-              // Do not automatically create a subscription without user gesture
-              setPushState('disabled');
-              clientLog('mount', { state: 'disabled', perm: 'granted_no_sub' });
-            } else {
-              setPushState('disabled');
-              clientLog('mount', { state: 'disabled' });
-            }
-          }
-        } catch (err) {
-          console.error('[PushButton] Error checking push subscription:', err);
-          setPushState('disabled');
-          clientLog('mount', { state: 'disabled', checkError: err.message });
-        }
-      }).catch((swErr) => {
-        setPushState('disabled');
-        clientLog('mount', { state: 'disabled', swReadyError: swErr?.message });
-      });
-    }
+    window.addEventListener('push-subscription-changed', handleSubscriptionChange);
 
     return () => {
       unsubscribeMq();
       window.removeEventListener('focus', updateEnvStatus);
       document.removeEventListener('visibilitychange', updateEnvStatus);
+      window.removeEventListener('push-subscription-changed', handleSubscriptionChange);
     };
   }, []);
 
@@ -324,6 +335,9 @@ export default function PushButton({ className = '' }) {
           await sub.unsubscribe().catch(() => {});
         }
         setPushState('disabled');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'disabled' } }));
+        }
         clientLog('unsubscribe_success');
       } else {
         const permBefore = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
@@ -411,6 +425,9 @@ export default function PushButton({ className = '' }) {
 
         setPushState('enabled');
         setShowIosPushHint(false);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'enabled' } }));
+        }
 
         if (subData.hasUserId === false) {
           alert('⚠️ Подписка сохранена, но не привязана к аккаунту (userId отсутствует). Перезайдите в аккаунт.');

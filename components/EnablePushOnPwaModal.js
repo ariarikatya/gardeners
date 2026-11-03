@@ -200,6 +200,9 @@ export default function EnablePushOnPwaModal() {
 
       if (subRes.ok) {
         clientLog('pwa_modal_subscribe_success');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'enabled' } }));
+        }
       }
       setIsOpen(false);
     } catch (err) {

@@ -1,4 +1,6 @@
 (function() {
+  var fatalErrorShown = false;
+
   function handleChunkError() {
     if (typeof window === 'undefined') return false;
     try {
@@ -11,9 +13,29 @@
     return false;
   }
 
+  function isPageRendered() {
+    if (typeof document === 'undefined' || !document.body) return false;
+    var root = document.querySelector('#root') || document.querySelector('main') || document.body;
+    var hasContent = Boolean(
+      (document.body.children && document.body.children.length > 0) &&
+      (document.body.innerText || '').trim().length > 0
+    );
+    if (root && root !== document.body) {
+      hasContent = hasContent || (root.children && root.children.length > 0);
+    }
+    return hasContent;
+  }
+
   function showFatalError(msg) {
+    if (fatalErrorShown) return;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     if (document.getElementById('fatal-error-fallback')) return;
+
+    // Check actual DOM state at call time: never show fatal error if content is rendered
+    if (isPageRendered()) return;
+
+    fatalErrorShown = true;
+
     var div = document.createElement('div');
     div.id = 'fatal-error-fallback';
     div.style.cssText = 'position:fixed;inset:0;background:#f8fafc;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;z-index:999999;';
@@ -51,23 +73,20 @@
     )) {
       if (handleChunkError()) return;
       showFatalError('ошибка загрузки чанка');
-      return;
-    }
-    if (document.body && (!document.body.children || document.body.children.length === 0 || document.body.innerText.trim() === '')) {
-      showFatalError('ошибка сети');
     }
   });
 
   setTimeout(function() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     if (typeof document !== 'undefined' && document.body) {
-      var text = (document.body.innerText || '').trim();
-      var hasChildren = document.body.children && document.body.children.length > 0;
       var hasFatal = document.getElementById('fatal-error-fallback');
-      if ((!hasChildren || text.length === 0) && !hasFatal) {
-        showFatalError('пустая страница');
-      } else {
+      if (isPageRendered()) {
         try { sessionStorage.removeItem('chunk_reload_done'); } catch(e) {}
+      } else if (!hasFatal) {
+        // Page appears empty after 3 seconds: attempt a silent reload once
+        if (handleChunkError()) return;
+        // If reload already attempted and page is still empty, show fatal error
+        showFatalError('пустая страница');
       }
     }
   }, 3000);
