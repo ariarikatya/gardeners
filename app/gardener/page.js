@@ -2699,11 +2699,11 @@ export default function GardenerDashboard() {
                                   </div>
                                   <div className="text-right flex-shrink-0 text-[11px]">
                                     {op.approved ? (
-                                      <span className="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      <span className="text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                                         Утверждён {op.approvedAmount ? `(${formatMoney(op.approvedAmount)})` : ''}
                                       </span>
                                     ) : (
-                                      <span className="text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                      <span className="text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                                         В ожидании
                                       </span>
                                     )}
