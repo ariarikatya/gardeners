@@ -403,8 +403,17 @@ export default function GardenerDashboard() {
       let operationsList = [];
       if (resOps.ok) {
         const ops = await resOps.json();
-        operationsList = ops.operations || [];
+        const incomingOps = ops.operations || [];
+        if (incomingOps.length > 0) {
+          operationsList = incomingOps;
+        } else {
+          // If server returned empty operations, check if cached operations exist and keep them
+          const cachedOps = await getCache('operations').catch(() => null);
+          const cachedList = (cachedOps && Array.isArray(cachedOps.data)) ? cachedOps.data : (Array.isArray(cachedOps) ? cachedOps : []);
+          operationsList = cachedList.length > 0 ? cachedList : incomingOps;
+        }
       } else {
+        console.error('Failed to fetch gardener operations:', resOps.status);
         const cachedOps = await getCache('operations').catch(() => null);
         if (cachedOps && Array.isArray(cachedOps.data)) {
           operationsList = cachedOps.data;
@@ -453,9 +462,22 @@ export default function GardenerDashboard() {
 
       // Кэшируем данные
       const ordersToCache = filterOrdersForOffline(incomingOrders);
+      const cacheOperationsPromise = (async () => {
+        if (!resOps.ok) return;
+        if (operationsList.length > 0) {
+          await saveCache('operations', operationsList);
+        } else {
+          // Never overwrite non-empty existing operations cache with an empty response
+          const prevCached = await getCache('operations').catch(() => null);
+          const prevList = (prevCached && Array.isArray(prevCached.data)) ? prevCached.data : (Array.isArray(prevCached) ? prevCached : []);
+          if (prevList.length === 0) {
+            await saveCache('operations', operationsList);
+          }
+        }
+      })();
       await Promise.all([
         saveCache('orders', { orders: ordersToCache, dayOffs: data.dayOffs || [] }),
-        saveCache('operations', operationsList),
+        cacheOperationsPromise,
       ]);
 
       touchOfflineSession();

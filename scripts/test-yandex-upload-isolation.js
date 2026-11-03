@@ -37,14 +37,16 @@ async function runUploadIsolationTest() {
 
     routeCode = routeCode
       .replace(/import\s*{\s*NextResponse\s*}\s*from\s*['"]next\/server['"];?/, '')
+      .replace(/import\s+path\s+from\s*['"]path['"];?/, '')
       .replace(/import\s*{\s*verifyToken\s*}\s*from\s*['"]@\/lib\/jwt['"];?/, '')
       .replace(/import\s+prisma\s+from\s+['"]@\/lib\/prisma['"];?/, '')
       .replace(/import\s*{\s*scheduleYandexUpload\s*}\s*from\s*['"]@\/lib\/yandexDisk['"];?/, '')
-      .replace(/import\s*{\s*saveUploadedImage\s*}\s*from\s*['"]@\/lib\/uploads['"];?/, '')
-      .replace(/async function checkGardener\(req\)\s*{[\s\S]*?\n}/, 'async function checkGardener(req) { return { payload: { name: "TestGardener", role: "GARDENER", gardenerId: "g1" } }; }')
+      .replace(/import\s*{\s*saveUploadedImage[\s\S]*?}\s*from\s*['"]@\/lib\/uploads['"];?/, '')
+      .replace(/async function (?:checkGardener|checkAuth)\(req\)[\s\S]*?return\s*{[\s\S]*?payload[\s\S]*?};?\s*}/, 'async function checkAuth(req) { return { payload: { name: "TestGardener", role: "GARDENER", gardenerId: "g1" } }; }')
       .replace(/export async function POST/, 'async function POST');
 
     const mockSaveUploadedImage = async () => '/api/files/2026/10/mock_uuid.jpg';
+    const mockSaveUploadedMedia = async () => '/api/files/2026/10/mock_uuid.jpg';
     const mockFailingScheduleYandexUpload = () => {
       throw new Error('Yandex.Disk connection failed or queue crashed!');
     };
@@ -52,7 +54,9 @@ async function runUploadIsolationTest() {
     const createPostHandler = new Function(
       'NextResponse',
       'saveUploadedImage',
+      'saveUploadedMedia',
       'scheduleYandexUpload',
+      'path',
       `
       ${routeCode}
       return POST;
@@ -62,7 +66,9 @@ async function runUploadIsolationTest() {
     const handlePost = createPostHandler(
       MockNextResponse,
       mockSaveUploadedImage,
-      mockFailingScheduleYandexUpload
+      mockSaveUploadedMedia,
+      mockFailingScheduleYandexUpload,
+      path
     );
 
     // Mock incoming Request with formData

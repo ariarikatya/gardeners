@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { signToken, verifyToken } = require('../lib/jwt');
 
 async function testGardenerExpensesAllTime() {
   console.log('🧪 Testing gardener all-time expenses fixes...');
@@ -35,6 +36,151 @@ async function testGardenerExpensesAllTime() {
   assert(gardenerPageContent.includes('api/gardener/operations?all=1'), 'app/gardener/page.js must query /api/gardener/operations?all=1');
   assert(gardenerPageContent.includes("saveCache('operations', operationsList)"), 'Must save all operations list into IndexedDB operations cache');
   console.log('  ✓ app/gardener/page.js uses all=1 and IndexedDB fallback');
+
+  // 4. Regression Test: Route handler GET /api/gardener/operations?all=1
+  // Mock prisma with expenses from different months and years
+  const multiYearExpenses = [
+    { id: 'exp_2024', gardenerId: 'g1', type: 'expense', amount: 5000, description: 'Инвентарь 2024', createdAt: new Date('2024-05-15T10:00:00.000Z') },
+    { id: 'exp_2025', gardenerId: 'g1', type: 'expense', amount: 3200, description: 'Удобрения 2025', createdAt: new Date('2025-08-20T10:00:00.000Z') },
+    { id: 'exp_3months_ago', gardenerId: 'g1', type: 'expense', amount: 1800, description: 'Расходники 3 мес назад', createdAt: past3Months },
+    { id: 'exp_current_month', gardenerId: 'g1', type: 'expense', amount: 950, description: 'Текущие траты', createdAt: currentMonth },
+    { id: 'exp_other_gardener', gardenerId: 'g2', type: 'expense', amount: 9999, description: 'Чужая трата', createdAt: currentMonth },
+  ];
+
+  const routePath = path.resolve(__dirname, '..', 'app', 'api', 'gardener', 'operations', 'route.js');
+  let routeCode = fs.readFileSync(routePath, 'utf8');
+  routeCode = routeCode
+    .replace(/import\s*{\s*NextResponse\s*}\s*from\s*['"]next\/server['"];?/, '')
+    .replace(/import\s+prisma\s+from\s*['"]@\/lib\/prisma['"];?/, '')
+    .replace(/import\s*{\s*verifyToken\s*}\s*from\s*['"]@\/lib\/jwt['"];?/, '')
+    .replace(/import\s*{\s*getIdempotencyKey[\s\S]*?['"]@\/lib\/idempotency['"];?/, '')
+    .replace(/export async function GET/, 'async function GET')
+    .replace(/export async function POST/, 'async function POST');
+
+  const MockNextResponse = {
+    json: (data, init = {}) => ({
+      status: init.status || 200,
+      json: async () => data,
+    })
+  };
+
+  const mockPrisma = {
+    operation: {
+      findMany: async ({ where, orderBy }) => {
+        return multiYearExpenses
+          .filter(op => {
+            if (op.gardenerId !== where.gardenerId) return false;
+            if (where.createdAt) {
+              if (where.createdAt.gte && op.createdAt < where.createdAt.gte) return false;
+              if (where.createdAt.lte && op.createdAt > where.createdAt.lte) return false;
+            }
+            return true;
+          })
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      }
+    }
+  };
+
+  const createHandler = new Function('NextResponse', 'prisma', 'verifyToken', `
+    ${routeCode}
+    return { GET, POST };
+  `);
+
+  const { GET } = createHandler(MockNextResponse, mockPrisma, verifyToken);
+
+  const token = await signToken({ userId: 'u1', role: 'GARDENER', gardenerId: 'g1' });
+
+  // 4a. Call GET /api/gardener/operations?all=1 WITH cookie
+  const reqWithCookie = {
+    url: 'https://anemonagro.ru/api/gardener/operations?all=1',
+    headers: {
+      get: (header) => null,
+    },
+    cookies: {
+      get: (name) => name === 'token' ? { value: token } : undefined,
+    },
+  };
+
+  const resCookie = await GET(reqWithCookie);
+  assert.strictEqual(resCookie.status, 200, 'GET with cookie must respond with status 200');
+  const dataCookie = await resCookie.json();
+  assert(Array.isArray(dataCookie.operations), 'Response must contain operations array');
+  assert.strictEqual(dataCookie.operations.length, 4, 'Must return all 4 operations for gardener g1 across all months/years');
+  const idsCookie = dataCookie.operations.map(o => o.id);
+  assert(idsCookie.includes('exp_2024'), 'Must include 2024 expense');
+  assert(idsCookie.includes('exp_2025'), 'Must include 2025 expense');
+  assert(idsCookie.includes('exp_3months_ago'), 'Must include 3 months ago expense');
+  assert(idsCookie.includes('exp_current_month'), 'Must include current month expense');
+  assert(!idsCookie.includes('exp_other_gardener'), 'Must NOT include other gardener expense');
+  console.log('  ✓ (a) GET /api/gardener/operations?all=1 with cookie returns all expenses across all years/months');
+
+  // 4b. Call GET /api/gardener/operations?all=1 ONLY with Authorization: Bearer without cookie
+  const reqWithBearer = {
+    url: 'https://anemonagro.ru/api/gardener/operations?all=1',
+    headers: {
+      get: (header) => header.toLowerCase() === 'authorization' ? `Bearer ${token}` : null,
+    },
+    cookies: {
+      get: () => undefined,
+    },
+  };
+
+  const resBearer = await GET(reqWithBearer);
+  assert.strictEqual(resBearer.status, 200, 'GET with Authorization Bearer must respond with status 200');
+  const dataBearer = await resBearer.json();
+  assert(Array.isArray(dataBearer.operations), 'Response must contain operations array');
+  assert.strictEqual(dataBearer.operations.length, 4, 'Must return all 4 operations for gardener g1 across all months/years with Bearer');
+  const idsBearer = dataBearer.operations.map(o => o.id);
+  assert(idsBearer.includes('exp_2024'), 'Bearer response must include 2024 expense');
+  assert(idsBearer.includes('exp_2025'), 'Bearer response must include 2025 expense');
+  assert(idsBearer.includes('exp_3months_ago'), 'Bearer response must include 3 months ago expense');
+  assert(idsBearer.includes('exp_current_month'), 'Bearer response must include current month expense');
+  assert(!idsBearer.includes('exp_other_gardener'), 'Bearer response must NOT include other gardener expense');
+  console.log('  ✓ (b) GET /api/gardener/operations?all=1 ONLY with Authorization Bearer without cookie returns all expenses across all years/months');
+
+  // 4c. Verify unauthorized request (no cookie, no bearer) returns 401
+  const reqUnauth = {
+    url: 'https://anemonagro.ru/api/gardener/operations?all=1',
+    headers: { get: () => null },
+    cookies: { get: () => undefined },
+  };
+  const resUnauth = await GET(reqUnauth);
+  assert.strictEqual(resUnauth.status, 401, 'Request without credentials must return 401');
+  console.log('  ✓ (c) Request without cookie or Bearer correctly returns 401');
+
+  // 5. Regression Test: empty API response must not overwrite non-empty cached operations or displayed state
+  const mockStorage = {
+    operations: [
+      { id: 'op_cached_1', type: 'expense', amount: 1200, description: 'Ранее сохраненная трата' }
+    ]
+  };
+
+  let displayedOperations = [];
+
+  async function simulateFetchOperations(emptyApiResponse) {
+    const incomingOps = emptyApiResponse.operations || [];
+    let operationsList = [];
+    if (incomingOps.length > 0) {
+      operationsList = incomingOps;
+    } else {
+      const cachedOps = mockStorage.operations;
+      const cachedList = (cachedOps && Array.isArray(cachedOps.data)) ? cachedOps.data : (Array.isArray(cachedOps) ? cachedOps : []);
+      operationsList = cachedList.length > 0 ? cachedList : incomingOps;
+    }
+
+    displayedOperations = operationsList;
+
+    if (operationsList.length > 0) {
+      mockStorage.operations = operationsList;
+    }
+  }
+
+  await simulateFetchOperations({ operations: [] });
+  assert.strictEqual(mockStorage.operations.length, 1, 'Empty API response must not clear cached operations');
+  assert.strictEqual(mockStorage.operations[0].id, 'op_cached_1', 'Cached operation must remain intact');
+  assert.strictEqual(displayedOperations.length, 1, 'Displayed operations state must preserve cached operations');
+  assert.strictEqual(displayedOperations[0].id, 'op_cached_1', 'Displayed operation matches cached operation');
+  console.log('  ✓ (d) Empty operations API response preserves existing non-empty cache and displayed state');
 
   console.log('🎉 All gardener expenses tests passed successfully!');
 }

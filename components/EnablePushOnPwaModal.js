@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { detectPwaEnv, CLIENT_VERSION } from '@/lib/pwa-env';
 import { clientLog } from '@/lib/clientLog';
+import { apiFetch } from '@/lib/apiFetch';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -15,79 +16,127 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// In-memory flag for active window session (reset when PWA is closed and reopened)
+let inMemoryDismissed = false;
+
 export default function EnablePushOnPwaModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
+  const checkingRef = useRef(false);
+
+  const checkModal = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+
+    try {
+      // Remove legacy sessionStorage flag so iOS PWA relaunch is not blocked
+      try {
+        sessionStorage.removeItem('pwa_push_dismissed');
+      } catch (e) {}
+
+      if (inMemoryDismissed) {
+        checkingRef.current = false;
+        return;
+      }
+
+      const env = detectPwaEnv();
+      const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
+
+      // Show ONLY in PWA installed (standalone) mode
+      if (!isPwa) {
+        checkingRef.current = false;
+        return;
+      }
+
+      let meData = null;
+      try {
+        const meRes = await apiFetch('/api/auth/me');
+        if (!meRes.ok) {
+          checkingRef.current = false;
+          return;
+        }
+        meData = await meRes.json();
+      } catch (meErr) {
+        checkingRef.current = false;
+        return;
+      }
+
+      // Check if user is fully connected in DB AND has active push subscription
+      const isDbEnabled = meData?.user?.notificationsEnabled === true;
+
+      let hasActiveSubscription = false;
+      if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          hasActiveSubscription = Boolean(sub);
+        } catch (e) {}
+      }
+
+      const isFullyConnected = isDbEnabled && hasActiveSubscription;
+
+      if (isFullyConnected) {
+        setIsOpen(false);
+        checkingRef.current = false;
+        return;
+      }
+
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && (!isDbEnabled || !hasActiveSubscription)) {
+        clientLog('auto_permission_detected', {
+          permission: Notification.permission,
+          isDbEnabled,
+          hasActiveSubscription,
+        });
+      }
+
+      // Notifications are not fully connected -> show modal
+      setIsOpen(true);
+    } catch (err) {
+      console.warn('EnablePushOnPwaModal init error:', err);
+    } finally {
+      checkingRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    checkModal();
 
-    let isCancelled = false;
-
-    const checkModal = async () => {
-      try {
-        const dismissedAt = localStorage.getItem('pwa_push_dismissed_at');
-        const dismissedSession = sessionStorage.getItem('pwa_push_dismissed');
-        if (dismissedSession === '1') return;
-
-        // 24-hour temporary dismissal check
-        if (dismissedAt) {
-          const timePassed = Date.now() - Number(dismissedAt);
-          if (timePassed < 24 * 60 * 60 * 1000) return;
-        }
-
-        const env = detectPwaEnv();
-        const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
-
-        // Show ONLY in PWA installed mode
-        if (!isPwa) return;
-
-        // Check user DB state: if notificationsEnabled === true, do not show
-        try {
-          const meRes = await fetch('/api/auth/me', { credentials: 'include' });
-          if (meRes.ok) {
-            const meData = await meRes.json();
-            if (meData?.user?.notificationsEnabled === true) {
-              return;
-            }
-          }
-        } catch (meErr) {}
-
-        if (typeof Notification !== 'undefined') {
-          if (Notification.permission === 'denied') {
-            return;
-          }
-        }
-
-        // If PushManager & SW exist, check subscription status
-        if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          try {
-            const reg = await navigator.serviceWorker.ready;
-            const sub = await reg.pushManager.getSubscription();
-            if (sub) return; // already subscribed and permission granted
-          } catch (e) {}
-        }
-
-        if (!isCancelled) {
-          setIsOpen(true);
-        }
-      } catch (err) {
-        console.warn('EnablePushOnPwaModal init error:', err);
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        checkModal();
       }
     };
 
-    checkModal();
+    const handleFocus = () => {
+      checkModal();
+    };
+
+    const handlePageShow = () => {
+      checkModal();
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('pageshow', handlePageShow);
+    }
 
     return () => {
-      isCancelled = true;
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('pageshow', handlePageShow);
+      }
     };
-  }, []);
+  }, [checkModal]);
 
   const handleDismiss = () => {
-    try {
-      localStorage.setItem('pwa_push_dismissed_at', String(Date.now()));
-      sessionStorage.setItem('pwa_push_dismissed', '1');
-    } catch (e) {}
+    inMemoryDismissed = true;
     setSubscribing(false);
     setIsOpen(false);
   };
@@ -95,6 +144,12 @@ export default function EnablePushOnPwaModal() {
   const handleEnablePush = async () => {
     setSubscribing(true);
     try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        alert('Уведомления заблокированы. Откройте Настройки устройства → Уведомления и разрешите их для приложения.');
+        handleDismiss();
+        return;
+      }
+
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         alert('Push-уведомления не поддерживаются на этом устройстве или в этой версии браузера.');
         handleDismiss();
@@ -106,13 +161,15 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      const permission = await Notification.requestPermission();
+      let permission = Notification.permission;
+      if (permission !== 'granted') {
+        permission = await Notification.requestPermission();
+      }
       clientLog('pwa_modal_permission_result', { permission });
 
-      // Save permission state to server
-      fetch('/api/push/permission', {
+      // Save permission state to server using apiFetch (includes Bearer + credentials)
+      await apiFetch('/api/push/permission', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ notifPermission: permission, notificationsEnabled: permission === 'granted' }),
       }).catch(() => {});
@@ -122,7 +179,7 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      const vapidRes = await fetch('/api/push/vapid-public-key', { credentials: 'include' });
+      const vapidRes = await apiFetch('/api/push/vapid-public-key');
       const vapidData = await vapidRes.json().catch(() => ({}));
       if (!vapidData.key) {
         handleDismiss();
@@ -135,9 +192,8 @@ export default function EnablePushOnPwaModal() {
         applicationServerKey: urlBase64ToUint8Array(vapidData.key),
       });
 
-      const subRes = await fetch('/api/push/subscribe', {
+      const subRes = await apiFetch('/api/push/subscribe', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subscription: sub.toJSON(), clientVersion: CLIENT_VERSION }),
       });
@@ -157,7 +213,7 @@ export default function EnablePushOnPwaModal() {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in duration-200">
         <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
           <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -170,9 +226,16 @@ export default function EnablePushOnPwaModal() {
           Разрешите уведомления
         </h3>
 
-        <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-          Чтобы получать уведомления, нажмите «Разрешить» в следующем окне
-        </p>
+        {typeof Notification !== 'undefined' && Notification.permission === 'denied' ? (
+          <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200 mb-6 text-left leading-relaxed">
+            Уведомления заблокированы в настройках устройства. Чтобы получать заказы, откройте:
+            <div className="font-semibold mt-1">Настройки → Приложения / Веб-приложение → Уведомления → Разрешить</div>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+            Чтобы получать уведомления, нажмите «Разрешить» в следующем окне
+          </p>
+        )}
 
         <div className="space-y-2">
           <button

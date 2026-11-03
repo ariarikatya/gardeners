@@ -1,26 +1,44 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { detectPwaEnv } from '@/lib/pwa-env';
+import { apiFetch } from '@/lib/apiFetch';
+
+// In-memory flag for active window session
+let inMemoryDismissed = false;
 
 export default function InstallNotificationsGuideModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [isIosPlatform, setIsIosPlatform] = useState(true);
+  const pathname = usePathname();
+  const checkingRef = useRef(false);
+  const isOpenRef = useRef(false);
 
+  // Keep isOpenRef strictly in sync with isOpen state
   useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  const checkModalState = useCallback(async () => {
     if (typeof window === 'undefined') return;
+    // Guard: skip re-checking/re-fetching if already open or already checking
+    if (isOpenRef.current || checkingRef.current) return;
+    checkingRef.current = true;
 
     try {
+      // 24-hour temporary dismissal check (not permanent)
       const dismissedAt = localStorage.getItem('notif_guide_dismissed_at');
-      const dismissed = localStorage.getItem('notif_guide_dismissed');
-      // 24-hour temporary dismissal check
       if (dismissedAt) {
         const timePassed = Date.now() - Number(dismissedAt);
         if (timePassed < 24 * 60 * 60 * 1000) {
+          checkingRef.current = false;
           return;
         }
-      } else if (dismissed === '1') {
-        // legacy flag fallback
+      }
+
+      if (inMemoryDismissed) {
+        checkingRef.current = false;
         return;
       }
 
@@ -28,21 +46,94 @@ export default function InstallNotificationsGuideModal() {
       const isMobile = env.isMobile || env.isIos || env.isAndroid;
       const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
 
-      // Do not display if already in PWA or not a mobile device
-      if (isMobile && !isPwa) {
+      // Display only in regular mobile browser, never inside standalone PWA (where EnablePushOnPwaModal runs)
+      if (!isMobile || isPwa) {
+        checkingRef.current = false;
+        return;
+      }
+
+      // Check user authentication via /api/auth/me
+      let notifEnabledInDb = false;
+      try {
+        const meRes = await apiFetch('/api/auth/me');
+        if (!meRes.ok) {
+          // If not authenticated, do not show until login
+          checkingRef.current = false;
+          return;
+        }
+        const meData = await meRes.json();
+        if (!meData?.user) {
+          checkingRef.current = false;
+          return;
+        }
+        notifEnabledInDb = meData.user.notificationsEnabled === true;
+      } catch (meErr) {
+        checkingRef.current = false;
+        return;
+      }
+
+      const isPermissionGranted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+
+      // Both must be true for notifications to be considered enabled
+      const notificationsAreEnabled = isPermissionGranted && notifEnabledInDb;
+
+      if (!notificationsAreEnabled) {
         setIsIosPlatform(Boolean(env.isIos));
+        isOpenRef.current = true;
         setIsOpen(true);
+      } else {
+        isOpenRef.current = false;
+        setIsOpen(false);
       }
     } catch (e) {
       console.warn('InstallNotificationsGuideModal check error:', e);
+    } finally {
+      checkingRef.current = false;
     }
   }, []);
+
+  useEffect(() => {
+    checkModalState();
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        checkModalState();
+      }
+    };
+
+    const handleFocus = () => {
+      checkModalState();
+    };
+
+    const handlePageShow = () => {
+      checkModalState();
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('pageshow', handlePageShow);
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('pageshow', handlePageShow);
+      }
+    };
+  }, [checkModalState, pathname]);
 
   const handleDismiss = () => {
     try {
       localStorage.setItem('notif_guide_dismissed_at', String(Date.now()));
-      localStorage.setItem('notif_guide_dismissed', '1');
     } catch (e) {}
+    inMemoryDismissed = true;
+    isOpenRef.current = false;
     setIsOpen(false);
   };
 
@@ -51,13 +142,14 @@ export default function InstallNotificationsGuideModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-slate-800 animate-in fade-in zoom-in duration-200">
-        {/* Верхняя иконка: колокольчик (bell SVG) для обеих платформ */}
+        {/* Верхняя иконка: реальная иконка приложения без подрезания и самодельных squircle-масок */}
         <div className="flex justify-center mb-3">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-700 shadow-inner">
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
+          <div className="w-14 h-14 bg-white flex items-center justify-center flex-shrink-0">
+            <img
+              src="/icon-192.png"
+              alt="Anemon Agro"
+              className="w-full h-full object-contain"
+            />
           </div>
         </div>
 
@@ -113,11 +205,13 @@ export default function InstallNotificationsGuideModal() {
 
               {/* iOS: иконка приложения */}
               <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <img
-                  src="/icon-192.png"
-                  alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0 shadow-xs"
-                />
+                <div className="w-12 h-12 bg-white flex items-center justify-center flex-shrink-0">
+                  <img
+                    src="/icon-192.png"
+                    alt="Иконка приложения Anemon Agro"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
                 </div>
@@ -154,11 +248,13 @@ export default function InstallNotificationsGuideModal() {
 
               {/* Android: иконка приложения */}
               <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <img
-                  src="/icon-192.png"
-                  alt="Иконка приложения Anemon Agro"
-                  className="w-7 h-7 rounded-lg object-cover flex-shrink-0 shadow-xs"
-                />
+                <div className="w-12 h-12 bg-white flex items-center justify-center flex-shrink-0">
+                  <img
+                    src="/icon-192.png"
+                    alt="Иконка приложения Anemon Agro"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
                 <div className="leading-snug pt-0.5">
                   На главном экране появится иконка. Нажмите на неё.
                 </div>

@@ -5,9 +5,15 @@ import { notifyDispatchers } from '@/lib/vkApi';
 import { getIdempotencyKey, getCachedIdempotencyResponse, setCachedIdempotencyResponse } from '@/lib/idempotency';
 
 async function checkGardener(req) {
-  const token = req.cookies.get('token')?.value;
-  if (!token) return { error: 'Сессия истекла', status: 401 };
-  const payload = await verifyToken(token);
+  const authHeader = req.headers?.get ? req.headers.get('authorization') : null;
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+  const cookieToken = req.cookies?.get ? req.cookies.get('token')?.value : null;
+
+  let payload = cookieToken ? await verifyToken(cookieToken) : null;
+  if (!payload && bearerToken) {
+    payload = await verifyToken(bearerToken);
+  }
+
   if (!payload) return { error: 'Сессия истекла', status: 401 };
   if (payload.role !== 'GARDENER') return { error: 'Недостаточно прав', status: 403 };
   return { payload };
