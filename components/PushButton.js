@@ -153,20 +153,53 @@ export default function PushButton({ className = '' }) {
     const handleSubscriptionChange = (e) => {
       if (e?.detail?.state === 'enabled') {
         setPushState('enabled');
+        refreshPushState();
+        return;
       } else if (e?.detail?.state === 'disabled') {
         setPushState('disabled');
+        refreshPushState();
+        return;
+      } else if (e?.detail?.state === 'permission-only') {
+        // Run refreshPushState but guard: DO NOT downgrade an already-'enabled' state back to 'disabled'
+        navigator.serviceWorker.ready.then(async (reg) => {
+          try {
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              setPushState('enabled');
+            } else {
+              setPushState(prev => prev === 'enabled' ? 'enabled' : 'disabled');
+            }
+          } catch (err) {
+            setPushState(prev => prev === 'enabled' ? 'enabled' : 'disabled');
+          }
+        }).catch(() => {});
+        return;
       }
       refreshPushState();
     };
 
-    window.addEventListener('focus', updateEnvStatus);
-    document.addEventListener('visibilitychange', updateEnvStatus);
+    const handleFocusOrVisible = () => {
+      updateEnvStatus();
+      if ('serviceWorker' in navigator && 'PushManager' in window && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        navigator.serviceWorker.ready.then(async (reg) => {
+          try {
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              setPushState('enabled');
+            }
+          } catch (e) {}
+        }).catch(() => {});
+      }
+    };
+
+    window.addEventListener('focus', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
     window.addEventListener('push-subscription-changed', handleSubscriptionChange);
 
     return () => {
       unsubscribeMq();
-      window.removeEventListener('focus', updateEnvStatus);
-      document.removeEventListener('visibilitychange', updateEnvStatus);
+      window.removeEventListener('focus', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
       window.removeEventListener('push-subscription-changed', handleSubscriptionChange);
     };
   }, []);

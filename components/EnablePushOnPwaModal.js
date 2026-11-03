@@ -150,6 +150,11 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
+      // Optimistic update: permission is granted
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'enabled' } }));
+      }
+
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
         alert('Push-уведомления не поддерживаются на этом устройстве или в этой версии браузера.');
         handleDismiss();
@@ -200,13 +205,25 @@ export default function EnablePushOnPwaModal() {
 
       if (subRes.ok) {
         clientLog('pwa_modal_subscribe_success');
+        await apiFetch('/api/push/permission', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notifPermission: permission, notificationsEnabled: true }),
+        }).catch(() => {});
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'enabled' } }));
+        }
+      } else {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
         }
       }
       setIsOpen(false);
     } catch (err) {
       console.error('Error enabling push in modal:', err);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
+      }
       handleDismiss();
     } finally {
       setSubscribing(false);

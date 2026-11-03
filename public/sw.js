@@ -1204,6 +1204,40 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // === /api/gardener/operations?all=1 : Network-First with cache fallback only if non-empty ===
+  if (request.method === 'GET' && url.pathname === '/api/gardener/operations' && url.searchParams.get('all') === '1') {
+    event.respondWith(
+      (async () => {
+        try {
+          const netRes = await fetch(request);
+          if (netRes && netRes.ok && netRes.status === 200) {
+            safeCachePut(CACHE_NAME, request, netRes.clone());
+            safeCachePut(OFFLINE_DATA_CACHE, request, netRes.clone());
+            return netRes;
+          }
+        } catch (e) {}
+
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          const pCache = await caches.open(OFFLINE_DATA_CACHE);
+          const cached = await cache.match(request) || await pCache.match(request);
+          if (cached) {
+            const data = await cached.clone().json().catch(() => null);
+            if (data && Array.isArray(data.operations) && data.operations.length > 0) {
+              return withOfflineHeader(cached);
+            }
+          }
+        } catch (cErr) {}
+
+        return new Response(JSON.stringify({ offline: true, error: 'no-internet' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      })()
+    );
+    return;
+  }
+
   // === GET /api/* read-only whitelisted endpoints: Stale-While-Revalidate ===
   if (request.method === 'GET' && url.pathname.startsWith('/api/')) {
     event.respondWith(

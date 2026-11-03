@@ -1,5 +1,18 @@
 (function() {
-  var fatalErrorShown = false;
+  function getFatalCount() {
+    try {
+      return parseInt(sessionStorage.getItem('fatal_overlay_shown_count') || '0', 10);
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function incFatalCount() {
+    try {
+      var c = getFatalCount();
+      sessionStorage.setItem('fatal_overlay_shown_count', String(c + 1));
+    } catch (e) {}
+  }
 
   function handleChunkError() {
     if (typeof window === 'undefined') return false;
@@ -27,14 +40,26 @@
   }
 
   function showFatalError(msg) {
-    if (fatalErrorShown) return;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (getFatalCount() >= 1) return;
     if (document.getElementById('fatal-error-fallback')) return;
 
     // Check actual DOM state at call time: never show fatal error if content is rendered
     if (isPageRendered()) return;
 
-    fatalErrorShown = true;
+    // Before ever showing the overlay, allow ONE automatic reload
+    if (handleChunkError()) return;
+
+    // Second anomaly after reload => prefer silent reload of '/' if home_reload_done is unset
+    try {
+      if (typeof window !== 'undefined' && !sessionStorage.getItem('home_reload_done')) {
+        sessionStorage.setItem('home_reload_done', '1');
+        window.location.href = '/';
+        return;
+      }
+    } catch (e) {}
+
+    incFatalCount();
 
     var div = document.createElement('div');
     div.id = 'fatal-error-fallback';
@@ -51,25 +76,38 @@
 
   window.addEventListener('error', function(e) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    if (e && (
-      (e.message && (e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) ||
-      (e.name && e.name.indexOf('ChunkLoadError') !== -1)
-    )) {
-      if (handleChunkError()) return;
-    }
-    if (e && (
-      (e.message && (e.message.indexOf('Hydration') !== -1 || e.message.indexOf('Minified React error') !== -1 || e.message.indexOf('SyntaxError') !== -1 || e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) ||
-      (e.name && e.name.indexOf('ChunkLoadError') !== -1)
-    )) {
-      showFatalError('сбой синтаксиса/гидратации');
+    if (getFatalCount() >= 1) return;
+
+    var isSameOrigin = false;
+    try {
+      if (e && e.filename && typeof window !== 'undefined' && window.location) {
+        isSameOrigin = e.filename.indexOf(window.location.origin) === 0;
+      }
+    } catch (err) {}
+
+    var msg = (e && (e.message || (e.error && e.error.message))) || '';
+    var isTargetError = /SyntaxError|ChunkLoadError|Loading( CSS)? chunk|Hydration/i.test(msg);
+
+    if (isSameOrigin && isTargetError) {
+      setTimeout(function() {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        var notReady = document.readyState !== 'complete';
+        var bodyEmpty = !document.body || (document.body.innerText || '').trim().length === 0;
+        if (!isPageRendered() && (notReady || bodyEmpty)) {
+          showFatalError('сбой синтаксиса/гидратации');
+        } else {
+          console.warn('[emergency] Ignored non-fatal JS error:', msg);
+        }
+      }, 2500);
     }
   });
 
   window.addEventListener('unhandledrejection', function(e) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (getFatalCount() >= 1) return;
     if (e && e.reason && (
       (e.reason.name && e.reason.name.indexOf('ChunkLoadError') !== -1) ||
-      (e.reason.message && (e.reason.message.indexOf('Loading chunk') !== -1 || e.reason.message.indexOf('ChunkLoadError') !== -1))
+      (e.reason.message && /ChunkLoadError|Loading( CSS)? chunk/i.test(e.reason.message))
     )) {
       if (handleChunkError()) return;
       showFatalError('ошибка загрузки чанка');
@@ -78,14 +116,12 @@
 
   setTimeout(function() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (getFatalCount() >= 1) return;
     if (typeof document !== 'undefined' && document.body) {
       var hasFatal = document.getElementById('fatal-error-fallback');
       if (isPageRendered()) {
         try { sessionStorage.removeItem('chunk_reload_done'); } catch(e) {}
       } else if (!hasFatal) {
-        // Page appears empty after 3 seconds: attempt a silent reload once
-        if (handleChunkError()) return;
-        // If reload already attempted and page is still empty, show fatal error
         showFatalError('пустая страница');
       }
     }

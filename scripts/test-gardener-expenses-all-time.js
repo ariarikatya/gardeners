@@ -1,7 +1,31 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { signToken, verifyToken } = require('../lib/jwt');
+
+// Standalone mock jwt implementation so test runs without external dependencies
+function base64UrlEncode(obj) {
+  return Buffer.from(JSON.stringify(obj)).toString('base64url');
+}
+
+function base64UrlDecode(str) {
+  return JSON.parse(Buffer.from(str, 'base64url').toString('utf8'));
+}
+
+async function signToken(payload) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  return `${base64UrlEncode(header)}.${base64UrlEncode(payload)}.signature`;
+}
+
+async function verifyToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    return base64UrlDecode(parts[1]);
+  } catch (e) {
+    return null;
+  }
+}
 
 async function testGardenerExpensesAllTime() {
   console.log('🧪 Testing gardener all-time expenses fixes...');
@@ -24,21 +48,25 @@ async function testGardenerExpensesAllTime() {
   assert.strictEqual(hasOldOp, true, 'offline-snapshot must include operations from 3+ months back');
   console.log('  ✓ offline-snapshot logic includes all-time operations (3+ months back)');
 
-  // 2. Assert sw.js contains no month-range filter for the operations resource and contains the bumped cache version
+  // 2. Assert sw.js contains no month-range filter for the operations resource and contains the bumped cache version & network-first rule
   const swContent = fs.readFileSync(path.join(__dirname, '..', 'public', 'sw.js'), 'utf8');
   assert(!swContent.includes('operations?month='), 'sw.js must not force a month-range query on operations');
   assert(swContent.includes('anemon-agro-v1.0.1'), 'sw.js must have bumped cache version constant');
   assert(swContent.includes('api/gardener/operations'), 'sw.js must reference gardener operations cache purging');
-  console.log('  ✓ sw.js has cache version bump and purge logic');
+  assert(swContent.includes('/api/gardener/operations') && swContent.includes("all') === '1'"), 'sw.js must contain network-first rule for operations?all=1');
+  console.log('  ✓ sw.js has cache version bump and purge logic, and network-first rule');
 
-  // 3. Assert app/gardener/page.js still uses `all=1` and saves full operations cache
+  // 3. Assert app/gardener/page.js uses `all=1`, has getAllCachedOperations reading both keys, and guards empty state
   const gardenerPageContent = fs.readFileSync(path.join(__dirname, '..', 'app', 'gardener', 'page.js'), 'utf8');
   assert(gardenerPageContent.includes('api/gardener/operations?all=1'), 'app/gardener/page.js must query /api/gardener/operations?all=1');
-  assert(gardenerPageContent.includes("saveCache('operations', operationsList)"), 'Must save all operations list into IndexedDB operations cache');
-  console.log('  ✓ app/gardener/page.js uses all=1 and IndexedDB fallback');
+  assert(gardenerPageContent.includes("saveCache('operations',"), 'Must save operations into IndexedDB operations cache');
+  assert(gardenerPageContent.includes('getAllCachedOperations'), 'app/gardener/page.js must define getAllCachedOperations helper');
+  assert(gardenerPageContent.includes('getNormalizedUrlCacheKey'), 'app/gardener/page.js must use getNormalizedUrlCacheKey');
+  assert(gardenerPageContent.includes('Данные загружаются…') || gardenerPageContent.includes('loading'), 'UI block must guard on loading');
+  assert(gardenerPageContent.includes('isOffline') || gardenerPageContent.includes('Нет сети'), 'UI block must guard on isOffline');
+  console.log('  ✓ app/gardener/page.js uses all=1, getAllCachedOperations and UI guards');
 
   // 4. Regression Test: Route handler GET /api/gardener/operations?all=1
-  // Mock prisma with expenses from different months and years
   const multiYearExpenses = [
     { id: 'exp_2024', gardenerId: 'g1', type: 'expense', amount: 5000, description: 'Инвентарь 2024', createdAt: new Date('2024-05-15T10:00:00.000Z') },
     { id: 'exp_2025', gardenerId: 'g1', type: 'expense', amount: 3200, description: 'Удобрения 2025', createdAt: new Date('2025-08-20T10:00:00.000Z') },

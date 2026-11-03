@@ -5,7 +5,7 @@ import PushButton from '@/components/PushButton';
 import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
-import apiFetch from '@/lib/apiFetch';
+import apiFetch, { getNormalizedUrlCacheKey } from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
 import { enqueueAction, getQueue, syncQueue, compressImageToBlob } from '@/lib/offlineQueue';
@@ -101,6 +101,44 @@ function xhrUpload(url, formData, onProgress) {
   });
 }
 
+
+async function getAllCachedOperations() {
+  try {
+    const normKey = getNormalizedUrlCacheKey('GET', '/api/gardener/operations?all=1');
+    const [cachedDedicated, cachedNormalized] = await Promise.all([
+      getCache('operations').catch(() => null),
+      getCache(normKey).catch(() => null),
+    ]);
+
+    const normalizeOps = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val;
+      if (val.data) {
+        if (Array.isArray(val.data)) return val.data;
+        if (val.data.operations && Array.isArray(val.data.operations)) return val.data.operations;
+      }
+      if (val.operations && Array.isArray(val.operations)) return val.operations;
+      return [];
+    };
+
+    const list1 = normalizeOps(cachedDedicated);
+    const list2 = normalizeOps(cachedNormalized);
+
+    const map = new Map();
+    // Prioritize normalized then dedicated
+    [...list2, ...list1].forEach((op) => {
+      if (op && op.id) {
+        map.set(op.id, op);
+      }
+    });
+
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+  } catch (e) {
+    return [];
+  }
+}
 
 export default function GardenerDashboard() {
   const router = useRouter();
@@ -254,12 +292,14 @@ export default function GardenerDashboard() {
     });
   };
 
+  const retryOpsRef = useRef(false);
+
   const loadFromCache = async () => {
     try {
-      const [cachedOrdersObj, cachedProfileObj, cachedOpsObj, cachedAuctionObj, cachedCommentsObj, pendingQueue] = await Promise.all([
+      const [cachedOrdersObj, cachedProfileObj, rawOps, cachedAuctionObj, cachedCommentsObj, pendingQueue] = await Promise.all([
         getCache('orders'),
         getCache('profile'),
-        getCache('operations'),
+        getAllCachedOperations(),
         getCache('auction'),
         getCache('day_comments'),
         getQueue(),
@@ -282,10 +322,7 @@ export default function GardenerDashboard() {
         setMyWorks(cachedProfileObj.data.works || []);
       }
 
-      if (cachedOpsObj) {
-        const rawOps = Array.isArray(cachedOpsObj.data)
-          ? cachedOpsObj.data
-          : (Array.isArray(cachedOpsObj) ? cachedOpsObj : []);
+      if (rawOps && rawOps.length > 0) {
         // Добавляем несинхронизированные траты из очереди
         const pendingExpenses = (pendingQueue || [])
           .filter(i => i.actionType === 'EXPENSE_POST' && i.payload)
@@ -392,9 +429,10 @@ export default function GardenerDashboard() {
     }
 
     try {
-      const [resOrders, resOps] = await Promise.all([
+      const [resOrders, resOps, resExp] = await Promise.all([
         apiFetch('/api/gardener/orders'),
-        apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' })
+        apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' }),
+        apiFetch('/api/gardener/expenses').catch(() => null)
       ]);
 
       if (!resOrders.ok) {
@@ -410,17 +448,31 @@ export default function GardenerDashboard() {
           operationsList = incomingOps;
         } else {
           // If server returned empty operations, check if cached operations exist and keep them
-          const cachedOps = await getCache('operations').catch(() => null);
-          const cachedList = (cachedOps && Array.isArray(cachedOps.data)) ? cachedOps.data : (Array.isArray(cachedOps) ? cachedOps : []);
+          const cachedList = await getAllCachedOperations();
           operationsList = cachedList.length > 0 ? cachedList : incomingOps;
+          if (cachedList.length > 0 && !retryOpsRef.current) {
+            retryOpsRef.current = true;
+            setTimeout(() => {
+              apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(freshOps => {
+                  if (freshOps && Array.isArray(freshOps.operations) && freshOps.operations.length > 0) {
+                    saveCache('operations', { data: freshOps.operations });
+                    setOperations(prev => {
+                      const pending = prev.filter(p => p.isPendingSync || String(p.id).startsWith('pending_') || String(p.id).startsWith('opt_'));
+                      return [...pending, ...freshOps.operations];
+                    });
+                  }
+                })
+                .catch(() => {});
+            }, 5000);
+          }
         }
       } else {
         console.error('Failed to fetch gardener operations:', resOps.status);
-        const cachedOps = await getCache('operations').catch(() => null);
-        if (cachedOps && Array.isArray(cachedOps.data)) {
-          operationsList = cachedOps.data;
-        } else if (Array.isArray(cachedOps)) {
-          operationsList = cachedOps;
+        const cachedList = await getAllCachedOperations();
+        if (cachedList.length > 0) {
+          operationsList = cachedList;
         }
       }
       const incomingOrders = data.orders || [];
@@ -435,6 +487,33 @@ export default function GardenerDashboard() {
           if (document.hidden) {
             document.title = `(${newlyAssigned.length}) Мой Кабинет`;
           }
+        }
+      }
+
+      // Merge Expense-model records from /api/gardener/expenses if available
+      let expenseModelItems = [];
+      if (resExp && resExp.ok) {
+        try {
+          const expJson = await resExp.json();
+          if (Array.isArray(expJson.expenses)) {
+            expenseModelItems = expJson.expenses.map(e => ({
+              id: e.id,
+              type: 'expense',
+              amount: Number(e.amount || 0),
+              description: e.description || '',
+              receiptUrl: e.receiptUrl || null,
+              createdAt: e.date ? new Date(e.date).toISOString() : (e.createdAt || new Date().toISOString()),
+              approved: true,
+            }));
+          }
+        } catch (e) {}
+      }
+
+      if (expenseModelItems.length > 0) {
+        const opIdSet = new Set(operationsList.map(o => o.id));
+        const newExpenses = expenseModelItems.filter(e => !opIdSet.has(e.id));
+        if (newExpenses.length > 0) {
+          operationsList = [...operationsList, ...newExpenses];
         }
       }
 
@@ -467,13 +546,12 @@ export default function GardenerDashboard() {
       const cacheOperationsPromise = (async () => {
         if (!resOps.ok) return;
         if (operationsList.length > 0) {
-          await saveCache('operations', operationsList);
+          await saveCache('operations', { data: operationsList });
         } else {
           // Never overwrite non-empty existing operations cache with an empty response
-          const prevCached = await getCache('operations').catch(() => null);
-          const prevList = (prevCached && Array.isArray(prevCached.data)) ? prevCached.data : (Array.isArray(prevCached) ? prevCached : []);
-          if (prevList.length === 0) {
-            await saveCache('operations', operationsList);
+          const prevCached = await getAllCachedOperations();
+          if (prevCached.length === 0) {
+            await saveCache('operations', { data: operationsList });
           }
         }
       })();
@@ -2539,6 +2617,20 @@ export default function GardenerDashboard() {
                   .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
                 if (allExpenses.length === 0) {
+                  if (loading) {
+                    return (
+                      <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">
+                        Данные загружаются…
+                      </div>
+                    );
+                  }
+                  if (isOffline) {
+                    return (
+                      <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">
+                        Нет сети — показываем сохранённые траты
+                      </div>
+                    );
+                  }
                   return (
                     <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">
                       Трат пока нет
