@@ -1,9 +1,140 @@
 (function() {
+  if (typeof window !== 'undefined' && window.location && window.location.pathname.indexOf('/login') === 0) {
+    return;
+  }
+
+  function getVersionKey() {
+    var v = 'default';
+    try {
+      if (typeof window !== 'undefined' && window.CLIENT_VERSION) {
+        v = String(window.CLIENT_VERSION).trim();
+      } else {
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0; i < scripts.length; i++) {
+          var src = scripts[i].src || '';
+          var idx = src.indexOf('emergency.js?v=');
+          if (idx !== -1) {
+            v = decodeURIComponent(src.substring(idx + 15).split('&')[0]).trim();
+            break;
+          }
+        }
+      }
+    } catch (e) {}
+    return v || 'default';
+  }
+
+  var ver = getVersionKey();
+
+  function getItem(k) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        var val = localStorage.getItem(k);
+        if (val !== null) return val;
+      }
+    } catch (e) {}
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        return sessionStorage.getItem(k);
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function setItem(k, val) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(k, val);
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(k, val);
+      }
+    } catch (e) {}
+  }
+
+  function removeItem(k) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(k);
+      }
+    } catch (e) {}
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(k);
+      }
+    } catch (e) {}
+  }
+
+  // Clean legacy keys from older versions
+  try {
+    if (typeof localStorage !== 'undefined') {
+      var keys = Object.keys(localStorage);
+      for (var k = 0; k < keys.length; k++) {
+        var keyName = keys[k];
+        if (
+          (keyName.indexOf('fatal_overlay_shown_count_') === 0 && keyName !== 'fatal_overlay_shown_count_' + ver) ||
+          (keyName.indexOf('chunk_reload_done_') === 0 && keyName !== 'chunk_reload_done_' + ver)
+        ) {
+          localStorage.removeItem(keyName);
+        }
+      }
+    }
+  } catch (e) {}
+
+  function isOfflineApp() {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    try {
+      if (getItem('offline_session') === '1') {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function isPageRendered() {
+    if (typeof document === 'undefined' || !document.body) return false;
+    var root = document.querySelector('#root') || document.querySelector('main') || document.body;
+    var text = (document.body.innerText || '').trim();
+    var hasContent = Boolean(
+      (document.body.children && document.body.children.length > 0) &&
+      (text.length > 0)
+    );
+    if (root && root !== document.body) {
+      hasContent = hasContent || (root.children && root.children.length > 0);
+    }
+    if (document.querySelector('main') || text.length > 50) {
+      return true;
+    }
+    return hasContent;
+  }
+
+  function canShowOverlay() {
+    if (typeof window !== 'undefined' && window.location && window.location.pathname.indexOf('/login') === 0) {
+      return false;
+    }
+    if (isOfflineApp()) return false;
+    if (document.readyState !== 'complete') return false;
+    if (isPageRendered()) return false;
+    if (document.getElementById('fatal-error-fallback')) return false;
+
+    try {
+      var count = parseInt(getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
+      if (count >= 1) return false;
+    } catch (e) {
+      return false;
+    }
+
+    return true;
+  }
+
   function handleChunkError() {
     if (typeof window === 'undefined') return false;
     try {
-      if (!sessionStorage.getItem('chunk_reload_done')) {
-        sessionStorage.setItem('chunk_reload_done', '1');
+      var key = 'chunk_reload_done_' + ver;
+      if (!getItem(key)) {
+        setItem(key, '1');
         window.location.reload();
         return true;
       }
@@ -12,8 +143,16 @@
   }
 
   function showFatalError(msg) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    if (document.getElementById('fatal-error-fallback')) return;
+    if (!canShowOverlay()) return;
+
+    // Prioritize one silent reload of the current URL
+    if (handleChunkError()) return;
+
+    try {
+      var count = parseInt(getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
+      setItem('fatal_overlay_shown_count_' + ver, String(count + 1));
+    } catch (e) {}
+
     var div = document.createElement('div');
     div.id = 'fatal-error-fallback';
     div.style.cssText = 'position:fixed;inset:0;background:#f8fafc;display:flex;align-items:center;justify-content:center;padding:20px;font-family:sans-serif;z-index:999999;';
@@ -28,47 +167,48 @@
   }
 
   window.addEventListener('error', function(e) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-    if (e && (
-      (e.message && (e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) ||
-      (e.name && e.name.indexOf('ChunkLoadError') !== -1)
-    )) {
-      if (handleChunkError()) return;
-    }
-    if (e && (
-      (e.message && (e.message.indexOf('Hydration') !== -1 || e.message.indexOf('Minified React error') !== -1 || e.message.indexOf('SyntaxError') !== -1 || e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) ||
-      (e.name && e.name.indexOf('ChunkLoadError') !== -1)
-    )) {
-      showFatalError('сбой синтаксиса/гидратации');
+    if (isOfflineApp()) return;
+
+    var isSameOrigin = false;
+    try {
+      if (e && e.filename && typeof window !== 'undefined' && window.location) {
+        isSameOrigin = e.filename.indexOf(window.location.origin) === 0;
+      }
+    } catch (err) {}
+
+    var msg = (e && (e.message || (e.error && e.error.message))) || '';
+    var isTargetError = /SyntaxError|ChunkLoadError|Loading( CSS)? chunk|Hydration/i.test(msg);
+
+    if (isSameOrigin && isTargetError) {
+      setTimeout(function() {
+        if (!canShowOverlay()) {
+          console.warn('[emergency] Ignored non-fatal JS error:', msg);
+          return;
+        }
+        showFatalError('сбой синтаксиса/гидратации');
+      }, 8000);
     }
   });
 
   window.addEventListener('unhandledrejection', function(e) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isOfflineApp()) return;
     if (e && e.reason && (
       (e.reason.name && e.reason.name.indexOf('ChunkLoadError') !== -1) ||
-      (e.reason.message && (e.reason.message.indexOf('Loading chunk') !== -1 || e.reason.message.indexOf('ChunkLoadError') !== -1))
+      (e.reason.message && /ChunkLoadError|Loading( CSS)? chunk/i.test(e.reason.message))
     )) {
       if (handleChunkError()) return;
       showFatalError('ошибка загрузки чанка');
-      return;
-    }
-    if (document.body && (!document.body.children || document.body.children.length === 0 || document.body.innerText.trim() === '')) {
-      showFatalError('ошибка сети');
     }
   });
 
   setTimeout(function() {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isOfflineApp()) return;
     if (typeof document !== 'undefined' && document.body) {
-      var text = (document.body.innerText || '').trim();
-      var hasChildren = document.body.children && document.body.children.length > 0;
-      var hasFatal = document.getElementById('fatal-error-fallback');
-      if ((!hasChildren || text.length === 0) && !hasFatal) {
+      if (isPageRendered()) {
+        try { removeItem('chunk_reload_done_' + ver); } catch(e) {}
+      } else if (canShowOverlay()) {
         showFatalError('пустая страница');
-      } else {
-        try { sessionStorage.removeItem('chunk_reload_done'); } catch(e) {}
       }
     }
-  }, 3000);
+  }, 8000);
 })();

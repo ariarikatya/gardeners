@@ -49,8 +49,32 @@ export async function GET(req) {
     where.createdAt = { gte: start, lte: end };
   }
 
-  const ops = await prisma.operation.findMany({ where, orderBy: { createdAt: 'desc' } });
-  return NextResponse.json({ operations: ops });
+  const [ops, expenses] = await Promise.all([
+    prisma.operation.findMany({ where, orderBy: { createdAt: 'desc' } }),
+    prisma.expense.findMany({
+      where: {
+        gardenerId,
+        ...(where.createdAt ? { date: where.createdAt } : {})
+      },
+      orderBy: { date: 'desc' }
+    }).catch(() => [])
+  ]);
+
+  const opIds = new Set(ops.map(o => o.id));
+  const expenseOps = (expenses || []).filter(e => !opIds.has(e.id)).map(e => ({
+    id: e.id,
+    gardenerId: e.gardenerId,
+    type: 'expense',
+    amount: e.amount,
+    description: e.description,
+    receiptUrl: e.receiptUrl,
+    approved: true,
+    createdAt: e.date,
+  }));
+
+  const allCombined = [...ops, ...expenseOps].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return NextResponse.json({ operations: allCombined });
 }
 
 export async function POST(req) {

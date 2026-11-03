@@ -18,6 +18,7 @@ function urlBase64ToUint8Array(base64String) {
 
 // In-memory flag for active window session (reset when PWA is closed and reopened)
 let inMemoryDismissed = false;
+let pushJustEnabled = false;
 
 export default function EnablePushOnPwaModal() {
   const [isOpen, setIsOpen] = useState(false);
@@ -35,10 +36,17 @@ export default function EnablePushOnPwaModal() {
         sessionStorage.removeItem('pwa_push_dismissed');
       } catch (e) {}
 
-      if (inMemoryDismissed) {
+      if (inMemoryDismissed || pushJustEnabled) {
         checkingRef.current = false;
         return;
       }
+
+      try {
+        if (sessionStorage.getItem('push_just_enabled') === '1') {
+          checkingRef.current = false;
+          return;
+        }
+      } catch (e) {}
 
       const env = detectPwaEnv();
       const isPwa = Boolean(env.rawIsStandalone || env.isStandalone || env.probableStandalone);
@@ -167,22 +175,33 @@ export default function EnablePushOnPwaModal() {
       }
       clientLog('pwa_modal_permission_result', { permission });
 
-      // Save permission state to server using apiFetch (includes Bearer + credentials)
-      await apiFetch('/api/push/permission', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notifPermission: permission, notificationsEnabled: permission === 'granted' }),
-      }).catch(() => {});
-
       if (permission !== 'granted') {
         handleDismiss();
         return;
       }
 
+      // Permission granted: close modal immediately, mark flag, set push_state_override with 60s TTL, and dispatch optimistic enabled state
+      pushJustEnabled = true;
+      try {
+        sessionStorage.setItem('push_just_enabled', '1');
+        localStorage.setItem('push_state_override', JSON.stringify({ state: 'enabled', ts: Date.now() }));
+      } catch (e) {}
+      setIsOpen(false);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'enabled' } }));
+      }
+
+      // Save permission state to server using apiFetch (includes Bearer + credentials)
+      await apiFetch('/api/push/permission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifPermission: permission, notificationsEnabled: true }),
+      }).catch(() => {});
+
       const vapidRes = await apiFetch('/api/push/vapid-public-key');
       const vapidData = await vapidRes.json().catch(() => ({}));
       if (!vapidData.key) {
-        handleDismiss();
         return;
       }
 
@@ -200,10 +219,23 @@ export default function EnablePushOnPwaModal() {
 
       if (subRes.ok) {
         clientLog('pwa_modal_subscribe_success');
+        await apiFetch('/api/push/permission', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notifPermission: permission, notificationsEnabled: true }),
+        }).catch(() => {});
+      } else {
+        try { localStorage.removeItem('push_state_override'); } catch (e) {}
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
+        }
       }
-      setIsOpen(false);
     } catch (err) {
       console.error('Error enabling push in modal:', err);
+      try { localStorage.removeItem('push_state_override'); } catch (e) {}
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
+      }
       handleDismiss();
     } finally {
       setSubscribing(false);
