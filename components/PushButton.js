@@ -62,7 +62,20 @@ async function performSilentReSubscribe(reg, oldEndpoint) {
 }
 
 export default function PushButton({ className = '' }) {
-  const [pushState, setPushState] = useState('loading'); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'orphan' | 'unsupported'
+  const [pushState, setPushState] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('push_state_override');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.state === 'enabled' && Date.now() - (parsed.ts || 0) < 60000) {
+            return 'enabled';
+          }
+        }
+      } catch (e) {}
+    }
+    return 'loading';
+  }); // 'loading' | 'disabled' | 'enabled' | 'denied' | 'orphan' | 'unsupported'
   const [pushLoading, setPushLoading] = useState(false);
   const [testingPush, setTestingPush] = useState(false);
   const [showIosPushHint, setShowIosPushHint] = useState(false);

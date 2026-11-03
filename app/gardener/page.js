@@ -2716,7 +2716,7 @@ export default function GardenerDashboard() {
                       })}
                     </div>
                     <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between items-center text-sm font-bold text-slate-800">
-                      <span>Итого трат за всё время:</span>
+                      <span>Всего потрачено за всё время:</span>
                       <span className="text-emerald-700">{formatMoney(totalExpensesSum)}</span>
                     </div>
                   </>

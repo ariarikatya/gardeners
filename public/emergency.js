@@ -25,6 +25,48 @@
 
   var ver = getVersionKey();
 
+  function getItem(k) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        var val = localStorage.getItem(k);
+        if (val !== null) return val;
+      }
+    } catch (e) {}
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        return sessionStorage.getItem(k);
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function setItem(k, val) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(k, val);
+        return;
+      }
+    } catch (e) {}
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(k, val);
+      }
+    } catch (e) {}
+  }
+
+  function removeItem(k) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(k);
+      }
+    } catch (e) {}
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(k);
+      }
+    } catch (e) {}
+  }
+
   // Clean legacy keys from older versions
   try {
     if (typeof localStorage !== 'undefined') {
@@ -44,7 +86,7 @@
   function isOfflineApp() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
     try {
-      if (typeof localStorage !== 'undefined' && localStorage.getItem('offline_session') === '1') {
+      if (getItem('offline_session') === '1') {
         return true;
       }
     } catch (e) {}
@@ -54,12 +96,16 @@
   function isPageRendered() {
     if (typeof document === 'undefined' || !document.body) return false;
     var root = document.querySelector('#root') || document.querySelector('main') || document.body;
+    var text = (document.body.innerText || '').trim();
     var hasContent = Boolean(
       (document.body.children && document.body.children.length > 0) &&
-      (document.body.innerText || '').trim().length > 0
+      (text.length > 0)
     );
     if (root && root !== document.body) {
       hasContent = hasContent || (root.children && root.children.length > 0);
+    }
+    if (document.querySelector('main') || text.length > 50) {
+      return true;
     }
     return hasContent;
   }
@@ -74,7 +120,7 @@
     if (document.getElementById('fatal-error-fallback')) return false;
 
     try {
-      var count = parseInt(localStorage.getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
+      var count = parseInt(getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
       if (count >= 1) return false;
     } catch (e) {
       return false;
@@ -87,8 +133,8 @@
     if (typeof window === 'undefined') return false;
     try {
       var key = 'chunk_reload_done_' + ver;
-      if (!localStorage.getItem(key)) {
-        localStorage.setItem(key, '1');
+      if (!getItem(key)) {
+        setItem(key, '1');
         window.location.reload();
         return true;
       }
@@ -103,8 +149,8 @@
     if (handleChunkError()) return;
 
     try {
-      var count = parseInt(localStorage.getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
-      localStorage.setItem('fatal_overlay_shown_count_' + ver, String(count + 1));
+      var count = parseInt(getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
+      setItem('fatal_overlay_shown_count_' + ver, String(count + 1));
     } catch (e) {}
 
     var div = document.createElement('div');
@@ -159,7 +205,7 @@
     if (isOfflineApp()) return;
     if (typeof document !== 'undefined' && document.body) {
       if (isPageRendered()) {
-        try { localStorage.removeItem('chunk_reload_done_' + ver); } catch(e) {}
+        try { removeItem('chunk_reload_done_' + ver); } catch(e) {}
       } else if (canShowOverlay()) {
         showFatalError('пустая страница');
       }

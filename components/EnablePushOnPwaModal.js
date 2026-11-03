@@ -180,10 +180,11 @@ export default function EnablePushOnPwaModal() {
         return;
       }
 
-      // Permission granted: close modal immediately, mark flag, and dispatch optimistic enabled state
+      // Permission granted: close modal immediately, mark flag, set push_state_override with 60s TTL, and dispatch optimistic enabled state
       pushJustEnabled = true;
       try {
         sessionStorage.setItem('push_just_enabled', '1');
+        localStorage.setItem('push_state_override', JSON.stringify({ state: 'enabled', ts: Date.now() }));
       } catch (e) {}
       setIsOpen(false);
 
@@ -224,12 +225,14 @@ export default function EnablePushOnPwaModal() {
           body: JSON.stringify({ notifPermission: permission, notificationsEnabled: true }),
         }).catch(() => {});
       } else {
+        try { localStorage.removeItem('push_state_override'); } catch (e) {}
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
         }
       }
     } catch (err) {
       console.error('Error enabling push in modal:', err);
+      try { localStorage.removeItem('push_state_override'); } catch (e) {}
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
       }
