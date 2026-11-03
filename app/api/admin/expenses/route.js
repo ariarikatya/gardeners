@@ -11,6 +11,10 @@ async function isAdmin(req) {
 
 export async function GET(req) {
   if (!(await isAdmin(req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  const expenses = await prisma.expense.findMany({ include: { gardener: true }, orderBy: { date: 'desc' } });
-  return NextResponse.json({ expenses });
+  const expenses = await prisma.operation.findMany({
+    where: { type: 'expense' },
+    include: { gardener: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  return NextResponse.json({ expenses: expenses.map(expense => ({ ...expense, date: expense.createdAt })) });
 }

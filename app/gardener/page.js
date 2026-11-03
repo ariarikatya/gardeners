@@ -433,10 +433,13 @@ export default function GardenerDashboard() {
     }
 
     try {
-      const [resOrders, resOps, resExp] = await Promise.all([
+      const [resOrders, resOps] = await Promise.all([
         apiFetch('/api/gardener/orders'),
-        apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' }),
-        apiFetch('/api/gardener/expenses').catch(() => null)
+        apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' })
+          .catch((error) => {
+            console.error('Failed to fetch gardener operations:', error);
+            return null;
+          })
       ]);
 
       if (!resOrders.ok) {
@@ -445,7 +448,7 @@ export default function GardenerDashboard() {
 
       const data = await resOrders.json();
       let operationsList = [];
-      if (resOps.ok) {
+      if (resOps?.ok) {
         const ops = await resOps.json();
         const incomingOps = ops.operations || [];
         if (incomingOps.length > 0) {
@@ -476,7 +479,9 @@ export default function GardenerDashboard() {
           }
         }
       } else {
-        console.error('Failed to fetch gardener operations:', resOps.status);
+        if (resOps) {
+          console.error('Failed to fetch gardener operations:', resOps.status);
+        }
         const cachedList = await getAllCachedOperations();
         if (cachedList.length > 0) {
           operationsList = cachedList;
@@ -494,33 +499,6 @@ export default function GardenerDashboard() {
           if (document.hidden) {
             document.title = `(${newlyAssigned.length}) Мой Кабинет`;
           }
-        }
-      }
-
-      // Merge Expense-model records from /api/gardener/expenses if available
-      let expenseModelItems = [];
-      if (resExp && resExp.ok) {
-        try {
-          const expJson = await resExp.json();
-          if (Array.isArray(expJson.expenses)) {
-            expenseModelItems = expJson.expenses.map(e => ({
-              id: e.id,
-              type: 'expense',
-              amount: Number(e.amount || 0),
-              description: e.description || '',
-              receiptUrl: e.receiptUrl || null,
-              createdAt: e.date ? new Date(e.date).toISOString() : (e.createdAt || new Date().toISOString()),
-              approved: true,
-            }));
-          }
-        } catch (e) {}
-      }
-
-      if (expenseModelItems.length > 0) {
-        const opIdSet = new Set(operationsList.map(o => o.id));
-        const newExpenses = expenseModelItems.filter(e => !opIdSet.has(e.id));
-        if (newExpenses.length > 0) {
-          operationsList = [...operationsList, ...newExpenses];
         }
       }
 
@@ -551,7 +529,7 @@ export default function GardenerDashboard() {
       // Кэшируем данные
       const ordersToCache = filterOrdersForOffline(incomingOrders);
       const cacheOperationsPromise = (async () => {
-        if (!resOps.ok) return;
+        if (!resOps?.ok) return;
         if (operationsList.length > 0) {
           await saveCache('operations', { data: operationsList });
         } else {

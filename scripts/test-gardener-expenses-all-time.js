@@ -59,6 +59,7 @@ async function testGardenerExpensesAllTime() {
   // 3. Assert app/gardener/page.js uses `all=1`, has getAllCachedOperations reading both keys, and guards empty state
   const gardenerPageContent = fs.readFileSync(path.join(__dirname, '..', 'app', 'gardener', 'page.js'), 'utf8');
   assert(gardenerPageContent.includes('api/gardener/operations?all=1'), 'app/gardener/page.js must query /api/gardener/operations?all=1');
+  assert(!gardenerPageContent.includes('/api/gardener/expenses'), 'Gardener page must not fetch expenses from the removed Prisma Expense model');
   assert(gardenerPageContent.includes("saveCache('operations',"), 'Must save operations into IndexedDB operations cache');
   assert(gardenerPageContent.includes('getAllCachedOperations'), 'app/gardener/page.js must define getAllCachedOperations helper');
   assert(gardenerPageContent.includes('getNormalizedUrlCacheKey'), 'app/gardener/page.js must use getNormalizedUrlCacheKey');
@@ -68,11 +69,11 @@ async function testGardenerExpensesAllTime() {
 
   // 4. Regression Test: Route handler GET /api/gardener/operations?all=1
   const multiYearExpenses = [
-    { id: 'exp_2024', gardenerId: 'g1', type: 'expense', amount: 5000, description: 'Инвентарь 2024', createdAt: new Date('2024-05-15T10:00:00.000Z') },
-    { id: 'exp_2025', gardenerId: 'g1', type: 'expense', amount: 3200, description: 'Удобрения 2025', createdAt: new Date('2025-08-20T10:00:00.000Z') },
-    { id: 'exp_3months_ago', gardenerId: 'g1', type: 'expense', amount: 1800, description: 'Расходники 3 мес назад', createdAt: past3Months },
-    { id: 'exp_current_month', gardenerId: 'g1', type: 'expense', amount: 950, description: 'Текущие траты', createdAt: currentMonth },
-    { id: 'exp_other_gardener', gardenerId: 'g2', type: 'expense', amount: 9999, description: 'Чужая трата', createdAt: currentMonth },
+    { id: 'exp_2024', gardenerId: 'g1', type: 'expense', amount: 5000, description: 'Инвентарь 2024', approved: true, createdAt: new Date('2024-05-15T10:00:00.000Z') },
+    { id: 'exp_2025', gardenerId: 'g1', type: 'expense', amount: 3200, description: 'Удобрения 2025', approved: true, createdAt: new Date('2025-08-20T10:00:00.000Z') },
+    { id: 'exp_3months_ago', gardenerId: 'g1', type: 'expense', amount: 1800, description: 'Расходники 3 мес назад', approved: false, createdAt: past3Months },
+    { id: 'exp_current_month', gardenerId: 'g1', type: 'expense', amount: 950, description: 'Текущие траты', approved: false, createdAt: currentMonth },
+    { id: 'exp_other_gardener', gardenerId: 'g2', type: 'expense', amount: 9999, description: 'Чужая трата', approved: false, createdAt: currentMonth },
   ];
 
   const routePath = path.resolve(__dirname, '..', 'app', 'api', 'gardener', 'operations', 'route.js');
@@ -97,6 +98,8 @@ async function testGardenerExpensesAllTime() {
     })
   };
 
+  const operationWrites = [];
+  let deletedExpenseWhere = null;
   const mockPrisma = {
     operation: {
       findMany: async ({ where, orderBy }) => {
@@ -110,10 +113,15 @@ async function testGardenerExpensesAllTime() {
             return true;
           })
           .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      }
-    },
-    expense: {
-      findMany: async () => []
+      },
+      create: async ({ data }) => {
+        operationWrites.push(data);
+        return { id: 'exp_new', ...data };
+      },
+      deleteMany: async ({ where }) => {
+        deletedExpenseWhere = where;
+        return { count: 1 };
+      },
     }
   };
 
@@ -148,6 +156,8 @@ async function testGardenerExpensesAllTime() {
   assert(idsCookie.includes('exp_3months_ago'), 'Must include 3 months ago expense');
   assert(idsCookie.includes('exp_current_month'), 'Must include current month expense');
   assert(!idsCookie.includes('exp_other_gardener'), 'Must NOT include other gardener expense');
+  assert.strictEqual(dataCookie.operations.find(o => o.id === 'exp_2024').approved, true, 'Must preserve approved status');
+  assert.strictEqual(dataCookie.operations.find(o => o.id === 'exp_3months_ago').approved, false, 'Must preserve pending status');
   console.log('  ✓ (a) GET /api/gardener/operations?all=1 with cookie returns all expenses across all years/months');
 
   // 4b. Call GET /api/gardener/operations?all=1 ONLY with Authorization: Bearer without cookie
@@ -184,6 +194,47 @@ async function testGardenerExpensesAllTime() {
   assert.strictEqual(resUnauth.status, 401, 'Request without credentials must return 401');
   console.log('  ✓ (c) Request without cookie or Bearer correctly returns 401');
 
+  // 4d. The legacy expenses endpoint must read from the same Operation model.
+  const expensesRoutePath = path.resolve(__dirname, '..', 'app', 'api', 'gardener', 'expenses', 'route.js');
+  const expensesRouteCode = fs.readFileSync(expensesRoutePath, 'utf8')
+    .replace(/import\s*{\s*NextResponse\s*}\s*from\s*['"]next\/server['"];?/, '')
+    .replace(/import\s+prisma\s+from\s*['"]@\/lib\/prisma['"];?/, '')
+    .replace(/import\s*{\s*verifyToken\s*}\s*from\s*['"]@\/lib\/jwt['"];?/, '')
+    .replace(/export async function GET/, 'async function GET')
+    .replace(/export async function POST/, 'async function POST')
+    .replace(/export async function DELETE/, 'async function DELETE');
+  assert(!expensesRouteCode.includes('prisma.expense'), 'Gardener expenses route must not use a Prisma model absent from schema');
+  const createExpensesHandler = new Function('NextResponse', 'prisma', 'verifyToken', `
+    ${expensesRouteCode}
+    return { GET, POST, DELETE };
+  `);
+  const { GET: getExpenses, POST: postExpense, DELETE: deleteExpense } = createExpensesHandler(MockNextResponse, mockPrisma, verifyToken);
+  const expensesResponse = await getExpenses({
+    headers: reqWithCookie.headers,
+    cookies: reqWithCookie.cookies,
+  });
+  const expensesData = await expensesResponse.json();
+  assert.strictEqual(expensesData.expenses.length, 4, 'Legacy expenses endpoint must return all Operation expenses for the gardener');
+  assert(expensesData.expenses.every(expense => expense.gardenerId === 'g1'), 'Legacy expenses endpoint must remain gardener-scoped');
+  assert(expensesData.expenses.every(expense => expense.date instanceof Date), 'Legacy expenses endpoint must preserve its date field');
+  const postResponse = await postExpense({
+    headers: reqWithCookie.headers,
+    cookies: reqWithCookie.cookies,
+    json: async () => ({ date: '2025-11-15', amount: '1250', description: 'Расходники' }),
+  });
+  assert.strictEqual(postResponse.status, 200, 'Legacy expenses endpoint must create an Operation');
+  assert.strictEqual(operationWrites[0].type, 'expense', 'Created operation must have expense type');
+  assert.strictEqual(operationWrites[0].gardenerId, 'g1', 'Created expense must belong to authenticated gardener');
+  assert.strictEqual(operationWrites[0].approved, false, 'New expense must remain pending approval');
+  const deleteResponse = await deleteExpense({
+    headers: reqWithCookie.headers,
+    cookies: reqWithCookie.cookies,
+    json: async () => ({ id: 'exp_new' }),
+  });
+  assert.strictEqual(deleteResponse.status, 200, 'Legacy expenses endpoint must delete an Operation');
+  assert.deepStrictEqual(deletedExpenseWhere, { id: 'exp_new', gardenerId: 'g1', type: 'expense' }, 'Delete must be restricted to the gardener’s own expenses');
+  console.log('  ✓ (d) Gardener expenses endpoint reads, creates, and deletes Operation expenses');
+
   // 5. Regression Test: empty API response must not overwrite non-empty cached operations or displayed state
   const mockStorage = {
     operations: [
@@ -216,7 +267,7 @@ async function testGardenerExpensesAllTime() {
   assert.strictEqual(mockStorage.operations[0].id, 'op_cached_1', 'Cached operation must remain intact');
   assert.strictEqual(displayedOperations.length, 1, 'Displayed operations state must preserve cached operations');
   assert.strictEqual(displayedOperations[0].id, 'op_cached_1', 'Displayed operation matches cached operation');
-  console.log('  ✓ (d) Empty operations API response preserves existing non-empty cache and displayed state');
+  console.log('  ✓ (e) Empty operations API response preserves existing non-empty cache and displayed state');
 
   console.log('🎉 All gardener expenses tests passed successfully!');
 }
