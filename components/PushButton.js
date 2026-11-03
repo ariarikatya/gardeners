@@ -153,7 +153,16 @@ export default function PushButton({ className = '' }) {
     const handleSubscriptionChange = (e) => {
       if (e?.detail?.state === 'enabled') {
         setPushState('enabled');
-        refreshPushState();
+        // Do NOT call async refreshPushState() that could downgrade back to 'disabled'
+        navigator.serviceWorker.ready.then(async (reg) => {
+          try {
+            const sub = await reg.pushManager.getSubscription();
+            if (!sub) {
+              // Only transition enabled -> orphan, NEVER enabled -> disabled
+              setPushState('orphan');
+            }
+          } catch (err) {}
+        }).catch(() => {});
         return;
       } else if (e?.detail?.state === 'disabled') {
         setPushState('disabled');

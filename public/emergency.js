@@ -1,7 +1,43 @@
 (function() {
+  if (typeof window !== 'undefined' && window.location && window.location.pathname.indexOf('/login') === 0) {
+    return;
+  }
+
+  function getVersionKey() {
+    var v = 'default';
+    try {
+      if (typeof window !== 'undefined' && window.CLIENT_VERSION) {
+        v = window.CLIENT_VERSION;
+      } else {
+        var scripts = document.getElementsByTagName('script');
+        for (var i = 0; i < scripts.length; i++) {
+          var src = scripts[i].src || '';
+          var idx = src.indexOf('emergency.js?v=');
+          if (idx !== -1) {
+            v = src.substring(idx + 15).split('&')[0];
+            break;
+          }
+        }
+      }
+    } catch (e) {}
+    return v;
+  }
+
+  var ver = getVersionKey();
+
+  function isOfflineApp() {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('offline_session') === '1') {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function getFatalCount() {
     try {
-      return parseInt(sessionStorage.getItem('fatal_overlay_shown_count') || '0', 10);
+      return parseInt(localStorage.getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
     } catch (e) {
       return 0;
     }
@@ -10,15 +46,16 @@
   function incFatalCount() {
     try {
       var c = getFatalCount();
-      sessionStorage.setItem('fatal_overlay_shown_count', String(c + 1));
+      localStorage.setItem('fatal_overlay_shown_count_' + ver, String(c + 1));
     } catch (e) {}
   }
 
   function handleChunkError() {
     if (typeof window === 'undefined') return false;
     try {
-      if (!sessionStorage.getItem('chunk_reload_done')) {
-        sessionStorage.setItem('chunk_reload_done', '1');
+      var key = 'chunk_reload_done_' + ver;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, '1');
         window.location.reload();
         return true;
       }
@@ -40,24 +77,15 @@
   }
 
   function showFatalError(msg) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isOfflineApp()) return;
     if (getFatalCount() >= 1) return;
     if (document.getElementById('fatal-error-fallback')) return;
 
     // Check actual DOM state at call time: never show fatal error if content is rendered
     if (isPageRendered()) return;
 
-    // Before ever showing the overlay, allow ONE automatic reload
+    // Before ever showing the overlay, allow ONE automatic reload of the current url
     if (handleChunkError()) return;
-
-    // Second anomaly after reload => prefer silent reload of '/' if home_reload_done is unset
-    try {
-      if (typeof window !== 'undefined' && !sessionStorage.getItem('home_reload_done')) {
-        sessionStorage.setItem('home_reload_done', '1');
-        window.location.href = '/';
-        return;
-      }
-    } catch (e) {}
 
     incFatalCount();
 
@@ -75,7 +103,7 @@
   }
 
   window.addEventListener('error', function(e) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isOfflineApp()) return;
     if (getFatalCount() >= 1) return;
 
     var isSameOrigin = false;
@@ -90,20 +118,19 @@
 
     if (isSameOrigin && isTargetError) {
       setTimeout(function() {
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-        var notReady = document.readyState !== 'complete';
-        var bodyEmpty = !document.body || (document.body.innerText || '').trim().length === 0;
-        if (!isPageRendered() && (notReady || bodyEmpty)) {
+        if (isOfflineApp()) return;
+        var isReady = document.readyState === 'complete';
+        if (isReady && !isPageRendered()) {
           showFatalError('сбой синтаксиса/гидратации');
         } else {
           console.warn('[emergency] Ignored non-fatal JS error:', msg);
         }
-      }, 2500);
+      }, 5000);
     }
   });
 
   window.addEventListener('unhandledrejection', function(e) {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isOfflineApp()) return;
     if (getFatalCount() >= 1) return;
     if (e && e.reason && (
       (e.reason.name && e.reason.name.indexOf('ChunkLoadError') !== -1) ||
@@ -115,15 +142,16 @@
   });
 
   setTimeout(function() {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (isOfflineApp()) return;
     if (getFatalCount() >= 1) return;
     if (typeof document !== 'undefined' && document.body) {
+      var isReady = document.readyState === 'complete';
       var hasFatal = document.getElementById('fatal-error-fallback');
       if (isPageRendered()) {
-        try { sessionStorage.removeItem('chunk_reload_done'); } catch(e) {}
-      } else if (!hasFatal) {
+        try { localStorage.removeItem('chunk_reload_done_' + ver); } catch(e) {}
+      } else if (isReady && !hasFatal) {
         showFatalError('пустая страница');
       }
     }
-  }, 3000);
+  }, 5000);
 })();

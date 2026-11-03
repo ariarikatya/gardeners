@@ -113,11 +113,15 @@ async function getAllCachedOperations() {
     const normalizeOps = (val) => {
       if (!val) return [];
       if (Array.isArray(val)) return val;
+      if (Array.isArray(val.operations)) return val.operations;
       if (val.data) {
         if (Array.isArray(val.data)) return val.data;
-        if (val.data.operations && Array.isArray(val.data.operations)) return val.data.operations;
+        if (Array.isArray(val.data.operations)) return val.data.operations;
       }
-      if (val.operations && Array.isArray(val.operations)) return val.operations;
+      if (val.rawOps) {
+        if (Array.isArray(val.rawOps)) return val.rawOps;
+        if (Array.isArray(val.rawOps.data)) return val.rawOps.data;
+      }
       return [];
     };
 
@@ -453,14 +457,17 @@ export default function GardenerDashboard() {
           if (cachedList.length > 0 && !retryOpsRef.current) {
             retryOpsRef.current = true;
             setTimeout(() => {
-              apiFetch(`/api/gardener/operations?all=1&_=${Date.now()}`, { cache: 'no-store' })
+              apiFetch(`/api/gardener/operations?all=1&retry=1&_=${Date.now()}`, { cache: 'no-store' })
                 .then(r => r.ok ? r.json() : null)
                 .then(freshOps => {
                   if (freshOps && Array.isArray(freshOps.operations) && freshOps.operations.length > 0) {
                     saveCache('operations', { data: freshOps.operations });
                     setOperations(prev => {
                       const pending = prev.filter(p => p.isPendingSync || String(p.id).startsWith('pending_') || String(p.id).startsWith('opt_'));
-                      return [...pending, ...freshOps.operations];
+                      const map = new Map();
+                      freshOps.operations.forEach(o => map.set(o.id, o));
+                      pending.forEach(p => map.set(p.id, p));
+                      return Array.from(map.values()).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
                     });
                   }
                 })
@@ -2632,8 +2639,15 @@ export default function GardenerDashboard() {
                     );
                   }
                   return (
-                    <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50">
-                      Трат пока нет
+                    <div className="text-sm text-slate-400 py-4 text-center border rounded-xl bg-slate-50 space-y-2">
+                      <div>Трат пока нет</div>
+                      <button
+                        type="button"
+                        onClick={() => fetchOrders()}
+                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+                      >
+                        🔄 Потяните или нажмите для обновления
+                      </button>
                     </div>
                   );
                 }

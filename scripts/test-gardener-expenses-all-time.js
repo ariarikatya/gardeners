@@ -106,6 +106,9 @@ async function testGardenerExpensesAllTime() {
           })
           .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       }
+    },
+    expense: {
+      findMany: async () => []
     }
   };
 
