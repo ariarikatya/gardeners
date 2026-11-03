@@ -2619,7 +2619,7 @@ export default function GardenerDashboard() {
               </div>
               {(() => {
                 const allExpenses = operations
-                  .filter(o => o.type === 'expense')
+                  .filter(o => String(o.type || '').toLowerCase() === 'expense')
                   .slice()
                   .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 

@@ -7,56 +7,44 @@
     var v = 'default';
     try {
       if (typeof window !== 'undefined' && window.CLIENT_VERSION) {
-        v = window.CLIENT_VERSION;
+        v = String(window.CLIENT_VERSION).trim();
       } else {
         var scripts = document.getElementsByTagName('script');
         for (var i = 0; i < scripts.length; i++) {
           var src = scripts[i].src || '';
           var idx = src.indexOf('emergency.js?v=');
           if (idx !== -1) {
-            v = src.substring(idx + 15).split('&')[0];
+            v = decodeURIComponent(src.substring(idx + 15).split('&')[0]).trim();
             break;
           }
         }
       }
     } catch (e) {}
-    return v;
+    return v || 'default';
   }
 
   var ver = getVersionKey();
+
+  // Clean legacy keys from older versions
+  try {
+    if (typeof localStorage !== 'undefined') {
+      var keys = Object.keys(localStorage);
+      for (var k = 0; k < keys.length; k++) {
+        var keyName = keys[k];
+        if (
+          (keyName.indexOf('fatal_overlay_shown_count_') === 0 && keyName !== 'fatal_overlay_shown_count_' + ver) ||
+          (keyName.indexOf('chunk_reload_done_') === 0 && keyName !== 'chunk_reload_done_' + ver)
+        ) {
+          localStorage.removeItem(keyName);
+        }
+      }
+    }
+  } catch (e) {}
 
   function isOfflineApp() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
     try {
       if (typeof localStorage !== 'undefined' && localStorage.getItem('offline_session') === '1') {
-        return true;
-      }
-    } catch (e) {}
-    return false;
-  }
-
-  function getFatalCount() {
-    try {
-      return parseInt(localStorage.getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  function incFatalCount() {
-    try {
-      var c = getFatalCount();
-      localStorage.setItem('fatal_overlay_shown_count_' + ver, String(c + 1));
-    } catch (e) {}
-  }
-
-  function handleChunkError() {
-    if (typeof window === 'undefined') return false;
-    try {
-      var key = 'chunk_reload_done_' + ver;
-      if (!localStorage.getItem(key)) {
-        localStorage.setItem(key, '1');
-        window.location.reload();
         return true;
       }
     } catch (e) {}
@@ -76,18 +64,48 @@
     return hasContent;
   }
 
+  function canShowOverlay() {
+    if (typeof window !== 'undefined' && window.location && window.location.pathname.indexOf('/login') === 0) {
+      return false;
+    }
+    if (isOfflineApp()) return false;
+    if (document.readyState !== 'complete') return false;
+    if (isPageRendered()) return false;
+    if (document.getElementById('fatal-error-fallback')) return false;
+
+    try {
+      var count = parseInt(localStorage.getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
+      if (count >= 1) return false;
+    } catch (e) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function handleChunkError() {
+    if (typeof window === 'undefined') return false;
+    try {
+      var key = 'chunk_reload_done_' + ver;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, '1');
+        window.location.reload();
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function showFatalError(msg) {
-    if (isOfflineApp()) return;
-    if (getFatalCount() >= 1) return;
-    if (document.getElementById('fatal-error-fallback')) return;
+    if (!canShowOverlay()) return;
 
-    // Check actual DOM state at call time: never show fatal error if content is rendered
-    if (isPageRendered()) return;
-
-    // Before ever showing the overlay, allow ONE automatic reload of the current url
+    // Prioritize one silent reload of the current URL
     if (handleChunkError()) return;
 
-    incFatalCount();
+    try {
+      var count = parseInt(localStorage.getItem('fatal_overlay_shown_count_' + ver) || '0', 10);
+      localStorage.setItem('fatal_overlay_shown_count_' + ver, String(count + 1));
+    } catch (e) {}
 
     var div = document.createElement('div');
     div.id = 'fatal-error-fallback';
@@ -104,7 +122,6 @@
 
   window.addEventListener('error', function(e) {
     if (isOfflineApp()) return;
-    if (getFatalCount() >= 1) return;
 
     var isSameOrigin = false;
     try {
@@ -118,20 +135,17 @@
 
     if (isSameOrigin && isTargetError) {
       setTimeout(function() {
-        if (isOfflineApp()) return;
-        var isReady = document.readyState === 'complete';
-        if (isReady && !isPageRendered()) {
-          showFatalError('сбой синтаксиса/гидратации');
-        } else {
+        if (!canShowOverlay()) {
           console.warn('[emergency] Ignored non-fatal JS error:', msg);
+          return;
         }
-      }, 5000);
+        showFatalError('сбой синтаксиса/гидратации');
+      }, 8000);
     }
   });
 
   window.addEventListener('unhandledrejection', function(e) {
     if (isOfflineApp()) return;
-    if (getFatalCount() >= 1) return;
     if (e && e.reason && (
       (e.reason.name && e.reason.name.indexOf('ChunkLoadError') !== -1) ||
       (e.reason.message && /ChunkLoadError|Loading( CSS)? chunk/i.test(e.reason.message))
@@ -143,15 +157,12 @@
 
   setTimeout(function() {
     if (isOfflineApp()) return;
-    if (getFatalCount() >= 1) return;
     if (typeof document !== 'undefined' && document.body) {
-      var isReady = document.readyState === 'complete';
-      var hasFatal = document.getElementById('fatal-error-fallback');
       if (isPageRendered()) {
         try { localStorage.removeItem('chunk_reload_done_' + ver); } catch(e) {}
-      } else if (isReady && !hasFatal) {
+      } else if (canShowOverlay()) {
         showFatalError('пустая страница');
       }
     }
-  }, 5000);
+  }, 8000);
 })();
