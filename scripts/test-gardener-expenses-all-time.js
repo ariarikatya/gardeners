@@ -77,11 +77,16 @@ async function testGardenerExpensesAllTime() {
 
   const routePath = path.resolve(__dirname, '..', 'app', 'api', 'gardener', 'operations', 'route.js');
   let routeCode = fs.readFileSync(routePath, 'utf8');
+  const dateFilterPath = path.resolve(__dirname, '..', 'lib', 'dateFilter.js');
+  let dateFilterCode = fs.readFileSync(dateFilterPath, 'utf8')
+    .replace(/export\s+/g, '');
+
   routeCode = routeCode
     .replace(/import\s*{\s*NextResponse\s*}\s*from\s*['"]next\/server['"];?/, '')
     .replace(/import\s+prisma\s+from\s*['"]@\/lib\/prisma['"];?/, '')
     .replace(/import\s*{\s*verifyToken\s*}\s*from\s*['"]@\/lib\/jwt['"];?/, '')
     .replace(/import\s*{\s*getIdempotencyKey[\s\S]*?['"]@\/lib\/idempotency['"];?/, '')
+    .replace(/import\s*{\s*parseDateRangeQuery\s*}\s*from\s*['"]@\/lib\/dateFilter['"];?/, dateFilterCode)
     .replace(/export async function GET/, 'async function GET')
     .replace(/export async function POST/, 'async function POST');
 

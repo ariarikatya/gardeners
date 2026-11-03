@@ -23,6 +23,7 @@ let pushJustEnabled = false;
 export default function EnablePushOnPwaModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const checkingRef = useRef(false);
 
   const checkModal = useCallback(async () => {
@@ -145,6 +146,9 @@ export default function EnablePushOnPwaModal() {
 
   const handleDismiss = () => {
     inMemoryDismissed = true;
+    try {
+      localStorage.setItem('pwa_push_modal_dismissed_at', String(Date.now()));
+    } catch (e) {}
     setSubscribing(false);
     setIsOpen(false);
   };
@@ -219,11 +223,24 @@ export default function EnablePushOnPwaModal() {
 
       if (subRes.ok) {
         clientLog('pwa_modal_subscribe_success');
+        setIsSubscribed(true);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'enabled' } }));
+        }
         await apiFetch('/api/push/permission', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ notifPermission: permission, notificationsEnabled: true }),
         }).catch(() => {});
+
+        // Automatically send test push notification right after enabling
+        try {
+          await apiFetch('/api/push/test', { method: 'POST' }).catch(() => {});
+        } catch (testErr) {
+          console.warn('Auto test push failed:', testErr);
+        }
+        // Modal must close after successful subscription and test push
+        handleDismiss();
       } else {
         try { localStorage.removeItem('push_state_override'); } catch (e) {}
         if (typeof window !== 'undefined') {
@@ -236,6 +253,43 @@ export default function EnablePushOnPwaModal() {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'permission-only' } }));
       }
+      handleDismiss();
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const handleUnsubscribe = async () => {
+    setSubscribing(true);
+    try {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await apiFetch('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          }).catch(() => {});
+          await sub.unsubscribe().catch(() => {});
+        }
+      }
+      await apiFetch('/api/push/permission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationsEnabled: false }),
+      }).catch(() => {});
+      try {
+        localStorage.removeItem('push_state_override');
+        sessionStorage.removeItem('push_just_enabled');
+      } catch (e) {}
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('push-subscription-changed', { detail: { state: 'disabled' } }));
+      }
+      setIsSubscribed(false);
+      handleDismiss();
+    } catch (err) {
+      console.error('Error disabling push in modal:', err);
       handleDismiss();
     } finally {
       setSubscribing(false);
@@ -255,10 +309,14 @@ export default function EnablePushOnPwaModal() {
         </div>
 
         <h3 className="text-lg font-bold text-slate-900 mb-2">
-          Разрешите уведомления
+          {isSubscribed ? 'Отключить уведомления' : 'Разрешите уведомления'}
         </h3>
 
-        {typeof Notification !== 'undefined' && Notification.permission === 'denied' ? (
+        {isSubscribed ? (
+          <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+            Push-уведомления успешно подключены. Нажмите «Отключить уведомления», если хотите перестать получать уведомления о заказах.
+          </p>
+        ) : typeof Notification !== 'undefined' && Notification.permission === 'denied' ? (
           <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200 mb-6 text-left leading-relaxed">
             Уведомления заблокированы в настройках устройства. Чтобы получать заказы, откройте:
             <div className="font-semibold mt-1">Настройки → Приложения / Веб-приложение → Уведомления → Разрешить</div>
@@ -270,21 +328,32 @@ export default function EnablePushOnPwaModal() {
         )}
 
         <div className="space-y-2">
-          <button
-            type="button"
-            disabled={subscribing}
-            onClick={handleEnablePush}
-            className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-xl text-sm shadow-md transition-all disabled:opacity-50 cursor-pointer"
-          >
-            {subscribing ? 'Подключение...' : 'Продолжить'}
-          </button>
+          {isSubscribed ? (
+            <button
+              type="button"
+              disabled={subscribing}
+              onClick={handleUnsubscribe}
+              className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold rounded-xl text-sm shadow-md transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {subscribing ? 'Отключение...' : 'Отключить уведомления'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={subscribing}
+              onClick={handleEnablePush}
+              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold rounded-xl text-sm shadow-md transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {subscribing ? 'Подключение...' : 'Продолжить'}
+            </button>
+          )}
 
           <button
             type="button"
             onClick={handleDismiss}
             className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
           >
-            Напомнить позже
+            {isSubscribed ? 'Закрыть' : 'Напомнить позже'}
           </button>
         </div>
       </div>

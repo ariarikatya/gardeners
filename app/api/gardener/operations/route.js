@@ -18,18 +18,7 @@ async function checkGardener(req) {
   return { payload };
 }
 
-function formatDateInput(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getDateRange(rawStart, rawEnd) {
-  const now = new Date();
-  const start = rawStart ? formatDateInput(rawStart) : new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = rawEnd ? formatDateInput(rawEnd) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return { start, end };
-}
+import { parseDateRangeQuery } from '@/lib/dateFilter';
 
 export async function GET(req) {
   const auth = await checkGardener(req);
@@ -37,16 +26,13 @@ export async function GET(req) {
   const gardenerId = auth.payload.gardenerId;
 
   const { searchParams } = new URL(req.url);
-  const startRaw = searchParams.get('start');
-  const endRaw = searchParams.get('end');
-  const allRaw = searchParams.get('all');
+  const dateFilter = parseDateRangeQuery(searchParams, { defaultToAll: true });
 
   const where = { gardenerId };
-  // If all=1 or all=true, or if start and end are omitted, return all operations without date filtering
-  const returnAll = allRaw === '1' || allRaw === 'true' || (!startRaw && !endRaw);
-  if (!returnAll && (startRaw || endRaw)) {
-    const { start, end } = getDateRange(startRaw, endRaw);
-    where.createdAt = { gte: start, lte: end };
+  if (!dateFilter.isAll && (dateFilter.start || dateFilter.end)) {
+    where.createdAt = {};
+    if (dateFilter.start) where.createdAt.gte = dateFilter.start;
+    if (dateFilter.end) where.createdAt.lte = dateFilter.end;
   }
 
   const [ops, expenses] = await Promise.all([
