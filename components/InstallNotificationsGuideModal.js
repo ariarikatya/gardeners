@@ -142,13 +142,13 @@ export default function InstallNotificationsGuideModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
       <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 text-slate-800 animate-in fade-in zoom-in duration-200">
-        {/* Верхняя иконка: реальная иконка приложения в нативном скруглённом контейнере */}
+        {/* Верхняя иконка: реальная иконка приложения без подрезания и самодельных squircle-масок */}
         <div className="flex justify-center mb-3">
-          <div className="w-14 h-14 rounded-[22%] overflow-hidden bg-white shadow-md ring-1 ring-slate-200 flex items-center justify-center flex-shrink-0">
+          <div className="w-14 h-14 bg-white flex items-center justify-center flex-shrink-0">
             <img
               src="/icon-192.png"
               alt="Anemon Agro"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
           </div>
         </div>
@@ -205,11 +205,11 @@ export default function InstallNotificationsGuideModal() {
 
               {/* iOS: иконка приложения */}
               <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="w-12 h-12 rounded-[22%] overflow-hidden bg-white shadow-sm ring-1 ring-slate-200 flex-shrink-0">
+                <div className="w-12 h-12 bg-white flex items-center justify-center flex-shrink-0">
                   <img
                     src="/icon-192.png"
                     alt="Иконка приложения Anemon Agro"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
                 </div>
                 <div className="leading-snug pt-0.5">
@@ -248,11 +248,11 @@ export default function InstallNotificationsGuideModal() {
 
               {/* Android: иконка приложения */}
               <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="w-12 h-12 rounded-[22%] overflow-hidden bg-white shadow-sm ring-1 ring-slate-200 flex-shrink-0">
+                <div className="w-12 h-12 bg-white flex items-center justify-center flex-shrink-0">
                   <img
                     src="/icon-192.png"
                     alt="Иконка приложения Anemon Agro"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
                 </div>
                 <div className="leading-snug pt-0.5">

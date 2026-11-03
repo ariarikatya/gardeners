@@ -226,9 +226,16 @@ export default function EnablePushOnPwaModal() {
           Разрешите уведомления
         </h3>
 
-        <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-          Чтобы получать уведомления, нажмите «Разрешить» в следующем окне
-        </p>
+        {typeof Notification !== 'undefined' && Notification.permission === 'denied' ? (
+          <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200 mb-6 text-left leading-relaxed">
+            Уведомления заблокированы в настройках устройства. Чтобы получать заказы, откройте:
+            <div className="font-semibold mt-1">Настройки → Приложения / Веб-приложение → Уведомления → Разрешить</div>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+            Чтобы получать уведомления, нажмите «Разрешить» в следующем окне
+          </p>
+        )}
 
         <div className="space-y-2">
           <button

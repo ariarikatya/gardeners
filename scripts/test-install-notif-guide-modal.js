@@ -24,11 +24,11 @@ assert(content.includes('Выберите «Добавить на главный
 assert(content.includes('Напомнить позже'), 'Must have "Напомнить позже" button');
 assert(content.includes("localStorage.setItem('notif_guide_dismissed_at'"), 'Must store notif_guide_dismissed_at on dismiss');
 
-// 5. Verify real PWA icon is wrapped in iOS squircle container (rounded-[22%] w-12 h-12)
+// 5. Verify real PWA icon is rendered without cropping or custom squircle mask (object-contain w-12 h-12)
 assert(content.includes('/icon-192.png'), 'Must render real PWA icon /icon-192.png');
-assert(content.includes('rounded-[22%]'), 'Must wrap icon in rounded-[22%] squircle container');
+assert(!content.includes('rounded-[22%]'), 'Must NOT use artificial rounded-[22%] squircle mask');
 assert(content.includes('w-12 h-12'), 'Must size icon wrapper to w-12 h-12');
-assert(content.includes('object-cover'), 'Must use object-cover inside squircle container');
+assert(content.includes('object-contain'), 'Must use object-contain without cutting edges');
 
 // 5b. Verify route change tracking and lack of permanent notif_guide_dismissed check
 assert(content.includes('usePathname'), 'Must use usePathname to trigger check on route change');
