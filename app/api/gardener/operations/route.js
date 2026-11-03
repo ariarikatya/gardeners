@@ -35,32 +35,8 @@ export async function GET(req) {
     if (dateFilter.end) where.createdAt.lte = dateFilter.end;
   }
 
-  const [ops, expenses] = await Promise.all([
-    prisma.operation.findMany({ where, orderBy: { createdAt: 'desc' } }),
-    prisma.expense.findMany({
-      where: {
-        gardenerId,
-        ...(where.createdAt ? { date: where.createdAt } : {})
-      },
-      orderBy: { date: 'desc' }
-    }).catch(() => [])
-  ]);
-
-  const opIds = new Set(ops.map(o => o.id));
-  const expenseOps = (expenses || []).filter(e => !opIds.has(e.id)).map(e => ({
-    id: e.id,
-    gardenerId: e.gardenerId,
-    type: 'expense',
-    amount: e.amount,
-    description: e.description,
-    receiptUrl: e.receiptUrl,
-    approved: true,
-    createdAt: e.date,
-  }));
-
-  const allCombined = [...ops, ...expenseOps].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-  return NextResponse.json({ operations: allCombined });
+  const operations = await prisma.operation.findMany({ where, orderBy: { createdAt: 'desc' } });
+  return NextResponse.json({ operations });
 }
 
 export async function POST(req) {

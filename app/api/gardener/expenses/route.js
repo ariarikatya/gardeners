@@ -22,11 +22,11 @@ export async function GET(req) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
   const payload = auth.payload;
 
-  const expenses = await prisma.expense.findMany({
-    where: { gardenerId: payload.gardenerId },
-    orderBy: { date: 'desc' },
+  const expenses = await prisma.operation.findMany({
+    where: { gardenerId: payload.gardenerId, type: 'expense' },
+    orderBy: { createdAt: 'desc' },
   });
-  return NextResponse.json({ expenses });
+  return NextResponse.json({ expenses: expenses.map(expense => ({ ...expense, date: expense.createdAt })) });
 }
 
 export async function POST(req) {
@@ -39,10 +39,18 @@ export async function POST(req) {
   if (!date || !parsedAmount || parsedAmount <= 0 || !description?.trim()) {
     return NextResponse.json({ error: 'Укажите дату, сумму и назначение траты' }, { status: 400 });
   }
-  const expense = await prisma.expense.create({
-    data: { date: new Date(date), amount: parsedAmount, description: description.trim(), receiptUrl: receiptUrl || null, gardenerId: payload.gardenerId },
+  const expense = await prisma.operation.create({
+    data: {
+      type: 'expense',
+      createdAt: new Date(date),
+      amount: parsedAmount,
+      description: description.trim(),
+      receiptUrl: receiptUrl || null,
+      gardenerId: payload.gardenerId,
+      approved: false,
+    },
   });
-  return NextResponse.json({ expense });
+  return NextResponse.json({ expense: { ...expense, date: expense.createdAt } });
 }
 
 export async function DELETE(req) {
@@ -51,6 +59,6 @@ export async function DELETE(req) {
   const payload = auth.payload;
 
   const { id } = await req.json();
-  await prisma.expense.deleteMany({ where: { id, gardenerId: payload.gardenerId } });
+  await prisma.operation.deleteMany({ where: { id, gardenerId: payload.gardenerId, type: 'expense' } });
   return NextResponse.json({ success: true });
 }
