@@ -36,6 +36,10 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Пользователь с таким номером не найден' }, { status: 401 });
     }
 
+    if (user.role === 'ADMIN' || user.role === 'LEADER') {
+      return NextResponse.json({ requiresPassword: true }, { status: 401 });
+    }
+
     const token = await signToken({
       userId: user.id,
       phone: user.phone,
