@@ -18,6 +18,7 @@ model User {
   phone                String    @unique
   name                 String
   role                 Role      @default(GARDENER)
+  passwordHash         String?
   vkId                 String?   // VK user id / peer id for notifications
   notifPermission      String?
   notificationsEnabled Boolean   @default(false)

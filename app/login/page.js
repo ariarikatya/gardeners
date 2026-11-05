@@ -58,6 +58,8 @@ class LoginErrorBoundary extends React.Component {
 
 export default function LoginPage() {
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordRequired, setPasswordRequired] = useState(false);
   const [savedPhone, setSavedPhone] = useState(null);
   const [isSavedPhoneMode, setIsSavedPhoneMode] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
@@ -197,6 +199,11 @@ export default function LoginPage() {
       }
 
       if (resolvedRole && ['ADMIN', 'LEADER', 'GARDENER'].includes(resolvedRole)) {
+        if (resolvedRole === 'ADMIN' || resolvedRole === 'LEADER') {
+          setError('Для входа владельца или администратора требуется интернет и пароль.');
+          return;
+        }
+
         const phoneToUse = cleanPhone || storedPhone || rawInputPhone;
         if (typeof window !== 'undefined') {
           localStorage.setItem('auth_role', resolvedRole);
@@ -281,6 +288,14 @@ export default function LoginPage() {
       } catch (jsonErr) {
         clearTimeout(watchdogId);
         await handleOfflineLogin(phoneToUse, seq);
+        return;
+      }
+
+      if (data.requiresPassword) {
+        setPhone(normalizeCleanPhone(phoneToUse) || phoneToUse);
+        setPassword('');
+        setPasswordRequired(true);
+        setIsSavedPhoneMode(false);
         return;
       }
 
@@ -470,7 +485,7 @@ export default function LoginPage() {
         fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone }),
+          body: JSON.stringify({ phone, ...(passwordRequired ? { password } : {}) }),
           credentials: 'include',
           signal: controller ? controller.signal : undefined,
         }),
@@ -495,6 +510,11 @@ export default function LoginPage() {
         return;
       }
 
+      if (data.requiresPassword) {
+        setPasswordRequired(true);
+        return;
+      }
+
       if (!res.ok) {
         const clientErr = new Error(data.error || 'Ошибка при входе');
         clientErr.isClientError = true;
@@ -515,6 +535,8 @@ export default function LoginPage() {
         }
       }
 
+      setPassword('');
+      setPasswordRequired(false);
       triggerSwPrecacheRoles();
       clearTimeout(watchdogId);
       redirectByRole(data.role, false, phoneToStore);
@@ -577,6 +599,8 @@ export default function LoginPage() {
                 onClick={() => {
                   setError('');
                   setIsSavedPhoneMode(false);
+                  setPassword('');
+                  setPasswordRequired(false);
                 }}
                 disabled={loading}
                 className="w-full flex justify-center py-3 px-4 border border-slate-300 rounded-lg shadow-sm text-base font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
@@ -594,7 +618,7 @@ export default function LoginPage() {
                 Вход в систему
               </h2>
               <p className="mt-2 text-center text-sm text-slate-500">
-                Введите ваш номер телефона без пароля
+                {passwordRequired ? 'Введите номер телефона и пароль' : 'Введите ваш номер телефона без пароля'}
               </p>
             </div>
             <form className="mt-8 space-y-6" onSubmit={handleLogin}>
@@ -608,10 +632,32 @@ export default function LoginPage() {
                   type="text"
                   placeholder="79991234567"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    setPassword('');
+                    setPasswordRequired(false);
+                  }}
                   className="mt-1 block w-full px-4 py-3 rounded-lg border border-slate-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 text-slate-900 text-lg"
                 />
               </div>
+
+              {passwordRequired && (
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                    Пароль
+                  </label>
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="mt-1 block w-full px-4 py-3 rounded-lg border border-slate-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500 text-slate-900 text-lg"
+                  />
+                </div>
+              )}
 
               {error && (
                 <div className="text-red-600 text-sm bg-red-50 p-3 rounded-lg border border-red-200">

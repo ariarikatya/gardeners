@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { signToken } from '@/lib/jwt';
+import { verifyPassword } from '@/lib/password';
 
 function isRequestSecure(req) {
   if (process.env.NODE_ENV !== 'production') return false;
@@ -19,7 +20,7 @@ function getPhoneSearchVariants(rawPhone) {
 
 export async function POST(req) {
   try {
-    const { phone } = await req.json();
+    const { phone, password } = await req.json();
     if (!phone) {
       return NextResponse.json({ error: 'Введите номер телефона' }, { status: 400 });
     }
@@ -34,6 +35,18 @@ export async function POST(req) {
 
     if (!user) {
       return NextResponse.json({ error: 'Пользователь с таким номером не найден' }, { status: 404 });
+    }
+
+    if (user.role === 'ADMIN' || user.role === 'LEADER') {
+      if (!password) {
+        return NextResponse.json({ requiresPassword: true });
+      }
+      if (!user.passwordHash) {
+        return NextResponse.json({ error: 'Пароль для аккаунта не настроен' }, { status: 409 });
+      }
+      if (!verifyPassword(password, user.passwordHash)) {
+        return NextResponse.json({ error: 'Неверный пароль' }, { status: 401 });
+      }
     }
 
     const token = await signToken({
