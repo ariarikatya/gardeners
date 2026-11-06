@@ -161,6 +161,7 @@ export async function GET(req) {
     gardenerId: c.gardenerId,
     gardenerName: c.gardener?.name || null,
     text: c.text,
+    completed: c.completed,
   }));
 
   return NextResponse.json({ orders, dayComments: formattedDayComments });

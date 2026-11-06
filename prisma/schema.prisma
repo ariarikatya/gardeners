@@ -148,6 +148,7 @@ model GardenerDayComment {
   gardenerId String
   gardener   Gardener @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   text       String
+  completed  Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

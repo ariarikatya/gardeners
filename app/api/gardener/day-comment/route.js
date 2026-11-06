@@ -105,6 +105,7 @@ export async function POST(req) {
     },
     update: {
       text: trimmedText,
+      completed: false,
     },
     create: {
       date: parsedDate,

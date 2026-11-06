@@ -1,0 +1,2 @@
+ALTER TABLE "GardenerDayComment"
+ADD COLUMN IF NOT EXISTS "completed" BOOLEAN NOT NULL DEFAULT false;

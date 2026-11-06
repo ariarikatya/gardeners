@@ -373,6 +373,7 @@ export default function AdminDashboard() {
   const [isStaleOfflineData, setIsStaleOfflineData] = useState(false);
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState(null);
   const [activeCommentPopup, setActiveCommentPopup] = useState(null);
+  const [updatingDayCommentId, setUpdatingDayCommentId] = useState(null);
   const [monthPreloadWarnings, setMonthPreloadWarnings] = useState([]);
   const fetchSeqRef = useRef(0);
 
@@ -1296,6 +1297,58 @@ export default function AdminDashboard() {
       }
     } else {
       router.push('/login');
+    }
+  };
+
+  const handleToggleDayCommentCompleted = async (comment) => {
+    if (!comment?.id || updatingDayCommentId === comment.id) return;
+    const completed = !comment.completed;
+    setDayComments((items) => items.map((item) => item.id === comment.id ? { ...item, completed } : item));
+    setUpdatingDayCommentId(comment.id);
+    let statusSaved = false;
+
+    try {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await enqueueAction({
+          actionType: 'ADMIN_DAY_COMMENT_COMPLETION',
+          url: '/api/admin/day-comment',
+          method: 'PATCH',
+          payload: { id: comment.id, completed },
+          scope: 'admin',
+        });
+        await refreshQueueCount();
+        statusSaved = true;
+      } else {
+        const res = await apiFetch('/api/admin/day-comment', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: comment.id, completed }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.error || 'Не удалось обновить статус комментария');
+        }
+        statusSaved = true;
+      }
+
+      const cachedAll = (await getCache('admin_day_comments'))?.data || [];
+      const cacheComment = (item) => item?.id === comment.id ? { ...item, completed } : item;
+      await saveCache('admin_day_comments', cachedAll.map(cacheComment));
+      const commentDate = new Date(comment.date);
+      const monthKey = `${commentDate.getFullYear()}-${String(commentDate.getMonth() + 1).padStart(2, '0')}`;
+      const canonicalKey = `admin_day_comments_${monthKey}`;
+      const cachedMonth = (await getCache(canonicalKey))?.data || [];
+      await saveCache(canonicalKey, cachedMonth.map(cacheComment));
+    } catch (error) {
+      if (!statusSaved) {
+        setDayComments((items) => items.map((item) => item.id === comment.id ? { ...item, completed: comment.completed } : item));
+        alert(error.message || 'Не удалось обновить статус комментария');
+      } else {
+        console.warn('Day comment status saved but local cache update failed:', error);
+        alert('Статус сохранён, но локальный кэш не обновился. При следующей загрузке данные обновятся с сервера.');
+      }
+    } finally {
+      setUpdatingDayCommentId(null);
     }
   };
 
@@ -3105,6 +3158,7 @@ export default function AdminDashboard() {
                                   const dateComments = dayComments.filter(c => c.date?.slice(0, 10) === dateStr);
                                   if (dateComments.length === 0) return null;
                                   const isPopupOpen = activeCommentPopup?.dateStr === dateStr;
+                                  const allCommentsCompleted = dateComments.every(c => c.completed);
 
                                   return (
                                     <div className="flex flex-wrap gap-1 mt-1 relative">
@@ -3115,8 +3169,8 @@ export default function AdminDashboard() {
                                             e.stopPropagation();
                                             setActiveCommentPopup(isPopupOpen ? null : { dateStr, comments: dateComments });
                                           }}
-                                          title={`Комментарии дня: ${dateComments.length}`}
-                                          className="inline-flex items-center gap-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors"
+                                          title={`Комментарии дня: ${dateComments.length}${allCommentsCompleted ? ', все выполнены' : ''}`}
+                                          className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded cursor-pointer font-medium transition-colors ${allCommentsCompleted ? 'bg-slate-200 hover:bg-slate-300 text-slate-500' : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-800'}`}
                                         >
                                           <span>💬</span>
                                           {dateComments.length > 1 ? (
@@ -3133,7 +3187,7 @@ export default function AdminDashboard() {
                                             onClick={(e) => e.stopPropagation()}
                                             className="absolute left-0 top-full mt-1 z-50 w-72 max-w-[85vw] bg-slate-900 text-white rounded-xl p-3 shadow-xl border border-slate-700 text-left text-xs max-h-80 overflow-y-auto"
                                           >
-                                            <div className="flex items-center justify-between font-bold text-emerald-400 mb-2 pb-1 border-b border-slate-700">
+                                            <div className={`flex items-center justify-between font-bold mb-2 pb-1 border-b border-slate-700 ${allCommentsCompleted ? 'text-slate-400' : 'text-emerald-400'}`}>
                                               <span>Комментарии ({dateStr}): {dateComments.length}</span>
                                               <button
                                                 type="button"
@@ -3145,11 +3199,19 @@ export default function AdminDashboard() {
                                             </div>
                                             <div className="space-y-2">
                                               {dateComments.map((c, idx) => (
-                                                <div key={c.id || idx} className="bg-slate-800/80 rounded-lg p-2 border border-slate-700/60">
-                                                  <div className="font-semibold text-emerald-300 text-[11px] mb-0.5">
+                                                <div key={c.id || idx} className={`rounded-lg p-2 border ${c.completed ? 'bg-slate-800/50 border-slate-700/40' : 'bg-slate-800/80 border-slate-700/60'}`}>
+                                                  <div className={`font-semibold text-[11px] mb-0.5 ${c.completed ? 'text-slate-400' : 'text-emerald-300'}`}>
                                                     {c.gardenerName || 'Садовник'}
                                                   </div>
-                                                  <div className="text-slate-200 leading-snug whitespace-pre-wrap text-[11px]">{c.text}</div>
+                                                  <div className={`leading-snug whitespace-pre-wrap text-[11px] ${c.completed ? 'text-slate-400' : 'text-slate-200'}`}>{c.text}</div>
+                                                  <button
+                                                    type="button"
+                                                    disabled={updatingDayCommentId === c.id}
+                                                    onClick={() => handleToggleDayCommentCompleted(c)}
+                                                    className={`mt-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold disabled:opacity-50 ${c.completed ? 'bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'}`}
+                                                  >
+                                                    {updatingDayCommentId === c.id ? '...' : c.completed ? '✓ Выполнено' : 'Отметить выполненным'}
+                                                  </button>
                                                 </div>
                                               ))}
                                             </div>

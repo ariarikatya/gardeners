@@ -576,7 +576,7 @@ export default function GardenerDashboard() {
           json.comments.forEach((c) => {
             const dKey = c.date ? c.date.slice(0, 10) : '';
             if (dKey) {
-              map[dKey] = { id: c.id, text: c.text };
+              map[dKey] = { id: c.id, text: c.text, completed: Boolean(c.completed) };
             }
           });
         }
@@ -608,7 +608,7 @@ export default function GardenerDashboard() {
 
     setSavingDayComment(true);
     const existing = dayComments[dateStr];
-    const updatedMap = { ...dayComments, [dateStr]: { id: existing?.id || `tmp_c_${Date.now()}`, text: trimmed } };
+    const updatedMap = { ...dayComments, [dateStr]: { id: existing?.id || `tmp_c_${Date.now()}`, text: trimmed, completed: false } };
     setDayComments(updatedMap);
     await saveCache('day_comments', updatedMap);
 
@@ -639,7 +639,7 @@ export default function GardenerDashboard() {
       }
       const json = await res.json();
       if (json.dayComment) {
-        const newMap = { ...dayComments, [dateStr]: { id: json.dayComment.id, text: json.dayComment.text } };
+        const newMap = { ...dayComments, [dateStr]: { id: json.dayComment.id, text: json.dayComment.text, completed: Boolean(json.dayComment.completed) } };
         setDayComments(newMap);
         await saveCache('day_comments', newMap);
       }
@@ -2842,6 +2842,9 @@ export default function GardenerDashboard() {
                   {dayComments[selectedDateStr]?.text && (
                     <div className="mt-1.5 text-[11px] text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
                       Сохранено: <span className="font-medium text-slate-700">{dayComments[selectedDateStr].text}</span>
+                      {dayComments[selectedDateStr].completed && (
+                        <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-700">Выполнено</span>
+                      )}
                     </div>
                   )}
                 </div>

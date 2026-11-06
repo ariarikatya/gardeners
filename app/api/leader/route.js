@@ -230,6 +230,7 @@ export async function GET(req) {
       gardenerId: c.gardenerId,
       gardenerName: c.gardener?.name || null,
       text: c.text,
+      completed: c.completed,
       createdAt: c.createdAt.toISOString(),
       updatedAt: c.updatedAt.toISOString(),
     })),
