@@ -1081,11 +1081,12 @@ export default function LeaderDashboard() {
                           ) : (
                             <div className="space-y-1 max-h-24 overflow-y-auto">
                               {gardenerComments.map((c) => (
-                                <div key={c.id} className="bg-emerald-50 text-emerald-950 p-1.5 rounded border border-emerald-200 text-[11px]">
+                                <div key={c.id} className={`p-1.5 rounded border text-[11px] ${c.completed ? 'bg-slate-100 text-slate-500 border-slate-200' : 'bg-emerald-50 text-emerald-950 border-emerald-200'}`}>
                                   <span className="font-bold text-emerald-800">
                                     📅 {c.date ? new Date(c.date).toLocaleDateString('ru-RU') : ''}:
                                   </span>{' '}
                                   <span>{c.text}</span>
+                                  {c.completed && <span className="ml-1 font-semibold text-emerald-700">✓ Выполнено</span>}
                                 </div>
                               ))}
                             </div>
