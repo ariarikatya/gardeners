@@ -24,6 +24,61 @@ model User {
   notificationsEnabled Boolean   @default(false)
   gardenerId           String?   @unique
   gardener             Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
+  chatParticipants     ChatParticipant[]
+  sentChatMessages    ChatMessage[] @relation("ChatMessageSender")
+}
+
+model Chat {
+  id         String            @id @default(uuid())
+  name       String?
+  isGroup    Boolean           @default(false)
+  directKey  String?           @unique
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  participants ChatParticipant[]
+  messages   ChatMessage[]
+
+  @@index([updatedAt])
+}
+
+model ChatParticipant {
+  id         String   @id @default(uuid())
+  chatId     String
+  userId     String
+  lastReadAt DateTime?
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([userId])
+  @@index([chatId, lastReadAt])
+}
+
+model ChatMessage {
+  id          String           @id @default(uuid())
+  chatId      String
+  senderId    String
+  body        String?
+  createdAt   DateTime         @default(now())
+  chat        Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender      User             @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  attachments ChatAttachment[]
+
+  @@index([chatId, createdAt])
+  @@index([senderId])
+}
+
+model ChatAttachment {
+  id         String      @id @default(uuid())
+  messageId  String
+  filename   String
+  mimeType   String
+  size       Int
+  storagePath String
+  createdAt  DateTime    @default(now())
+  message    ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
 }
 
 model Gardener {

@@ -44,8 +44,9 @@ export async function middleware(request) {
   const isAdminPage = pathname.startsWith('/admin');
   const isGardenerPage = pathname.startsWith('/gardener');
   const isLeaderPage = pathname.startsWith('/leader');
+  const isChatPage = pathname === '/chats' || pathname.startsWith('/chats/');
 
-  if (!isAdminPage && !isGardenerPage && !isLeaderPage) {
+  if (!isAdminPage && !isGardenerPage && !isLeaderPage && !isChatPage) {
     return NextResponse.next();
   }
 
@@ -64,15 +65,15 @@ export async function middleware(request) {
 
   // Каждая роль имеет свою главную страницу: ADMIN -> /admin, LEADER -> /leader, GARDENER -> /gardener
   if (payload.role === 'ADMIN') {
-    if (!isAdminPage) {
+    if (!isAdminPage && !isChatPage) {
       redirectUrl = new URL('/admin', request.url);
     }
   } else if (payload.role === 'LEADER') {
-    if (!isLeaderPage) {
+    if (!isLeaderPage && !isChatPage) {
       redirectUrl = new URL('/leader', request.url);
     }
   } else if (payload.role === 'GARDENER') {
-    if (!isGardenerPage) {
+    if (!isGardenerPage && !isChatPage) {
       redirectUrl = new URL('/gardener', request.url);
     }
   } else {
@@ -114,5 +115,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/gardener/:path*', '/leader/:path*'],
+  matcher: ['/admin/:path*', '/gardener/:path*', '/leader/:path*', '/chats/:path*'],
 };

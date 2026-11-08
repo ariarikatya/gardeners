@@ -1018,6 +1018,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Чаты содержат личную переписку и не должны попадать в общий PWA-кэш или повторно отправляться.
+  if (url.pathname === '/api/chats' || url.pathname.startsWith('/api/chats/')) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   // Для остальных ВСЕХ не-GET запросов на /api/* (POST, PUT, DELETE, PATCH): 1 ретрай при сетевой ошибке/таймауте
   if (url.pathname.startsWith('/api/')) {
     if (request.method !== 'GET') {

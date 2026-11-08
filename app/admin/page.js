@@ -2549,6 +2549,12 @@ export default function AdminDashboard() {
           >
             🔌 amoCRM
           </a>
+          <Link
+            href="/chats"
+            className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
+          >
+            💬 Чаты
+          </Link>
           <PushButton className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap" />
           <button
             onClick={async () => {

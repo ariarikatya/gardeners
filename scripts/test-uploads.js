@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { saveUploadedImage, saveUploadedMedia, getUploadsDir, checkDiskSpace } from '../lib/uploads.js';
+import { saveUploadedImage, saveUploadedMedia, saveUploadedFile, getUploadsDir, checkDiskSpace } from '../lib/uploads.js';
 
 let sharp;
 try {
@@ -215,6 +215,16 @@ async function runUploadsTests() {
     assert(videoUrl.startsWith('/api/files/'), 'Expected video URL starting with /api/files/');
     assert(videoUrl.endsWith('.mp4'), `Expected video URL ending with .mp4, got ${videoUrl}`);
     console.log('✅ Test 8 Passed! Video uploaded and saved with original extension.');
+
+    // Test 9: Generic documents retain their bytes and safe extension
+    console.log('Test 9: Uploading a generic document...');
+    const documentBuffer = Buffer.from('chat attachment test');
+    const documentUrl = await saveUploadedFile(documentBuffer, { filename: 'report.txt' });
+    assert(documentUrl.startsWith('/api/files/'), 'Expected document URL starting with /api/files/');
+    assert(documentUrl.endsWith('.txt'), `Expected document URL ending with .txt, got ${documentUrl}`);
+    const documentPath = path.join(testUploadsDir, ...documentUrl.replace('/api/files/', '').split('/'));
+    assert(fs.readFileSync(documentPath).equals(documentBuffer), 'Expected saved document bytes to match upload');
+    console.log('✅ Test 9 Passed! Generic file uploaded without modifying its contents.');
 
     console.log('\n🎉 ALL LOCAL UPLOAD TESTS PASSED SUCCESSFULLY!');
   } finally {
