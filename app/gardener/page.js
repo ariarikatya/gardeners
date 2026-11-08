@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import PushButton from '@/components/PushButton';
 import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
@@ -1961,6 +1962,9 @@ export default function GardenerDashboard() {
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <Link href="/chats" className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg whitespace-nowrap">
+            💬 Чаты
+          </Link>
           <PushButton className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
           <a href="tel:88452650206" className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap">
             📞 Диспетчер

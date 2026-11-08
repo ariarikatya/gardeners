@@ -820,6 +820,9 @@ export default function LeaderDashboard() {
           <p className="text-[11px] sm:text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <Link href="/chats" className="bg-emerald-700 hover:bg-emerald-600 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap">
+            💬 Чаты
+          </Link>
           <Link href="/admin/users" className="bg-amber-600 hover:bg-amber-500 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap">
             👥 Пользователи
           </Link>

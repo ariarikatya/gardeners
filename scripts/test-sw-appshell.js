@@ -22,6 +22,10 @@ const swContent = fs.readFileSync(swPath, 'utf8');
 // Verify public/sw.js contains getCacheName function
 assert(swContent.includes('function getCacheName()'), 'public/sw.js must contain getCacheName() function');
 assert(swContent.includes('CACHE_NAME'), 'public/sw.js must contain CACHE_NAME');
+assert(
+  swContent.includes("if (url.pathname === '/api/chats' || url.pathname.startsWith('/api/chats/'))"),
+  'Chat API requests must bypass shared service-worker caching and retries'
+);
 console.log('✅ public/sw.js contains getCacheName() function.');
 
 // 3. Read generated lib/version.js
