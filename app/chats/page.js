@@ -264,26 +264,6 @@ export default function ChatsPage() {
   }, [loadChats]);
 
   useEffect(() => {
-    if (typeof navigator === 'undefined') return undefined;
-    const updateDeviceType = () => {
-      const ua = navigator.userAgent || '';
-      const matchesMobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-      const matchesMobileMedia = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
-      setIsMobileDevice(Boolean(matchesMobileUserAgent || matchesMobileMedia));
-    };
-
-    updateDeviceType();
-    const mediaQuery = window.matchMedia('(max-width: 767px)');
-    const handleChange = () => updateDeviceType();
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
-    mediaQuery.addListener(handleChange);
-    return () => mediaQuery.removeListener(handleChange);
-  }, []);
-
-  useEffect(() => {
     if (!activeChatId) return undefined;
     const timer = window.setInterval(async () => {
       if (document.visibilityState !== 'visible' || activeChatRef.current !== activeChatId) return;
