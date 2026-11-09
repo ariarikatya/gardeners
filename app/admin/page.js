@@ -2549,12 +2549,6 @@ export default function AdminDashboard() {
           >
             🔌 amoCRM
           </a>
-          <Link
-            href="/chats"
-            className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
-          >
-            💬 Чаты
-          </Link>
           <PushButton className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap" />
           <button
             onClick={async () => {
@@ -2637,6 +2631,12 @@ export default function AdminDashboard() {
         >
           📅 Календарь
         </button>
+        <Link
+          href="/chats"
+          className="px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+        >
+          💬 Чаты
+        </Link>
         <button
           onClick={() => setActiveTab('gardeners')}
           className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}

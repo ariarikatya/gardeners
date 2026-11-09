@@ -7,7 +7,7 @@ import apiFetch from '@/lib/apiFetch';
 import { convertHeicIfNeeded } from '@/lib/imageCompress';
 
 const ROLE_LABELS = {
-  ADMIN: 'Администратор',
+  ADMIN: 'Диспетчер',
   LEADER: 'Руководитель',
   GARDENER: 'Садовник',
 };
@@ -161,14 +161,10 @@ export default function ChatsPage() {
   const [groupName, setGroupName] = useState('');
   const [creatingChat, setCreatingChat] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
-  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [allAttachments, setAllAttachments] = useState([]);
-  const [isMobileDevice, setIsMobileDevice] = useState(false);
   const messagesContainerRef = useRef(null);
   const chatComposerRef = useRef(null);
   const bottomRef = useRef(null);
-  const galleryInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const activeChatRef = useRef('');
   const latestMessageRef = useRef('');
@@ -436,7 +432,6 @@ export default function ChatsPage() {
     }
     setError('');
     setSelectedFiles((current) => [...current, ...incoming].slice(0, 10));
-    setAttachmentPickerOpen(false);
   };
 
   const openAttachments = async () => {
@@ -457,17 +452,9 @@ export default function ChatsPage() {
   };
 
   const homePath = user?.role === 'ADMIN' ? '/admin' : user?.role === 'LEADER' ? '/leader' : '/gardener';
-  const attachmentMenuOptions = isMobileDevice
-    ? [
-        { label: 'Галерея', icon: '🖼️', onClick: () => { setAttachmentPickerOpen(false); galleryInputRef.current?.click(); } },
-        { label: 'Файлы', icon: '📎', onClick: () => { setAttachmentPickerOpen(false); fileInputRef.current?.click(); } },
-        { label: 'Камера', icon: '📷', onClick: () => { setAttachmentPickerOpen(false); cameraInputRef.current?.click(); } },
-      ]
-    : [{ label: 'Файлы', icon: '📎', onClick: () => { setAttachmentPickerOpen(false); fileInputRef.current?.click(); } }];
-
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-800">
-      <header className="bg-emerald-900 px-4 py-3 text-white shadow">
+    <main className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-800">
+      <header className="shrink-0 bg-emerald-900 px-4 py-3 text-white shadow">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <button type="button" onClick={() => activeChatId ? closeChat() : router.push(homePath)} className="rounded-lg bg-emerald-800 px-3 py-2 text-sm hover:bg-emerald-700">
@@ -485,7 +472,7 @@ export default function ChatsPage() {
       </header>
 
       {error && (
-        <div role="alert" className="mx-auto mt-3 max-w-7xl px-3">
+        <div role="alert" className="mx-auto mt-3 max-w-7xl shrink-0 px-3">
           <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
             <span>{error}</span>
             <button type="button" onClick={() => setError('')} aria-label="Закрыть сообщение об ошибке">×</button>
@@ -493,8 +480,8 @@ export default function ChatsPage() {
         </div>
       )}
 
-      <div className="mx-auto grid max-w-7xl gap-3 p-3 md:h-[calc(100vh-76px)] md:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className={`min-h-[65vh] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'hidden' : 'flex'}`}>
+      <div className="mx-auto grid min-h-0 w-full max-w-7xl flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className={`flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'hidden' : 'flex'}`}>
           <div className="border-b border-slate-200 px-4 py-3">
             <h2 className="font-semibold">Переписки</h2>
             <p className="mt-1 text-xs text-slate-500">Личные и групповые чаты</p>
@@ -534,7 +521,7 @@ export default function ChatsPage() {
           </div>
         </aside>
 
-        <section className={`min-h-[65vh] min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'flex' : 'hidden'} ${activeChatId ? 'h-[calc(100dvh-140px)] md:h-auto' : ''}`}>
+        <section className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'flex' : 'hidden'}`}>
           {!activeChat ? (
             <div className="hidden h-full flex-col items-center justify-center gap-2 p-6 text-center text-slate-500 md:flex">
               <span className="text-5xl">💬</span>
@@ -556,7 +543,7 @@ export default function ChatsPage() {
                 </button>
               </div>
 
-              <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-3">
+              <div className="shrink-0 border-b border-slate-100 bg-white p-3">
                 <label className="sr-only" htmlFor="chat-search">Поиск по переписке</label>
                 <input
                   id="chat-search"
@@ -626,7 +613,7 @@ export default function ChatsPage() {
                 <div ref={bottomRef} />
               </div>
 
-              <form ref={chatComposerRef} onSubmit={sendMessage} className="sticky bottom-0 border-t border-slate-200 bg-white p-3 sm:p-4">
+              <form ref={chatComposerRef} onSubmit={sendMessage} className="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4">
                 {selectedFiles.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {selectedFiles.map((file, index) => (
@@ -641,32 +628,13 @@ export default function ChatsPage() {
                   <div className="relative shrink-0">
                     <button
                       type="button"
-                      onClick={() => setAttachmentPickerOpen((open) => !open)}
+                      onClick={() => fileInputRef.current?.click()}
                       title="Добавить фото или файл"
                       aria-label="Добавить фото или файл"
-                      aria-haspopup="menu"
-                      aria-expanded={attachmentPickerOpen}
                       className="rounded-lg border border-slate-200 p-2 text-lg hover:bg-slate-50"
                     >📎</button>
-                    {attachmentPickerOpen && (
-                      <div role="menu" className="absolute bottom-full left-0 z-30 mb-2 min-w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                        {attachmentMenuOptions.map((option) => (
-                          <button
-                            key={option.label}
-                            type="button"
-                            role="menuitem"
-                            onClick={option.onClick}
-                            className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50"
-                          >
-                            <span aria-hidden="true">{option.icon}</span> {option.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
-                  <input ref={galleryInputRef} type="file" accept="image/*,video/*" multiple onChange={addFiles} className="hidden" />
-                  <input ref={fileInputRef} type="file" multiple onChange={addFiles} className="hidden" />
-                  <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" onChange={addFiles} className="hidden" />
+                  <input ref={fileInputRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx" multiple onChange={addFiles} className="hidden" />
                   <textarea
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}

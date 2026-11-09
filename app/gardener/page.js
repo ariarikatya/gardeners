@@ -1962,9 +1962,6 @@ export default function GardenerDashboard() {
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          <Link href="/chats" className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg whitespace-nowrap">
-            💬 Чаты
-          </Link>
           <PushButton className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
           <a href="tel:88452650206" className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap">
             📞 Диспетчер
@@ -2018,6 +2015,7 @@ export default function GardenerDashboard() {
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           <button type="button" onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
+          <Link href="/chats" className="px-3 py-2 rounded-lg border bg-white text-sm font-medium whitespace-nowrap text-slate-600 hover:bg-slate-50">💬 Чаты</Link>
           <button type="button" onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
             🔔 Аукцион
             {auctionOrders.length > 0 && (
