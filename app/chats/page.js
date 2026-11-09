@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import apiFetch from '@/lib/apiFetch';
+import { convertHeicIfNeeded } from '@/lib/imageCompress';
 
 const ROLE_LABELS = {
   ADMIN: 'Администратор',
@@ -40,18 +41,90 @@ function chatTitle(chat, userId) {
   return names.join(', ') || 'Новый чат';
 }
 
-function fileKind(mimeType = '') {
-  if (mimeType.startsWith('image/')) return 'Фото';
-  if (mimeType.startsWith('video/')) return 'Видео';
+function fileKind(mimeType = '', filename = '') {
+  if (mimeType.startsWith('image/') || isImageAttachment({ mimeType, filename })) return 'Фото';
+  if (mimeType.startsWith('video/') || isVideoAttachment({ mimeType, filename })) return 'Видео';
   return 'Файл';
+}
+
+function isImageAttachment(attachment) {
+  return attachment.mimeType?.startsWith('image/') || /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i.test(attachment.filename || '');
+}
+
+function isVideoAttachment(attachment) {
+  return attachment.mimeType?.startsWith('video/') || /\.(3gp|avi|m4v|mkv|mov|mp4|ogv|webm)$/i.test(attachment.filename || '');
+}
+
+function isHeicAttachment(attachment) {
+  return attachment.mimeType === 'image/heic'
+    || attachment.mimeType === 'image/heif'
+    || /\.(heic|heif)$/i.test(attachment.filename || '');
 }
 
 function AttachmentPreview({ attachment, compact = false }) {
   const className = compact ? 'h-24 w-24' : 'h-36 w-full';
-  if (attachment.mimeType?.startsWith('image/')) {
-    return <img src={attachment.url} alt={attachment.filename} className={`${className} rounded-lg object-cover bg-slate-100`} />;
+  const isImage = isImageAttachment(attachment);
+  const isHeic = isImage && isHeicAttachment(attachment);
+  const [imageUrl, setImageUrl] = useState(isHeic ? '' : attachment.url);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = '';
+
+    if (!isImage || !isHeic) {
+      setImageUrl(attachment.url);
+      setImageError(false);
+      return undefined;
+    }
+
+    setImageUrl('');
+    setImageError(false);
+    async function convertExistingHeic() {
+      const response = await fetch(attachment.url, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Не удалось загрузить фото');
+      const blob = await response.blob();
+      const sourceFile = new File([blob], attachment.filename, {
+        type: blob.type || attachment.mimeType || 'image/heic',
+      });
+      const convertedFile = await convertHeicIfNeeded(sourceFile);
+      if (convertedFile === sourceFile || !convertedFile.type.startsWith('image/')) {
+        throw new Error('Не удалось преобразовать фото');
+      }
+
+      objectUrl = URL.createObjectURL(convertedFile);
+      if (!cancelled) setImageUrl(objectUrl);
+    }
+
+    convertExistingHeic().catch(() => {
+      if (!cancelled) setImageError(true);
+    });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.filename, attachment.mimeType, attachment.url, isHeic, isImage]);
+
+  if (isImage) {
+    if (imageError) {
+      return <div role="status" className={`${className} flex items-center justify-center rounded-lg bg-slate-100 p-2 text-center text-xs text-slate-500`}>Не удалось загрузить фото</div>;
+    }
+    if (!imageUrl) {
+      return <div role="status" className={`${className} flex items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-500`}>Загрузка фото…</div>;
+    }
+    return (
+      <a href={imageUrl} target="_blank" rel="noreferrer" aria-label={`Открыть фото ${attachment.filename}`}>
+        <img
+          src={imageUrl}
+          alt={attachment.filename}
+          onError={() => setImageError(true)}
+          className={`${className} rounded-lg object-cover bg-slate-100`}
+        />
+      </a>
+    );
   }
-  if (attachment.mimeType?.startsWith('video/')) {
+  if (isVideoAttachment(attachment)) {
     return <video src={attachment.url} controls className={`${className} rounded-lg bg-black object-contain`} />;
   }
   return (
@@ -88,6 +161,7 @@ export default function ChatsPage() {
   const [groupName, setGroupName] = useState('');
   const [creatingChat, setCreatingChat] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [allAttachments, setAllAttachments] = useState([]);
   const messagesContainerRef = useRef(null);
   const bottomRef = useRef(null);
@@ -282,11 +356,16 @@ export default function ChatsPage() {
     if (!activeChatId || sending || (!draft.trim() && selectedFiles.length === 0)) return;
     const formData = new FormData();
     formData.set('body', draft.trim());
-    selectedFiles.forEach((file) => formData.append('files', file));
 
     try {
       setSending(true);
       setError('');
+      const uploadFiles = await Promise.all(selectedFiles.map((file) => convertHeicIfNeeded(file)));
+      const totalBytes = uploadFiles.reduce((sum, file) => sum + file.size, 0);
+      if (totalBytes > 25 * 1024 * 1024) {
+        throw new Error('Общий размер вложений не должен превышать 25 МБ');
+      }
+      uploadFiles.forEach((file) => formData.append('files', file));
       const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/messages`, {
         method: 'POST',
         body: formData,
@@ -306,16 +385,16 @@ export default function ChatsPage() {
 
   const addFiles = (event) => {
     const incoming = Array.from(event.target.files || []);
+    event.target.value = '';
     if (!incoming.length) return;
     const total = [...selectedFiles, ...incoming].reduce((sum, file) => sum + file.size, 0);
     if (total > 25 * 1024 * 1024) {
       setError('Общий размер вложений не должен превышать 25 МБ');
-      event.target.value = '';
       return;
     }
     setError('');
     setSelectedFiles((current) => [...current, ...incoming].slice(0, 10));
-    event.target.value = '';
+    setAttachmentPickerOpen(false);
   };
 
   const openAttachments = async () => {
@@ -395,7 +474,7 @@ export default function ChatsPage() {
                     <span className="mt-1 flex items-center justify-between gap-2">
                       <span className="truncate text-xs text-slate-500">
                         {chat.isGroup && latest?.sender ? `${latest.sender.name}: ` : ''}
-                        {latest?.body || (latest?.attachments?.length ? `📎 ${fileKind(latest.attachments[0].mimeType)}` : 'Нет сообщений')}
+                        {latest?.body || (latest?.attachments?.length ? `📎 ${fileKind(latest.attachments[0].mimeType, latest.attachments[0].filename)}` : 'Нет сообщений')}
                       </span>
                       {chat.unreadCount > 0 && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600" aria-label="Есть непрочитанные сообщения" />}
                     </span>
@@ -420,7 +499,7 @@ export default function ChatsPage() {
                   <p className="truncate text-xs text-slate-500">
                     {activeChat.isGroup
                       ? `Группа · ${activeChat.participants.length + 1} участника`
-                      : `${ROLE_LABELS[activeChat.participants[0]?.role] || 'Пользователь'} · ${activeChat.participants[0]?.name || ''}`}
+                      : ROLE_LABELS[activeChat.participants[0]?.role] || 'Пользователь'}
                   </p>
                 </button>
                 <button type="button" onClick={openAttachments} className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50">
@@ -460,16 +539,34 @@ export default function ChatsPage() {
                             {message.attachments.map((attachment) => (
                               <div key={attachment.id} className="min-w-0">
                                 <AttachmentPreview attachment={attachment} />
-                                {attachment.mimeType.startsWith('image/') || attachment.mimeType.startsWith('video/')
-                                  ? <a href={attachment.url} target="_blank" rel="noreferrer" className="mt-1 block max-w-64 truncate text-xs text-emerald-800 underline">{attachment.filename}</a>
-                                  : null}
+                                {isImageAttachment(attachment)
+                                  ? <p className="mt-1 max-w-64 truncate text-xs text-slate-500" title={attachment.filename}>{attachment.filename}</p>
+                                  : isVideoAttachment(attachment)
+                                    ? <a href={attachment.url} target="_blank" rel="noreferrer" className="mt-1 block max-w-64 truncate text-xs text-emerald-800 underline">{attachment.filename}</a>
+                                    : null}
                               </div>
                             ))}
                           </div>
                         )}
                         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
                           <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
-                          {own && <span className={message.readByAll ? 'font-bold text-sky-600' : ''} aria-label={message.readByAll ? 'Прочитано всеми' : 'Отправлено'}>{message.readByAll ? '✓✓' : '✓'}</span>}
+                          {own && (
+                            <svg
+                              aria-label={message.readByAll ? 'Прочитано всеми' : 'Отправлено'}
+                              role="img"
+                              viewBox="0 0 18 12"
+                              className={`h-3 w-[18px] ${message.readByAll ? 'text-sky-600' : 'text-slate-500'}`}
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              {message.readByAll
+                                ? <path d="m1 6 3.2 3.2L10.8 2M6.5 6l3.2 3.2L17.3 2" />
+                                : <path d="m3 6 3.2 3.2L12.8 2" />}
+                            </svg>
+                          )}
                         </div>
                       </div>
                     </article>
@@ -490,10 +587,23 @@ export default function ChatsPage() {
                   </div>
                 )}
                 <div className="flex items-end gap-2">
-                  <div className="flex shrink-0 gap-1">
-                    <button type="button" onClick={() => galleryInputRef.current?.click()} title="Выбрать фото или видео" className="rounded-lg border border-slate-200 p-2 text-lg hover:bg-slate-50">🖼️</button>
-                    <button type="button" onClick={() => fileInputRef.current?.click()} title="Выбрать файл" className="rounded-lg border border-slate-200 p-2 text-lg hover:bg-slate-50">📎</button>
-                    <button type="button" onClick={() => cameraInputRef.current?.click()} title="Сделать фото или видео" className="rounded-lg border border-slate-200 p-2 text-lg hover:bg-slate-50">📷</button>
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setAttachmentPickerOpen((open) => !open)}
+                      title="Добавить фото или файл"
+                      aria-label="Добавить фото или файл"
+                      aria-haspopup="menu"
+                      aria-expanded={attachmentPickerOpen}
+                      className="rounded-lg border border-slate-200 p-2 text-lg hover:bg-slate-50"
+                    >📎</button>
+                    {attachmentPickerOpen && (
+                      <div role="menu" className="absolute bottom-full left-0 z-30 mb-2 min-w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                        <button type="button" role="menuitem" onClick={() => { setAttachmentPickerOpen(false); galleryInputRef.current?.click(); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50">🖼️ Галерея</button>
+                        <button type="button" role="menuitem" onClick={() => { setAttachmentPickerOpen(false); fileInputRef.current?.click(); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50">📎 Файлы</button>
+                        <button type="button" role="menuitem" onClick={() => { setAttachmentPickerOpen(false); cameraInputRef.current?.click(); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50">📷 Камера</button>
+                      </div>
+                    )}
                   </div>
                   <input ref={galleryInputRef} type="file" accept="image/*,video/*" multiple onChange={addFiles} className="hidden" />
                   <input ref={fileInputRef} type="file" multiple onChange={addFiles} className="hidden" />
