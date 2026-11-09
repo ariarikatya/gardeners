@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import apiFetch from '@/lib/apiFetch';
 import { convertHeicIfNeeded } from '@/lib/imageCompress';
+import ChatMediaLightbox from '@/components/ChatMediaLightbox';
 
 const ROLE_LABELS = {
   ADMIN: 'Диспетчер',
@@ -61,7 +62,7 @@ function isHeicAttachment(attachment) {
     || /\.(heic|heif)$/i.test(attachment.filename || '');
 }
 
-function AttachmentPreview({ attachment, compact = false }) {
+function AttachmentPreview({ attachment, compact = false, onOpenMedia }) {
   const className = compact ? 'h-24 w-24' : 'h-36 w-full';
   const isImage = isImageAttachment(attachment);
   const isHeic = isImage && isHeicAttachment(attachment);
@@ -114,18 +115,22 @@ function AttachmentPreview({ attachment, compact = false }) {
       return <div role="status" className={`${className} flex items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-500`}>Загрузка фото…</div>;
     }
     return (
-      <a href={imageUrl} target="_blank" rel="noreferrer" aria-label={`Открыть фото ${attachment.filename}`}>
+      <button type="button" onClick={() => onOpenMedia(attachment)} aria-label={`Открыть фото ${attachment.filename}`} className="block overflow-hidden rounded-lg">
         <img
           src={imageUrl}
           alt={attachment.filename}
           onError={() => setImageError(true)}
           className={`${className} rounded-lg object-cover bg-slate-100`}
         />
-      </a>
+      </button>
     );
   }
   if (isVideoAttachment(attachment)) {
-    return <video src={attachment.url} controls className={`${className} rounded-lg bg-black object-contain`} />;
+    return (
+      <button type="button" onClick={() => onOpenMedia(attachment)} aria-label={`Открыть видео ${attachment.filename}`} className="block overflow-hidden rounded-lg">
+        <video src={attachment.url} preload="metadata" className={`${className} rounded-lg bg-black object-contain`} />
+      </button>
+    );
   }
   return (
     <a
@@ -162,8 +167,20 @@ export default function ChatsPage() {
   const [creatingChat, setCreatingChat] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [allAttachments, setAllAttachments] = useState([]);
+  const [mediaGallery, setMediaGallery] = useState(null);
+  const [mediaIndex, setMediaIndex] = useState(0);
+  const [participantsOpen, setParticipantsOpen] = useState(false);
+  const [chatParticipants, setChatParticipants] = useState([]);
+  const [participantsCanManage, setParticipantsCanManage] = useState(false);
+  const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [participantSearch, setParticipantSearch] = useState('');
+  const [participantUsers, setParticipantUsers] = useState([]);
+  const [editingMessageId, setEditingMessageId] = useState('');
+  const [editDraft, setEditDraft] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const messagesContainerRef = useRef(null);
   const chatComposerRef = useRef(null);
+  const messageInputRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const activeChatRef = useRef('');
@@ -274,15 +291,18 @@ export default function ChatsPage() {
         ]);
         if (activeChatRef.current !== activeChatId) return;
         const latest = (allMessages || nextMessages).at(-1);
+        const hasNewMessage = latest && latest.id !== latestMessageRef.current;
         const hasNewIncoming = latest && latest.id !== latestMessageRef.current && latest.senderId !== user?.id;
         const container = messagesContainerRef.current;
         const nearBottom = container && container.scrollHeight - container.scrollTop - container.clientHeight < 120;
         setMessages(nextMessages);
         if (latest?.id) latestMessageRef.current = latest.id;
-        if (hasNewIncoming) {
+        if (hasNewMessage) {
           await markRead(activeChatId);
           await loadChats();
-          if (nearBottom) requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
+          if (hasNewIncoming && nearBottom) {
+            requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
+          }
         }
       } catch (requestError) {
         setError(requestError.message || 'Не удалось обновить сообщения');
@@ -298,7 +318,7 @@ export default function ChatsPage() {
       const form = chatComposerRef.current;
       if (!form) return;
       const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
-      form.style.paddingBottom = `${Math.max(12, inset + 12)}px`;
+      form.style.paddingBottom = `calc(${Math.max(12, inset + 12)}px + env(safe-area-inset-bottom))`;
     };
 
     updateComposerInset();
@@ -327,6 +347,37 @@ export default function ChatsPage() {
     };
   }, [userSearch]);
 
+  useEffect(() => {
+    if (!participantsOpen || !showAddParticipant) return undefined;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await requestJson(`/api/chats/users?q=${encodeURIComponent(participantSearch.trim())}`);
+        if (!cancelled) setParticipantUsers(data.users || []);
+      } catch (requestError) {
+        if (!cancelled) setError(requestError.message || 'Не удалось найти пользователей');
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [participantSearch, participantsOpen, showAddParticipant]);
+
+  useEffect(() => {
+    if (!participantsOpen || !activeChatId) return undefined;
+    const timer = window.setInterval(async () => {
+      try {
+        const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/participants`);
+        setChatParticipants(data.participants || []);
+        setParticipantsCanManage(Boolean(data.canManage));
+      } catch (requestError) {
+        setError(requestError.message || 'Не удалось обновить статус участников');
+      }
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [activeChatId, participantsOpen]);
+
   const chooseChat = (chatId) => {
     setError('');
     setMessages([]);
@@ -334,6 +385,8 @@ export default function ChatsPage() {
     setActiveChatId(chatId);
     setMessageSearch('');
     setAttachmentsOpen(false);
+    setParticipantsOpen(false);
+    setEditingMessageId('');
   };
 
   const toggleSelectedUser = (id) => {
@@ -391,7 +444,9 @@ export default function ChatsPage() {
       setMessages((current) => [...current, data.message]);
       latestMessageRef.current = data.message.id;
       setDraft('');
+      if (messageInputRef.current) messageInputRef.current.style.height = '';
       setSelectedFiles([]);
+      await markRead(activeChatId);
       await loadChats();
       requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
     } catch (requestError) {
@@ -425,15 +480,120 @@ export default function ChatsPage() {
     }
   };
 
+  const openParticipants = async () => {
+    if (!activeChatId) return;
+    try {
+      const [data, userData] = await Promise.all([
+        requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/participants`),
+        requestJson('/api/chats/users'),
+      ]);
+      setChatParticipants(data.participants || []);
+      setParticipantUsers(userData.users || []);
+      setParticipantsCanManage(Boolean(data.canManage));
+      setParticipantsOpen(true);
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось загрузить участников');
+    }
+  };
+
+  const refreshParticipants = async () => {
+    const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/participants`);
+    setChatParticipants(data.participants || []);
+    setParticipantsCanManage(Boolean(data.canManage));
+    await loadChats();
+  };
+
+  const addParticipant = async (userId) => {
+    try {
+      await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/participants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      setShowAddParticipant(false);
+      setParticipantSearch('');
+      await refreshParticipants();
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось добавить участника');
+    }
+  };
+
+  const removeParticipant = async (participant) => {
+    if (!window.confirm(`Исключить ${participant.name} из группы?`)) return;
+    try {
+      await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/participants`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: participant.id }),
+      });
+      await refreshParticipants();
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось исключить участника');
+    }
+  };
+
+  const openMedia = async (attachment) => {
+    if (!activeChatId) return;
+    try {
+      const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/attachments`);
+      const media = (data.attachments || []).filter(
+        (item) => isImageAttachment(item) || isVideoAttachment(item)
+      );
+      const index = media.findIndex((item) => item.id === attachment.id);
+      setMediaGallery(media);
+      setMediaIndex(Math.max(index, 0));
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось открыть медиа');
+    }
+  };
+
+  const saveEditedMessage = async (event, message) => {
+    event.preventDefault();
+    if (savingEdit) return;
+    try {
+      setSavingEdit(true);
+      const data = await requestJson(`/api/chats/messages/${encodeURIComponent(message.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: editDraft }),
+      });
+      setMessages((current) => current.map((item) => (
+        item.id === message.id ? { ...item, ...data.message } : item
+      )));
+      setEditingMessageId('');
+      setEditDraft('');
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось изменить сообщение');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const deleteMessage = async (message) => {
+    if (!window.confirm('Удалить сообщение у всех участников?')) return;
+    try {
+      await requestJson(`/api/chats/messages/${encodeURIComponent(message.id)}`, { method: 'DELETE' });
+      setMessages((current) => current.map((item) => (
+        item.id === message.id
+          ? { ...item, body: null, isDeleted: true, attachments: [], canEdit: false, canDelete: false }
+          : item
+      )));
+      await loadChats();
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось удалить сообщение');
+    }
+  };
+
   const closeChat = () => {
     setActiveChatId('');
     setMessages([]);
+    setParticipantsOpen(false);
     window.history.replaceState(null, '', '/chats');
   };
 
   const homePath = user?.role === 'ADMIN' ? '/admin' : user?.role === 'LEADER' ? '/leader' : '/gardener';
   return (
-    <main className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-800">
+    <main className="chat-page flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-800">
       <header className="shrink-0 bg-emerald-900 px-4 py-3 text-white shadow">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -490,7 +650,9 @@ export default function ChatsPage() {
                     <span className="mt-1 flex items-center justify-between gap-2">
                       <span className="truncate text-xs text-slate-500">
                         {chat.isGroup && latest?.sender ? `${latest.sender.name}: ` : ''}
-                        {latest?.body || (latest?.attachments?.length ? `📎 ${fileKind(latest.attachments[0].mimeType, latest.attachments[0].filename)}` : 'Нет сообщений')}
+                        {latest?.isDeleted
+                          ? 'Сообщение удалено'
+                          : latest?.body || (latest?.attachments?.length ? `📎 ${fileKind(latest.attachments[0].mimeType, latest.attachments[0].filename)}` : 'Нет сообщений')}
                       </span>
                       {chat.unreadCount > 0 && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-600" aria-label="Есть непрочитанные сообщения" />}
                     </span>
@@ -510,7 +672,7 @@ export default function ChatsPage() {
           ) : (
             <>
               <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-3 sm:px-5">
-                <button type="button" onClick={openAttachments} aria-label={`Открыть все файлы и медиа чата ${chatTitle(activeChat, user?.id)}`} className="min-w-0 text-left">
+                <button type="button" onClick={openParticipants} aria-label={`Открыть участников чата ${chatTitle(activeChat, user?.id)}`} className="min-w-0 text-left">
                   <h2 className="truncate font-semibold">{chatTitle(activeChat, user?.id)}</h2>
                   <p className="truncate text-xs text-slate-500">
                     {activeChat.isGroup
@@ -531,7 +693,7 @@ export default function ChatsPage() {
                   value={messageSearch}
                   onChange={(event) => setMessageSearch(event.target.value)}
                   placeholder="Поиск по сообщениям…"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                 />
               </div>
 
@@ -550,12 +712,38 @@ export default function ChatsPage() {
                           <span className="font-semibold" style={{ color: '#7a7a7a' }}>{message.sender.name}</span>
                           <span className="opacity-80">{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
                         </div>
-                        {message.body && <p className="whitespace-pre-wrap break-words text-sm">{message.body}</p>}
-                        {message.attachments?.length > 0 && (
+                        {editingMessageId === message.id ? (
+                          <form onSubmit={(event) => saveEditedMessage(event, message)} className="space-y-2">
+                            <textarea
+                              autoFocus
+                              value={editDraft}
+                              onChange={(event) => setEditDraft(event.target.value)}
+                              maxLength={4000}
+                              rows={3}
+                              className="box-border min-h-11 w-full resize-none overflow-y-auto rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base leading-[1.5] text-slate-900 outline-none focus:border-emerald-600"
+                              aria-label="Редактировать сообщение"
+                            />
+                            <div className="flex justify-end gap-2">
+                              <button type="button" onClick={() => { setEditingMessageId(''); setEditDraft(''); }} className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-white">Отмена</button>
+                              <button type="submit" disabled={savingEdit} className="rounded bg-emerald-700 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">{savingEdit ? 'Сохранение…' : 'Сохранить'}</button>
+                            </div>
+                          </form>
+                        ) : message.isDeleted ? (
+                          <p className="text-sm italic text-slate-500">Сообщение удалено</p>
+                        ) : message.body && (
+                          <p className="whitespace-pre-wrap break-words text-sm">
+                            {message.body}
+                            {message.updatedAt
+                              && new Date(message.updatedAt).getTime() - new Date(message.createdAt).getTime() > 1000
+                              ? <span className="ml-1 text-xs text-slate-500">(изменено)</span>
+                              : null}
+                          </p>
+                        )}
+                        {!message.isDeleted && message.attachments?.length > 0 && (
                           <div className="mt-2 grid gap-2 sm:grid-cols-2">
                             {message.attachments.map((attachment) => (
                               <div key={attachment.id} className="min-w-0">
-                                <AttachmentPreview attachment={attachment} />
+                                <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
                                 {isImageAttachment(attachment)
                                   ? <p className="mt-1 max-w-64 truncate text-xs text-slate-500" title={attachment.filename}>{attachment.filename}</p>
                                   : isVideoAttachment(attachment)
@@ -567,6 +755,32 @@ export default function ChatsPage() {
                         )}
                         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
                           <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
+                          {own && message.canEdit && editingMessageId !== message.id && (
+                            <button
+                              type="button"
+                              onClick={() => { setEditingMessageId(message.id); setEditDraft(message.body || ''); }}
+                              aria-label="Редактировать сообщение"
+                              title="Редактировать"
+                              className="ml-1 rounded p-1 text-slate-500 hover:bg-white hover:text-emerald-800"
+                            >
+                              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="m13.5 3.5 3 3M4 16l3.8-.8L17 6a2.1 2.1 0 0 0-3-3L4.8 12.2 4 16Z" />
+                              </svg>
+                            </button>
+                          )}
+                          {own && message.canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => deleteMessage(message)}
+                              aria-label="Удалить сообщение"
+                              title="Удалить"
+                              className="rounded p-1 text-slate-500 hover:bg-white hover:text-rose-700"
+                            >
+                              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
+                              </svg>
+                            </button>
+                          )}
                           {own && (
                             <svg
                               aria-label={message.readByAll ? 'Прочитано всеми' : 'Отправлено'}
@@ -593,7 +807,7 @@ export default function ChatsPage() {
                 <div ref={bottomRef} />
               </div>
 
-              <form ref={chatComposerRef} onSubmit={sendMessage} className="shrink-0 border-t border-slate-200 bg-white p-3 sm:p-4">
+              <form ref={chatComposerRef} onSubmit={sendMessage} className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-4">
                 {selectedFiles.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {selectedFiles.map((file, index) => (
@@ -616,8 +830,13 @@ export default function ChatsPage() {
                   </div>
                   <input ref={fileInputRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx" multiple onChange={addFiles} className="hidden" />
                   <textarea
+                    ref={messageInputRef}
                     value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
+                    onChange={(event) => {
+                      setDraft(event.target.value);
+                      event.currentTarget.style.height = 'auto';
+                      event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 128)}px`;
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
@@ -627,7 +846,7 @@ export default function ChatsPage() {
                     rows={1}
                     maxLength={4000}
                     placeholder="Написать сообщение…"
-                    className="max-h-32 min-h-10 flex-1 resize-y rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    className="box-border max-h-32 min-h-11 flex-1 resize-none overflow-y-auto rounded-xl border border-slate-300 px-3 py-2 text-base leading-[1.5] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                   />
                   <button disabled={sending || (!draft.trim() && selectedFiles.length === 0)} type="submit" className="min-h-10 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
                     {sending ? '…' : 'Отправить'}
@@ -676,6 +895,92 @@ export default function ChatsPage() {
         </div>
       )}
 
+      {participantsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-labelledby="chat-participants-title" onClick={() => setParticipantsOpen(false)}>
+          <div className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h2 id="chat-participants-title" className="font-bold">Участники чата</h2>
+                <p className="text-xs text-slate-500">{chatParticipants.length} участников</p>
+              </div>
+              <button type="button" onClick={() => setParticipantsOpen(false)} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
+            </div>
+            <div className="overflow-y-auto p-3">
+              <div className="divide-y divide-slate-100">
+                {chatParticipants.map((participant) => (
+                  <div key={participant.id} className="flex items-center gap-3 px-2 py-3">
+                    <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-800">
+                      {(participant.name || '?').trim().charAt(0).toUpperCase()}
+                      <span
+                        className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${participant.isOnline ? 'bg-green-500' : 'bg-slate-300'}`}
+                        aria-label={participant.isOnline ? 'Онлайн' : 'Не в сети'}
+                        title={participant.isOnline ? 'Онлайн' : 'Не в сети'}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">
+                        {participant.name}{participant.id === user?.id ? ' (вы)' : ''}
+                      </span>
+                      <span className="block text-xs text-slate-500">{ROLE_LABELS[participant.role] || participant.role}</span>
+                    </span>
+                    {participantsCanManage && participant.id !== user?.id && (
+                      <button
+                        type="button"
+                        onClick={() => removeParticipant(participant)}
+                        aria-label={`Исключить ${participant.name}`}
+                        title="Исключить из группы"
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-rose-700 hover:bg-rose-50"
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {participantsCanManage && (
+                <div className="mt-3 border-t border-slate-200 pt-3">
+                  {!showAddParticipant ? (
+                    <button type="button" onClick={() => setShowAddParticipant(true)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50">
+                      <span className="text-xl leading-none">+</span> Добавить участника
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <input
+                        value={participantSearch}
+                        onChange={(event) => setParticipantSearch(event.target.value)}
+                        placeholder="Найти пользователя…"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-base outline-none focus:border-emerald-500"
+                      />
+                      <div className="max-h-48 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+                        {participantUsers
+                          .filter((candidate) => (
+                            !chatParticipants.some((participant) => participant.id === candidate.id)
+                            && candidate.name.toLowerCase().includes(participantSearch.trim().toLowerCase())
+                          ))
+                          .map((candidate) => (
+                            <button key={candidate.id} type="button" onClick={() => addParticipant(candidate.id)} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-emerald-50">
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold">{candidate.name}</span>
+                                <span className="block text-xs text-slate-500">{ROLE_LABELS[candidate.role] || candidate.role}</span>
+                              </span>
+                              <span aria-hidden="true" className="text-xl font-semibold text-emerald-700">+</span>
+                            </button>
+                          ))}
+                        {participantUsers.filter((candidate) => (
+                          !chatParticipants.some((participant) => participant.id === candidate.id)
+                          && candidate.name.toLowerCase().includes(participantSearch.trim().toLowerCase())
+                        )).length === 0 && (
+                          <p className="p-3 text-sm text-slate-500">Подходящих пользователей нет</p>
+                        )}
+                      </div>
+                      <button type="button" onClick={() => { setShowAddParticipant(false); setParticipantSearch(''); }} className="rounded px-2 py-1 text-sm text-slate-600 hover:bg-slate-100">Отмена</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {attachmentsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-labelledby="chat-files-title">
           <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
@@ -689,7 +994,7 @@ export default function ChatsPage() {
             <div className="grid grid-cols-1 gap-3 overflow-y-auto p-4 sm:grid-cols-2 lg:grid-cols-3">
               {allAttachments.length === 0 ? <p className="col-span-full py-8 text-center text-sm text-slate-500">Вложений пока нет</p> : allAttachments.map((attachment) => (
                 <article key={attachment.id} className="min-w-0 space-y-2 rounded-xl border border-slate-200 p-2">
-                  <AttachmentPreview attachment={attachment} />
+                  <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-semibold" title={attachment.filename}>{attachment.filename}</p>
                     <p className="text-[11px] text-slate-500">{fileKind(attachment.mimeType)} · {attachment.message.sender.name} · {formatDate(attachment.createdAt)}</p>
@@ -699,6 +1004,14 @@ export default function ChatsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {mediaGallery?.length > 0 && (
+        <ChatMediaLightbox
+          items={mediaGallery}
+          initialIndex={mediaIndex}
+          onClose={() => setMediaGallery(null)}
+        />
       )}
 
       <footer className="px-4 pb-4 text-center text-[11px] text-slate-400 md:hidden">

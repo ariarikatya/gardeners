@@ -42,7 +42,10 @@ export async function GET(req, { params }) {
     const attachment = await prisma.chatAttachment.findFirst({
       where: {
         id: params.attachmentId,
-        message: { chat: { participants: { some: { userId: auth.user.id } } } },
+        message: {
+          isDeleted: false,
+          chat: { participants: { some: { userId: auth.user.id } } },
+        },
       },
       select: { id: true, filename: true, mimeType: true, storagePath: true, messageId: true },
     });

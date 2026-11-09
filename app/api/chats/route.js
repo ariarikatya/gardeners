@@ -32,6 +32,7 @@ export async function GET(req) {
       const unreadCount = await prisma.chatMessage.count({
         where: {
           chatId: chat.id,
+          isDeleted: false,
           senderId: { not: auth.user.id },
           ...(currentParticipant?.lastReadAt ? { createdAt: { gt: currentParticipant.lastReadAt } } : {}),
         },
