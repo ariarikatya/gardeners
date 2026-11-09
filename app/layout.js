@@ -1,6 +1,7 @@
 import './globals.css';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
 import BuildVersionWatcher from '@/components/BuildVersionWatcher';
+import SessionActivityTracker from '@/components/SessionActivityTracker';
 import { CLIENT_VERSION } from '@/lib/pwa-env';
 
 export const metadata = {
@@ -27,6 +28,7 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         {children}
+        <SessionActivityTracker />
         <BuildVersionWatcher />
         <ServiceWorkerRegister />
       </body>

@@ -16,10 +16,20 @@ export async function GET(req) {
     return NextResponse.json({ error: 'Невалидный токен' }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: payload.userId },
-    select: { id: true, phone: true, name: true, role: true, gardenerId: true, notifPermission: true, notificationsEnabled: true }
-  });
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, phone: true, name: true, role: true, gardenerId: true, notifPermission: true, notificationsEnabled: true }
+    });
+    if (!user) return NextResponse.json({ user: null });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastActive: new Date() },
+    });
 
-  return NextResponse.json({ user });
+    return NextResponse.json({ user });
+  } catch (error) {
+    console.error('Ошибка GET /api/auth/me:', error);
+    return NextResponse.json({ error: 'Не удалось получить пользователя' }, { status: 500 });
+  }
 }

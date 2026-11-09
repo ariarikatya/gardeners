@@ -14,9 +14,10 @@ export async function GET(req, { params }) {
     if (!membership) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
 
     const attachments = await prisma.chatAttachment.findMany({
-      where: { message: { chatId: params.chatId } },
+      where: { message: { chatId: params.chatId, isDeleted: false } },
       select: {
         id: true,
+        messageId: true,
         filename: true,
         mimeType: true,
         size: true,

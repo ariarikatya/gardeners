@@ -34,24 +34,47 @@ export async function GET(req, { params }) {
         attachments: {
           select: { id: true, filename: true, mimeType: true, size: true },
         },
+        readReceipts: { select: { userId: true, readAt: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 200,
     });
 
     const participants = await prisma.chatParticipant.findMany({
-      where: { chatId: params.chatId, userId: { not: auth.user.id } },
-      select: { lastReadAt: true },
+      where: { chatId: params.chatId },
+      select: { userId: true },
     });
-    const result = messages.reverse().map((message) => ({
-      ...message,
-      attachments: message.attachments.map((attachment) => ({
-        ...attachment,
-        url: `/api/chats/attachments/${attachment.id}`,
-      })),
-      readByAll: participants.length > 0
-        && participants.every((participant) => participant.lastReadAt && participant.lastReadAt >= message.createdAt),
-    }));
+    const now = Date.now();
+    const participantIds = participants.map(({ userId }) => userId);
+    const result = messages.reverse().map((message) => {
+      const recipients = participantIds.filter((userId) => userId !== message.senderId);
+      const receipts = message.readReceipts.filter((receipt) => recipients.includes(receipt.userId));
+      const readUserIds = new Set(receipts.map(({ userId }) => userId));
+      const hasRead = receipts.length > 0;
+      const readByAll = recipients.length > 0 && recipients.every((userId) => readUserIds.has(userId));
+      const latestReadAt = receipts.reduce(
+        (latest, receipt) => Math.max(latest, new Date(receipt.readAt).getTime()),
+        0
+      );
+      const own = message.senderId === auth.user.id;
+
+      return {
+        ...message,
+        body: message.isDeleted ? null : message.body,
+        attachments: message.isDeleted ? [] : message.attachments.map((attachment) => ({
+          ...attachment,
+          url: `/api/chats/attachments/${attachment.id}`,
+        })),
+        readReceipts: undefined,
+        readByAll,
+        canEdit: own && !message.isDeleted && (
+          !hasRead || (
+            readByAll && now >= latestReadAt && now - latestReadAt < 15 * 60 * 1000
+          )
+        ),
+        canDelete: own && !message.isDeleted && !hasRead,
+      };
+    });
 
     return NextResponse.json({ messages: result, lastReadAt: membership.lastReadAt });
   } catch (error) {
@@ -172,6 +195,8 @@ export async function POST(req, { params }) {
           url: `/api/chats/attachments/${attachment.id}`,
         })),
         readByAll: false,
+        canEdit: true,
+        canDelete: true,
       },
     }, { status: 201 });
   } catch (error) {

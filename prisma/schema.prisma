@@ -22,10 +22,12 @@ model User {
   vkId                 String?   // VK user id / peer id for notifications
   notifPermission      String?
   notificationsEnabled Boolean   @default(false)
+  lastActive           DateTime?
   gardenerId           String?   @unique
   gardener             Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   chatParticipants     ChatParticipant[]
   sentChatMessages    ChatMessage[] @relation("ChatMessageSender")
+  chatMessageReads    ChatMessageRead[]
 }
 
 model Chat {
@@ -60,12 +62,29 @@ model ChatMessage {
   senderId    String
   body        String?
   createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @default(now()) @updatedAt
+  isDeleted   Boolean          @default(false)
   chat        Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender      User             @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   attachments ChatAttachment[]
+  readReceipts ChatMessageRead[]
 
   @@index([chatId, createdAt])
   @@index([senderId])
+  @@index([isDeleted])
+}
+
+model ChatMessageRead {
+  id        String      @id @default(uuid())
+  messageId String
+  userId    String
+  readAt    DateTime    @default(now())
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId, readAt])
+  @@index([userId, readAt])
 }
 
 model ChatAttachment {
