@@ -163,7 +163,9 @@ export default function ChatsPage() {
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [allAttachments, setAllAttachments] = useState([]);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
   const messagesContainerRef = useRef(null);
+  const chatComposerRef = useRef(null);
   const bottomRef = useRef(null);
   const galleryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -266,6 +268,26 @@ export default function ChatsPage() {
   }, [loadChats]);
 
   useEffect(() => {
+    if (typeof navigator === 'undefined') return undefined;
+    const updateDeviceType = () => {
+      const ua = navigator.userAgent || '';
+      const matchesMobileUserAgent = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      const matchesMobileMedia = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+      setIsMobileDevice(Boolean(matchesMobileUserAgent || matchesMobileMedia));
+    };
+
+    updateDeviceType();
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const handleChange = () => updateDeviceType();
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    }
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
+  useEffect(() => {
     if (!activeChatId) return undefined;
     const timer = window.setInterval(async () => {
       if (document.visibilityState !== 'visible' || activeChatRef.current !== activeChatId) return;
@@ -292,6 +314,26 @@ export default function ChatsPage() {
     }, 5000);
     return () => window.clearInterval(timer);
   }, [activeChatId, loadChats, loadMessages, markRead, messageSearch, user?.id]);
+
+  useEffect(() => {
+    if (!activeChatId || typeof window === 'undefined' || !('visualViewport' in window)) return undefined;
+    const viewport = window.visualViewport;
+    const updateComposerInset = () => {
+      const form = chatComposerRef.current;
+      if (!form) return;
+      const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      form.style.paddingBottom = `${Math.max(12, inset + 12)}px`;
+    };
+
+    updateComposerInset();
+    viewport.addEventListener('resize', updateComposerInset);
+    viewport.addEventListener('scroll', updateComposerInset);
+    return () => {
+      viewport.removeEventListener('resize', updateComposerInset);
+      viewport.removeEventListener('scroll', updateComposerInset);
+      if (chatComposerRef.current) chatComposerRef.current.style.paddingBottom = '';
+    };
+  }, [activeChatId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -415,6 +457,13 @@ export default function ChatsPage() {
   };
 
   const homePath = user?.role === 'ADMIN' ? '/admin' : user?.role === 'LEADER' ? '/leader' : '/gardener';
+  const attachmentMenuOptions = isMobileDevice
+    ? [
+        { label: 'Галерея', icon: '🖼️', onClick: () => { setAttachmentPickerOpen(false); galleryInputRef.current?.click(); } },
+        { label: 'Файлы', icon: '📎', onClick: () => { setAttachmentPickerOpen(false); fileInputRef.current?.click(); } },
+        { label: 'Камера', icon: '📷', onClick: () => { setAttachmentPickerOpen(false); cameraInputRef.current?.click(); } },
+      ]
+    : [{ label: 'Файлы', icon: '📎', onClick: () => { setAttachmentPickerOpen(false); fileInputRef.current?.click(); } }];
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-800">
@@ -485,7 +534,7 @@ export default function ChatsPage() {
           </div>
         </aside>
 
-        <section className={`min-h-[65vh] min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'flex' : 'hidden'}`}>
+        <section className={`min-h-[65vh] min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'flex' : 'hidden'} ${activeChatId ? 'h-[calc(100dvh-140px)] md:h-auto' : ''}`}>
           {!activeChat ? (
             <div className="hidden h-full flex-col items-center justify-center gap-2 p-6 text-center text-slate-500 md:flex">
               <span className="text-5xl">💬</span>
@@ -507,7 +556,7 @@ export default function ChatsPage() {
                 </button>
               </div>
 
-              <div className="border-b border-slate-100 p-3">
+              <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-3">
                 <label className="sr-only" htmlFor="chat-search">Поиск по переписке</label>
                 <input
                   id="chat-search"
@@ -519,7 +568,8 @@ export default function ChatsPage() {
                 />
               </div>
 
-              <div ref={messagesContainerRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3 sm:p-5">
+              <div ref={messagesContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50 p-3 sm:p-5">
+                <div className="space-y-3">
                 {loadingMessages && messages.length === 0 ? <p className="text-center text-sm text-slate-500">Загрузка сообщений…</p> : null}
                 {!loadingMessages && messages.length === 0 ? (
                   <p className="py-12 text-center text-sm text-slate-500">{messageSearch ? 'Ничего не найдено' : 'Сообщений пока нет. Напишите первым!'}</p>
@@ -529,9 +579,9 @@ export default function ChatsPage() {
                   return (
                     <article key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[88%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] ${own ? 'rounded-br-sm bg-emerald-100 text-emerald-950' : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800'}`}>
-                        <div className="mb-1 flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-slate-500">
-                          <span className="font-semibold text-slate-700">{message.sender.name}</span>
-                          <span>{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
+                        <div className="mb-2 flex flex-wrap items-baseline gap-x-1.5 text-[10px] leading-4" style={{ color: '#888' }}>
+                          <span className="font-semibold" style={{ color: '#7a7a7a' }}>{message.sender.name}</span>
+                          <span className="opacity-80">{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
                         </div>
                         {message.body && <p className="whitespace-pre-wrap break-words text-sm">{message.body}</p>}
                         {message.attachments?.length > 0 && (
@@ -572,10 +622,11 @@ export default function ChatsPage() {
                     </article>
                   );
                 })}
+                </div>
                 <div ref={bottomRef} />
               </div>
 
-              <form onSubmit={sendMessage} className="border-t border-slate-200 bg-white p-3 sm:p-4">
+              <form ref={chatComposerRef} onSubmit={sendMessage} className="sticky bottom-0 border-t border-slate-200 bg-white p-3 sm:p-4">
                 {selectedFiles.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {selectedFiles.map((file, index) => (
@@ -599,9 +650,17 @@ export default function ChatsPage() {
                     >📎</button>
                     {attachmentPickerOpen && (
                       <div role="menu" className="absolute bottom-full left-0 z-30 mb-2 min-w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                        <button type="button" role="menuitem" onClick={() => { setAttachmentPickerOpen(false); galleryInputRef.current?.click(); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50">🖼️ Галерея</button>
-                        <button type="button" role="menuitem" onClick={() => { setAttachmentPickerOpen(false); fileInputRef.current?.click(); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50">📎 Файлы</button>
-                        <button type="button" role="menuitem" onClick={() => { setAttachmentPickerOpen(false); cameraInputRef.current?.click(); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50">📷 Камера</button>
+                        {attachmentMenuOptions.map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            role="menuitem"
+                            onClick={option.onClick}
+                            className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-emerald-50"
+                          >
+                            <span aria-hidden="true">{option.icon}</span> {option.label}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>

@@ -139,11 +139,22 @@ export async function POST(req, { params }) {
     });
     if (recipients.length) {
       const chat = await prisma.chat.findUnique({ where: { id: params.chatId }, select: { name: true, isGroup: true } });
+      const senderName = auth.user.name || 'Пользователь';
+      const chatName = chat?.name || 'чат';
+      const trimmedBody = body.replace(/\s+/g, ' ').trim();
+      const previewText = trimmedBody ? trimmedBody.slice(0, 50) : '';
+      const pushBody = trimmedBody
+        ? `Новое сообщение от ${senderName}: ${previewText}${trimmedBody.length > 50 ? '…' : ''}`
+        : (uploaded.length ? `Новое фото в чате ${chatName}` : `Новое сообщение от ${senderName}`);
+      const pushTitle = uploaded.length && !trimmedBody
+        ? `Новое фото в чате ${chatName}`
+        : `Новое сообщение от ${senderName}`;
+
       const pushResult = await sendToUsers(
         recipients.map(({ userId }) => userId),
         {
-          title: chat?.isGroup ? (chat.name || 'Новое сообщение в групповом чате') : auth.user.name,
-          body: body || (uploaded.length ? 'Отправил(а) вложение' : 'Новое сообщение'),
+          title: pushTitle,
+          body: pushBody,
           tag: `chat-${params.chatId}`,
           url: `/chats?chat=${encodeURIComponent(params.chatId)}`,
         }

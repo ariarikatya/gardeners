@@ -44,7 +44,7 @@ export async function GET(req, { params }) {
         id: params.attachmentId,
         message: { chat: { participants: { some: { userId: auth.user.id } } } },
       },
-      select: { filename: true, mimeType: true, storagePath: true },
+      select: { id: true, filename: true, mimeType: true, storagePath: true, messageId: true },
     });
     if (!attachment) return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
 
@@ -52,14 +52,21 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: 'Файл недоступен' }, { status: 404 });
     }
 
-    const segments = attachment.storagePath.split('/');
-    if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.includes('\\'))) {
+    const uploadsDir = path.resolve(getUploadsDir());
+    const normalizedStoragePath = attachment.storagePath.replace(/\\/g, '/').trim();
+    const segments = normalizedStoragePath.split('/').filter(Boolean);
+    if (segments.some((segment) => segment === '.' || segment === '..')) {
       return NextResponse.json({ error: 'Файл недоступен' }, { status: 404 });
     }
 
-    const uploadsDir = path.resolve(getUploadsDir());
-    const filePath = path.resolve(uploadsDir, ...segments);
-    if (!filePath.startsWith(`${uploadsDir}${path.sep}`) || !fs.existsSync(filePath)) {
+    const filePath = path.isAbsolute(normalizedStoragePath)
+      ? path.resolve(normalizedStoragePath)
+      : path.resolve(uploadsDir, normalizedStoragePath);
+
+    if (!filePath.startsWith(`${uploadsDir}${path.sep}`) && filePath !== uploadsDir) {
+      return NextResponse.json({ error: 'Файл недоступен' }, { status: 404 });
+    }
+    if (!fs.existsSync(filePath)) {
       return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
     }
 
@@ -68,10 +75,10 @@ export async function GET(req, { params }) {
 
     const mimeType = getAttachmentMimeType(attachment);
     const isMedia = mimeType.startsWith('image/') || mimeType.startsWith('video/');
-    const safeName = attachment.filename.replace(/[\r\n"]/g, '_');
+    const fallbackName = String(attachment.filename || 'download').replace(/[\r\n"]/g, '_').replace(/[^\x20-\x7E]/g, '_');
     const headers = {
       'Content-Type': mimeType,
-      'Content-Disposition': `${isMedia ? 'inline' : 'attachment'}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+      'Content-Disposition': `${isMedia ? 'inline' : 'attachment'}; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(attachment.filename || 'download')}`,
       'X-Content-Type-Options': 'nosniff',
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'private, no-store',
