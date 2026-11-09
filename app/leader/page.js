@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
+import PushButton from '@/components/PushButton';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
 import apiFetch from '@/lib/apiFetch';
@@ -820,9 +821,7 @@ export default function LeaderDashboard() {
           <p className="text-[11px] sm:text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          <Link href="/chats" className="bg-emerald-700 hover:bg-emerald-600 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap">
-            💬 Чаты
-          </Link>
+          <PushButton className="bg-emerald-700 hover:bg-emerald-600 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap" />
           <Link href="/admin/users" className="bg-amber-600 hover:bg-amber-500 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap">
             👥 Пользователи
           </Link>
@@ -901,16 +900,19 @@ export default function LeaderDashboard() {
       )}
 
       <main className="max-w-7xl mx-auto px-2 sm:px-3 py-3 space-y-3">
-        <div className="flex gap-2 border-b border-slate-200 pb-2">
+        <div className="flex gap-2 overflow-x-auto border-b border-slate-200 pb-2">
           <button
             onClick={() => setLeaderTab('finance')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'finance' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
+            className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'finance' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
           >
             💰 Финансы и Заказы
           </button>
+          <Link href="/chats" className="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-all hover:bg-slate-50">
+            💬 Чаты
+          </Link>
           <button
             onClick={() => setLeaderTab('catalog')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'catalog' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
+            className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'catalog' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
           >
             📦 Справочная база и назначение
           </button>
