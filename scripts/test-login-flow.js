@@ -35,6 +35,37 @@ async function runLoginFlowTests() {
   const loginPagePath = path.resolve('app/login/page.js');
   const loginPageCode = fs.readFileSync(loginPagePath, 'utf8');
 
+  // Test 0: Existing manager sessions are accepted only for the same verified user.
+  const authSessionPath = path.resolve('lib/authSession.js');
+  let authSessionCode = fs.readFileSync(authSessionPath, 'utf8');
+  authSessionCode = authSessionCode
+    .replace(/import\s*{\s*verifyToken\s*}\s*from\s*['"]@\/lib\/jwt['"];?/, '')
+    .replace('export async function hasActiveSessionForUser', 'async function hasActiveSessionForUser');
+  const sessionPayloads = {
+    same: { userId: 'user-1', phone: '79991234567', role: 'ADMIN' },
+    otherUser: { userId: 'user-2', phone: '79991234567', role: 'ADMIN' },
+    otherPhone: { userId: 'user-1', phone: '79990000000', role: 'ADMIN' },
+    otherRole: { userId: 'user-1', phone: '79991234567', role: 'LEADER' },
+  };
+  const verifyMockToken = async (token) => sessionPayloads[token] || null;
+  const hasActiveSessionForUser = new Function(
+    'verifyToken',
+    `${authSessionCode}\nreturn hasActiveSessionForUser;`
+  )(verifyMockToken);
+  const managerUser = { id: 'user-1', phone: '79991234567', role: 'ADMIN' };
+  const requestWithCookie = (value) => ({ cookies: { get: () => value ? { value } : undefined } });
+  assert(await hasActiveSessionForUser(requestWithCookie('same'), managerUser), 'same valid session must be accepted');
+  assert(!(await hasActiveSessionForUser(requestWithCookie('otherUser'), managerUser)), 'a different user session must be rejected');
+  assert(!(await hasActiveSessionForUser(requestWithCookie('otherPhone'), managerUser)), 'a different phone session must be rejected');
+  assert(!(await hasActiveSessionForUser(requestWithCookie('otherRole'), managerUser)), 'a different role session must be rejected');
+  assert(!(await hasActiveSessionForUser(requestWithCookie('expired'), managerUser)), 'an invalid or expired session must be rejected');
+  assert(!(await hasActiveSessionForUser(requestWithCookie('same'), { ...managerUser, id: 'user-2' })), 'the cookie must match the requested account');
+  const authLoginCode = fs.readFileSync(path.resolve('app/api/auth/login/route.js'), 'utf8');
+  const authAutoLoginCode = fs.readFileSync(path.resolve('app/api/auth/auto-login/route.js'), 'utf8');
+  assert(authLoginCode.includes('hasActiveSessionForUser(req, user)'), 'manual login must check for the same active session');
+  assert(authAutoLoginCode.includes('hasActiveSessionForUser(req, user)'), 'saved-phone auto-login must check for the same active session');
+  console.log('✅ Existing manager session checks verified.');
+
   // Test 1: Code inspection for onboarding confirmation card wording
   console.log('Test 1: Verifying onboarding card wording in app/login/page.js...');
   assert(loginPageCode.includes('Вы входите с телефона'), 'login/page.js must contain "Вы входите с телефона" confirmation text');

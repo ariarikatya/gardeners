@@ -2532,6 +2532,90 @@ export default function AdminDashboard() {
     return `/api/admin/export?start=${startStr}&end=${endStr}`;
   };
 
+  const adminSettingsMenu = (
+    <SettingsMenu>
+      <section className="space-y-2 border-b border-slate-200 pb-3">
+        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Разделы</h2>
+        <div className="grid grid-cols-1 gap-1">
+          {[
+            ['gardeners', '🧑‍🌾 Садовники'],
+            ['services', '🌿 Услуги'],
+            ['auction', '🔔 Аукцион'],
+          ].map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              data-dismiss-settings
+              onClick={() => setActiveTab(tab)}
+              className={`w-full rounded-lg px-3 py-2 text-left text-sm ${activeTab === tab ? 'bg-emerald-100 font-semibold text-emerald-800' : 'hover:bg-slate-100'}`}
+            >
+              {label}{tab === 'auction' && auctionOrders.filter(o => o.status === 'Аукцион').length > 0 ? ` (${auctionOrders.filter(o => o.status === 'Аукцион').length})` : ''}
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="space-y-2">
+        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+        <div className="flex flex-wrap gap-2">
+          <a href="/admin/amo-connect" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">amoCRM</a>
+          <PushButton className="flex max-w-full items-center gap-1.5 whitespace-normal break-words rounded-lg bg-emerald-100 px-2.5 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const res = await apiFetch('/api/sync-amo');
+                const data = await res.json();
+                alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
+                window.location.reload();
+              } catch (e) {
+                alert('Ошибка при синхронизации с amoCRM');
+              }
+            }}
+            className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
+          >
+            Синхронизация
+          </button>
+          {currentUser?.role === 'LEADER' && <Link href="/admin/users" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">Пользователи</Link>}
+          <button
+            type="button"
+            onClick={handleSyncSheets}
+            disabled={syncing}
+            className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+          >
+            {syncing ? 'Синхронизация...' : 'Google Таблицы'}
+          </button>
+        </div>
+        <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+          <label htmlFor="admin-export-period" className="block text-sm font-medium">Экспорт в Excel</label>
+          <select
+            id="admin-export-period"
+            value={exportPeriod}
+            onChange={e => {
+              const val = e.target.value;
+              setExportPeriod(val);
+              if (val !== 'custom') window.location.href = getExportUrl(val);
+            }}
+            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+          >
+            <option value="all">За всё время</option>
+            <option value="month">Этот месяц</option>
+            <option value="year">Этот год</option>
+            <option value="custom">Свой диапазон</option>
+          </select>
+          {exportPeriod === 'custom' && (
+            <div className="space-y-2">
+              <label className="sr-only" htmlFor="admin-export-start">Начало периода</label>
+              <input id="admin-export-start" type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="w-full rounded-lg border px-2 py-2 text-sm" />
+              <label className="sr-only" htmlFor="admin-export-end">Конец периода</label>
+              <input id="admin-export-end" type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="w-full rounded-lg border px-2 py-2 text-sm" />
+              <a href={getExportUrl('custom')} className="inline-block rounded bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-500">Скачать</a>
+            </div>
+          )}
+        </div>
+      </section>
+    </SettingsMenu>
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 pb-20 text-slate-800 sm:pb-0">
       {/* Шапка */}
@@ -2540,137 +2624,55 @@ export default function AdminDashboard() {
         <h1 className="text-base sm:text-xl font-bold flex items-center gap-2">
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <button onClick={handleLogout} className="bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg whitespace-nowrap text-xs sm:text-sm">
+        <button onClick={handleLogout} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-200 sm:px-4 sm:py-2 sm:text-sm">
           Выйти
         </button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm">
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-xs sm:text-sm">
           <div className="flex items-center gap-1">
-            <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">-</button>
+            <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">-</button>
             <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
-            <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">+</button>
+            <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">+</button>
           </div>
+          {adminSettingsMenu}
         </div>
       </header>
 
       {/* Меню вкладок */}
-      <div className="bg-white border-b border-slate-200 flex items-center overflow-visible px-3 sm:px-6 py-2 gap-2 sm:gap-4 text-sm sm:text-base">
+      <div className="flex items-center justify-center gap-2 overflow-visible border-b border-slate-200 bg-white px-3 py-2 text-sm sm:gap-4 sm:px-6 sm:text-base">
         <button
           onClick={() => setActiveTab('calendar')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+          className={`rounded-lg px-3 py-2 font-semibold whitespace-nowrap sm:px-4 ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}
         >
           📅 Календарь
         </button>
         <ChatNavLink
-          className="px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+          className="rounded-lg px-3 py-2 font-semibold whitespace-nowrap text-slate-700 hover:bg-emerald-50 sm:px-4"
         >
           💬 Чаты
         </ChatNavLink>
         <button
           onClick={() => setActiveTab('webleads')}
-          className={`hidden sm:inline-flex px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+          className={`relative hidden rounded-lg px-3 py-2 font-semibold whitespace-nowrap sm:inline-flex sm:px-4 ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}
         >
           🌐 Заявки
           {webLeads.filter(l => l.status === 'Новая').length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
               {webLeads.filter(l => l.status === 'Новая').length}
             </span>
           )}
         </button>
         <button
           onClick={() => setActiveTab('refusals')}
-          className={`hidden sm:inline-flex px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'refusals' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+          className={`relative hidden rounded-lg px-3 py-2 font-semibold whitespace-nowrap sm:inline-flex sm:px-4 ${activeTab === 'refusals' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}
         >
           ❌ Отказы
           {orders.filter(o => o.status === 'Отказ').length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white">
               {orders.filter(o => o.status === 'Отказ').length}
             </span>
           )}
         </button>
-        <div className="ml-auto">
-          <SettingsMenu>
-            <section className="space-y-2 border-b border-slate-200 pb-3">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Разделы</h2>
-              <div className="grid grid-cols-1 gap-1">
-                {[
-                  ['gardeners', '🧑‍🌾 Садовники'],
-                  ['services', '🌿 Услуги'],
-                  ['auction', '🔔 Аукцион'],
-                ].map(([tab, label]) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    data-dismiss-settings
-                    onClick={() => setActiveTab(tab)}
-                    className={`w-full rounded-lg px-3 py-2 text-left text-sm ${activeTab === tab ? 'bg-emerald-100 font-semibold text-emerald-800' : 'hover:bg-slate-100'}`}
-                  >
-                    {label}{tab === 'auction' && auctionOrders.filter(o => o.status === 'Аукцион').length > 0 ? ` (${auctionOrders.filter(o => o.status === 'Аукцион').length})` : ''}
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section className="space-y-2">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
-              <div className="flex flex-wrap gap-2">
-                <a href="/admin/amo-connect" className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500">🔌 amoCRM</a>
-                <PushButton className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-2 text-sm font-medium text-white hover:bg-emerald-500" />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const res = await apiFetch('/api/sync-amo');
-                      const data = await res.json();
-                      alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
-                      window.location.reload();
-                    } catch (e) {
-                      alert('Ошибка при синхронизации с amoCRM');
-                    }
-                  }}
-                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
-                >
-                  🔄 Синхронизация
-                </button>
-                {currentUser?.role === 'LEADER' && <Link href="/admin/users" className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-500">👥 Пользователи</Link>}
-                <button
-                  type="button"
-                  onClick={handleSyncSheets}
-                  disabled={syncing}
-                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-                >
-                  {syncing ? 'Синхронизация...' : '🔄 Google Таблицы'}
-                </button>
-              </div>
-              <div className="space-y-2 rounded-lg bg-slate-50 p-2">
-                <label htmlFor="admin-export-period" className="block text-sm font-medium">📊 Экспорт в Excel</label>
-                <select
-                  id="admin-export-period"
-                  value={exportPeriod}
-                  onChange={e => {
-                    const val = e.target.value;
-                    setExportPeriod(val);
-                    if (val !== 'custom') window.location.href = getExportUrl(val);
-                  }}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
-                >
-                  <option value="all">За всё время</option>
-                  <option value="month">Этот месяц</option>
-                  <option value="year">Этот год</option>
-                  <option value="custom">Свой диапазон</option>
-                </select>
-                {exportPeriod === 'custom' && (
-                  <div className="space-y-2">
-                    <label className="sr-only" htmlFor="admin-export-start">Начало периода</label>
-                    <input id="admin-export-start" type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="w-full rounded-lg border px-2 py-2 text-sm" />
-                    <label className="sr-only" htmlFor="admin-export-end">Конец периода</label>
-                    <input id="admin-export-end" type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="w-full rounded-lg border px-2 py-2 text-sm" />
-                    <a href={getExportUrl('custom')} className="inline-block rounded bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-500">Скачать</a>
-                  </div>
-                )}
-              </div>
-            </section>
-          </SettingsMenu>
-        </div>
       </div>
 
       <nav aria-label="Основная навигация" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(15,23,42,0.12)] sm:hidden">

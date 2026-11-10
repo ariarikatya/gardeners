@@ -822,14 +822,22 @@ export default function LeaderDashboard() {
           <h1 className="text-base sm:text-lg font-bold">🌿 Руководитель</h1>
           <p className="text-[11px] sm:text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
-        <div className="flex items-center justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex items-center gap-1 text-xs text-white">
+            <span>Масштаб {Math.round(leaderScale * 100)}%</span>
+            <button type="button" onClick={() => setLeaderScale(s => Math.max(0.7, +(s - 0.1).toFixed(1)))} aria-label="Уменьшить масштаб" className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 hover:bg-emerald-200">−</button>
+            <button type="button" onClick={() => setLeaderScale(s => Math.min(1, +(s + 0.1).toFixed(1)))} aria-label="Увеличить масштаб" className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 hover:bg-emerald-200">+</button>
+          </div>
           <SettingsMenu>
             <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
-            <PushButton className="bg-emerald-700 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-emerald-600" />
-            <Link href="/admin/users" className="block rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-amber-500">
+            <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 transition-all hover:bg-emerald-200" />
+            <button type="button" data-dismiss-settings onClick={() => setLeaderTab('catalog')} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
+              📦 Справочная база и назначения
+            </button>
+            <Link href="/admin/users" className="block rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 transition-all hover:bg-emerald-100">
               👥 Пользователи
             </Link>
-            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-left text-sm text-white hover:bg-emerald-600">Выйти</button>
+            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm text-emerald-800 hover:bg-emerald-100">Выйти</button>
           </SettingsMenu>
         </div>
       </header>
@@ -905,22 +913,16 @@ export default function LeaderDashboard() {
       )}
 
       <main className="max-w-7xl mx-auto px-2 sm:px-3 py-3 space-y-3">
-        <div className="flex gap-2 overflow-x-auto border-b border-slate-200 pb-2">
+        <div className="flex justify-center gap-2 overflow-x-auto border-b border-slate-200 pb-2">
           <button
             onClick={() => setLeaderTab('finance')}
-            className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'finance' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
+            className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold transition-all ${leaderTab === 'finance' ? 'bg-emerald-100 text-emerald-800 shadow-sm' : 'text-slate-700 hover:bg-emerald-50'}`}
           >
             💰 Финансы и Заказы
           </button>
-          <ChatNavLink className="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-all hover:bg-slate-50">
+          <ChatNavLink className="whitespace-nowrap rounded-lg px-4 py-2 text-xs font-bold text-slate-700 transition-all hover:bg-emerald-50">
             💬 Чаты
           </ChatNavLink>
-          <button
-            onClick={() => setLeaderTab('catalog')}
-            className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'catalog' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}
-          >
-            📦 Справочная база и назначение
-          </button>
         </div>
 
         {leaderTab === 'catalog' ? (
@@ -1000,11 +1002,6 @@ export default function LeaderDashboard() {
             )}
           </div>
 
-          <div className="ml-auto flex items-center gap-2 text-xs text-slate-700">
-            <span>Масштаб {Math.round(leaderScale * 100)}%</span>
-            <button onClick={() => setLeaderScale(s => Math.max(0.7, +(s - 0.1).toFixed(1)))} className="bg-white border rounded px-2 py-1">−</button>
-            <button onClick={() => setLeaderScale(s => Math.min(1, +(s + 0.1).toFixed(1)))} className="bg-white border rounded px-2 py-1">+</button>
-          </div>
         </div>
 
         {loading ? (
