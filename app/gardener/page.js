@@ -6,6 +6,7 @@ import PushButton from '@/components/PushButton';
 import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
+import ChatNavLink from '@/components/ChatNavLink';
 import apiFetch, { getNormalizedUrlCacheKey } from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -2015,7 +2016,7 @@ export default function GardenerDashboard() {
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           <button type="button" onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
-          <Link href="/chats" className="px-3 py-2 rounded-lg border bg-white text-sm font-medium whitespace-nowrap text-slate-600 hover:bg-slate-50">💬 Чаты</Link>
+          <ChatNavLink className="px-3 py-2 rounded-lg border bg-white text-sm font-medium whitespace-nowrap text-slate-600 hover:bg-slate-50">💬 Чаты</ChatNavLink>
           <button type="button" onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
             🔔 Аукцион
             {auctionOrders.length > 0 && (

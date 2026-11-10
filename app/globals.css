@@ -6,3 +6,16 @@
 .chat-page textarea {
   font-size: 16px;
 }
+
+.chat-page .chat-input-textarea {
+  box-sizing: border-box;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  resize: none;
+  font-size: 16px;
+  line-height: 1.4;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
