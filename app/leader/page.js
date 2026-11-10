@@ -7,6 +7,7 @@ import InstallNotificationsGuideModal from '@/components/InstallNotificationsGui
 import PushButton from '@/components/PushButton';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
+import ChatNavLink from '@/components/ChatNavLink';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -907,9 +908,9 @@ export default function LeaderDashboard() {
           >
             💰 Финансы и Заказы
           </button>
-          <Link href="/chats" className="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-all hover:bg-slate-50">
+          <ChatNavLink className="whitespace-nowrap rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-all hover:bg-slate-50">
             💬 Чаты
-          </Link>
+          </ChatNavLink>
           <button
             onClick={() => setLeaderTab('catalog')}
             className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${leaderTab === 'catalog' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white border text-slate-700 hover:bg-slate-50'}`}

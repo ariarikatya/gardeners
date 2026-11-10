@@ -6,6 +6,7 @@ import PushButton from '@/components/PushButton';
 import InstallNotificationsGuideModal from '@/components/InstallNotificationsGuideModal';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
+import ChatNavLink from '@/components/ChatNavLink';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -2631,12 +2632,11 @@ export default function AdminDashboard() {
         >
           📅 Календарь
         </button>
-        <Link
-          href="/chats"
+        <ChatNavLink
           className="px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
         >
           💬 Чаты
-        </Link>
+        </ChatNavLink>
         <button
           onClick={() => setActiveTab('gardeners')}
           className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}

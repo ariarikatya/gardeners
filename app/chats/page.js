@@ -26,6 +26,28 @@ function formatDate(value) {
   return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
 
+function formatParticipantCount(count) {
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
+  const noun = lastTwoDigits >= 11 && lastTwoDigits <= 14
+    ? 'участников'
+    : lastDigit === 1
+      ? 'участник'
+      : lastDigit >= 2 && lastDigit <= 4
+        ? 'участника'
+        : 'участников';
+  return `${count} ${noun}`;
+}
+
+function isEditedMessage(message) {
+  if (!message.createdAt || !message.updatedAt) return false;
+  const createdAt = new Date(message.createdAt).getTime();
+  const updatedAt = new Date(message.updatedAt).getTime();
+  return Number.isFinite(createdAt)
+    && Number.isFinite(updatedAt)
+    && updatedAt - createdAt > 1000;
+}
+
 async function requestJson(url, options = {}) {
   const response = await apiFetch(url, { ...options, bypassOfflineCache: true, cache: 'no-store' });
   const data = await response.json().catch(() => ({}));
@@ -172,6 +194,7 @@ export default function ChatsPage() {
   const [participantsOpen, setParticipantsOpen] = useState(false);
   const [chatParticipants, setChatParticipants] = useState([]);
   const [participantsCanManage, setParticipantsCanManage] = useState(false);
+  const [chatPresence, setChatPresence] = useState({});
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [participantSearch, setParticipantSearch] = useState('');
   const [participantUsers, setParticipantUsers] = useState([]);
@@ -179,7 +202,6 @@ export default function ChatsPage() {
   const [editDraft, setEditDraft] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const messagesContainerRef = useRef(null);
-  const chatComposerRef = useRef(null);
   const messageInputRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -312,26 +334,6 @@ export default function ChatsPage() {
   }, [activeChatId, loadChats, loadMessages, markRead, messageSearch, user?.id]);
 
   useEffect(() => {
-    if (!activeChatId || typeof window === 'undefined' || !('visualViewport' in window)) return undefined;
-    const viewport = window.visualViewport;
-    const updateComposerInset = () => {
-      const form = chatComposerRef.current;
-      if (!form) return;
-      const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
-      form.style.paddingBottom = `calc(${Math.max(12, inset + 12)}px + env(safe-area-inset-bottom))`;
-    };
-
-    updateComposerInset();
-    viewport.addEventListener('resize', updateComposerInset);
-    viewport.addEventListener('scroll', updateComposerInset);
-    return () => {
-      viewport.removeEventListener('resize', updateComposerInset);
-      viewport.removeEventListener('scroll', updateComposerInset);
-      if (chatComposerRef.current) chatComposerRef.current.style.paddingBottom = '';
-    };
-  }, [activeChatId]);
-
-  useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
@@ -377,6 +379,36 @@ export default function ChatsPage() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [activeChatId, participantsOpen]);
+
+  useEffect(() => {
+    if (!activeChatId) {
+      setChatPresence({});
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadPresence = async () => {
+      try {
+        const presence = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/presence`);
+        if (!cancelled) {
+          setChatPresence(Object.fromEntries(presence.map((participant) => [participant.userId, participant])));
+        }
+      } catch (requestError) {
+        if (!cancelled) setError(requestError.message || 'Не удалось обновить статус участников');
+      }
+    };
+
+    loadPresence();
+    const timer = window.setInterval(loadPresence, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeChatId]);
+
+  useEffect(() => () => {
+    document.body.style.overflow = '';
+  }, []);
 
   const chooseChat = (chatId) => {
     setError('');
@@ -591,6 +623,10 @@ export default function ChatsPage() {
     window.history.replaceState(null, '', '/chats');
   };
 
+  const activeChatRecipient = activeChat && !activeChat.isGroup
+    ? activeChat.participants[0]
+    : null;
+  const recipientIsOnline = Boolean(activeChatRecipient && chatPresence[activeChatRecipient.id]?.isOnline);
   const homePath = user?.role === 'ADMIN' ? '/admin' : user?.role === 'LEADER' ? '/leader' : '/gardener';
   return (
     <main className="chat-page flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-800">
@@ -676,8 +712,20 @@ export default function ChatsPage() {
                   <h2 className="truncate font-semibold">{chatTitle(activeChat, user?.id)}</h2>
                   <p className="truncate text-xs text-slate-500">
                     {activeChat.isGroup
-                      ? `Группа · ${activeChat.participants.length + 1} участника`
-                      : ROLE_LABELS[activeChat.participants[0]?.role] || 'Пользователь'}
+                      ? `Группа · ${formatParticipantCount(activeChat.participants.length + 1)}`
+                      : (
+                        <span className="inline-flex max-w-full items-center gap-1.5">
+                          <span className="truncate">{ROLE_LABELS[activeChatRecipient?.role] || 'Пользователь'}</span>
+                          {activeChatRecipient && (
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${recipientIsOnline ? 'bg-green-500' : 'bg-slate-300'}`}
+                              role="img"
+                              aria-label={recipientIsOnline ? 'Онлайн' : 'Не в сети'}
+                              title={recipientIsOnline ? 'Онлайн' : 'Не в сети'}
+                            />
+                          )}
+                        </span>
+                      )}
                   </p>
                 </button>
                 <button type="button" onClick={openAttachments} className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50">
@@ -685,15 +733,17 @@ export default function ChatsPage() {
                 </button>
               </div>
 
-              <div className="shrink-0 border-b border-slate-100 bg-white p-3">
+              <div className="sticky top-0 z-[100] h-[68px] shrink-0 border-b border-slate-100 bg-white p-3">
                 <label className="sr-only" htmlFor="chat-search">Поиск по переписке</label>
                 <input
                   id="chat-search"
                   type="search"
                   value={messageSearch}
                   onChange={(event) => setMessageSearch(event.target.value)}
+                  onFocus={() => { document.body.style.overflow = 'hidden'; }}
+                  onBlur={() => { document.body.style.overflow = ''; }}
                   placeholder="Поиск по сообщениям…"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                  className="h-full w-full rounded-lg border border-slate-200 px-3 py-2 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                 />
               </div>
 
@@ -733,8 +783,7 @@ export default function ChatsPage() {
                         ) : message.body && (
                           <p className="whitespace-pre-wrap break-words text-sm">
                             {message.body}
-                            {message.updatedAt
-                              && new Date(message.updatedAt).getTime() - new Date(message.createdAt).getTime() > 1000
+                            {isEditedMessage(message)
                               ? <span className="ml-1 text-xs text-slate-500">(изменено)</span>
                               : null}
                           </p>
@@ -807,7 +856,7 @@ export default function ChatsPage() {
                 <div ref={bottomRef} />
               </div>
 
-              <form ref={chatComposerRef} onSubmit={sendMessage} className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-4">
+              <form onSubmit={sendMessage} className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-4">
                 {selectedFiles.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {selectedFiles.map((file, index) => (
@@ -835,7 +884,7 @@ export default function ChatsPage() {
                     onChange={(event) => {
                       setDraft(event.target.value);
                       event.currentTarget.style.height = 'auto';
-                      event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 128)}px`;
+                      event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 120)}px`;
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -846,7 +895,7 @@ export default function ChatsPage() {
                     rows={1}
                     maxLength={4000}
                     placeholder="Написать сообщение…"
-                    className="box-border max-h-32 min-h-11 flex-1 resize-none overflow-y-auto rounded-xl border border-slate-300 px-3 py-2 text-base leading-[1.5] outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    className="chat-input-textarea min-w-0 flex-1 rounded-xl border border-slate-300 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                   />
                   <button disabled={sending || (!draft.trim() && selectedFiles.length === 0)} type="submit" className="min-h-10 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
                     {sending ? '…' : 'Отправить'}
@@ -901,7 +950,7 @@ export default function ChatsPage() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
                 <h2 id="chat-participants-title" className="font-bold">Участники чата</h2>
-                <p className="text-xs text-slate-500">{chatParticipants.length} участников</p>
+                <p className="text-xs text-slate-500">{formatParticipantCount(chatParticipants.length)}</p>
               </div>
               <button type="button" onClick={() => setParticipantsOpen(false)} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
             </div>
