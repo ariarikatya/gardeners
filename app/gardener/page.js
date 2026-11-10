@@ -1966,11 +1966,11 @@ export default function GardenerDashboard() {
         <div className="flex items-center justify-end">
           <SettingsMenu>
             <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
-            <PushButton className="bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600" />
-            <a href="tel:88452650206" className="block rounded-lg bg-emerald-700 px-3 py-2 text-sm text-white hover:bg-emerald-600">
-              📞 Диспетчер
+            <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
+            <a href="tel:88452650206" className="block rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-800 hover:bg-emerald-200">
+              Диспетчер
             </a>
-            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-left text-sm text-white hover:bg-emerald-600">Выйти</button>
+            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm text-emerald-800 hover:bg-emerald-200">Выйти</button>
           </SettingsMenu>
         </div>
       </header>
@@ -2018,10 +2018,10 @@ export default function GardenerDashboard() {
       )}
 
       <main className="p-4 max-w-md md:max-w-4xl mx-auto">
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          <button type="button" onClick={() => setActiveSection('records')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Записи и календарь</button>
-          <ChatNavLink className="px-3 py-2 rounded-lg border bg-white text-sm font-medium whitespace-nowrap text-slate-600 hover:bg-slate-50">💬 Чаты</ChatNavLink>
-          <button type="button" onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap relative ${activeSection === 'auction' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>
+        <div className="mb-4 flex flex-wrap justify-center gap-2 pb-1">
+          <button type="button" onClick={() => setActiveSection('records')} className={`rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap ${activeSection === 'records' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}>Записи и календарь</button>
+          <ChatNavLink className="rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap text-slate-700 hover:bg-emerald-50">💬 Чаты</ChatNavLink>
+          <button type="button" onClick={() => { setActiveSection('auction'); fetchAuction(); }} className={`relative rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap ${activeSection === 'auction' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}>
             🔔 Аукцион
             {auctionOrders.length > 0 && (
               <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full font-bold">
@@ -2029,8 +2029,8 @@ export default function GardenerDashboard() {
               </span>
             )}
           </button>
-          <button type="button" onClick={() => setActiveSection('portfolio')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'portfolio' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>🖼️ Портфолио</button>
-          <button type="button" onClick={() => setActiveSection('finance')} className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeSection === 'finance' ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-600'}`}>Финансы и операции</button>
+          <button type="button" onClick={() => setActiveSection('portfolio')} className={`rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap ${activeSection === 'portfolio' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}>Портфолио</button>
+          <button type="button" onClick={() => setActiveSection('finance')} className={`rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap ${activeSection === 'finance' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700 hover:bg-emerald-50'}`}>Финансы и операции</button>
         </div>
 
         {activeSection === 'portfolio' && (

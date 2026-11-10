@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { signToken } from '@/lib/jwt';
+import { hasActiveSessionForUser } from '@/lib/authSession';
 
 function isRequestSecure(req) {
   if (process.env.NODE_ENV !== 'production') return false;
@@ -36,7 +37,7 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Пользователь с таким номером не найден' }, { status: 401 });
     }
 
-    if (user.role === 'ADMIN' || user.role === 'LEADER') {
+    if ((user.role === 'ADMIN' || user.role === 'LEADER') && !(await hasActiveSessionForUser(req, user))) {
       return NextResponse.json({ requiresPassword: true }, { status: 401 });
     }
 
