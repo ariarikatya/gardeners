@@ -44,12 +44,29 @@ export async function GET(req, { params }) {
         id: params.attachmentId,
         message: {
           isDeleted: false,
-          chat: { participants: { some: { userId: auth.user.id } } },
+          chat: { participants: { some: { userId: auth.user.id, hiddenAt: null } } },
         },
       },
-      select: { id: true, filename: true, mimeType: true, storagePath: true, messageId: true },
+      select: {
+        id: true,
+        filename: true,
+        mimeType: true,
+        storagePath: true,
+        messageId: true,
+        message: { select: { chatId: true, createdAt: true } },
+      },
     });
     if (!attachment) return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
+    const membership = await prisma.chatParticipant.findUnique({
+      where: { chatId_userId: { chatId: attachment.message.chatId, userId: auth.user.id } },
+      select: { historyClearedAt: true },
+    });
+    if (
+      !membership
+      || (membership.historyClearedAt && attachment.message.createdAt <= membership.historyClearedAt)
+    ) {
+      return NextResponse.json({ error: 'Файл не найден' }, { status: 404 });
+    }
 
     if (typeof attachment.storagePath !== 'string') {
       return NextResponse.json({ error: 'Файл недоступен' }, { status: 404 });

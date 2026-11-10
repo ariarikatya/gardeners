@@ -8,6 +8,7 @@ import PushButton from '@/components/PushButton';
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
 import ChatNavLink from '@/components/ChatNavLink';
+import SettingsMenu from '@/components/SettingsMenu';
 import apiFetch from '@/lib/apiFetch';
 import { uploadImageWithRetry } from '@/lib/uploadClient';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -821,12 +822,15 @@ export default function LeaderDashboard() {
           <h1 className="text-base sm:text-lg font-bold">🌿 Руководитель</h1>
           <p className="text-[11px] sm:text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          <PushButton className="bg-emerald-700 hover:bg-emerald-600 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap" />
-          <Link href="/admin/users" className="bg-amber-600 hover:bg-amber-500 text-white font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm transition-all whitespace-nowrap">
-            👥 Пользователи
-          </Link>
-          <button onClick={handleLogout} className="bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm whitespace-nowrap">Выйти</button>
+        <div className="flex items-center justify-end">
+          <SettingsMenu>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+            <PushButton className="bg-emerald-700 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-emerald-600" />
+            <Link href="/admin/users" className="block rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white transition-all hover:bg-amber-500">
+              👥 Пользователи
+            </Link>
+            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-left text-sm text-white hover:bg-emerald-600">Выйти</button>
+          </SettingsMenu>
         </div>
       </header>
 

@@ -11,7 +11,14 @@ const MAX_MESSAGE_LENGTH = 4000;
 async function findMembership(chatId, userId) {
   return prisma.chatParticipant.findUnique({
     where: { chatId_userId: { chatId, userId } },
-    select: { id: true, lastReadAt: true },
+    select: {
+      id: true,
+      lastReadAt: true,
+      historyClearedAt: true,
+      hiddenAt: true,
+      isMuted: true,
+      mutedUntil: true,
+    },
   });
 }
 
@@ -21,12 +28,13 @@ export async function GET(req, { params }) {
 
   try {
     const membership = await findMembership(params.chatId, auth.user.id);
-    if (!membership) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
+    if (!membership || membership.hiddenAt) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
 
     const search = new URL(req.url).searchParams.get('q')?.trim() || '';
     const messages = await prisma.chatMessage.findMany({
       where: {
         chatId: params.chatId,
+        ...(membership.historyClearedAt ? { createdAt: { gt: membership.historyClearedAt } } : {}),
         ...(search ? { body: { contains: search, mode: 'insensitive' } } : {}),
       },
       include: {
@@ -76,7 +84,11 @@ export async function GET(req, { params }) {
       };
     });
 
-    return NextResponse.json({ messages: result, lastReadAt: membership.lastReadAt });
+    return NextResponse.json({
+      messages: result,
+      lastReadAt: membership.lastReadAt,
+      historyClearedAt: membership.historyClearedAt,
+    });
   } catch (error) {
     console.error('Ошибка GET /api/chats/[chatId]/messages:', error);
     return NextResponse.json({ error: 'Не удалось получить сообщения' }, { status: 500 });
@@ -89,7 +101,19 @@ export async function POST(req, { params }) {
 
   try {
     const membership = await findMembership(params.chatId, auth.user.id);
-    if (!membership) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
+    if (!membership || membership.hiddenAt) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
+
+    const participants = await prisma.chatParticipant.findMany({
+      where: { chatId: params.chatId },
+      select: { blockedAt: true },
+    });
+    const chat = await prisma.chat.findUnique({
+      where: { id: params.chatId },
+      select: { isGroup: true },
+    });
+    if (!chat?.isGroup && participants.some(({ blockedAt }) => blockedAt)) {
+      return NextResponse.json({ error: 'Отправка сообщений в этот чат приостановлена' }, { status: 403 });
+    }
 
     const formData = await req.formData();
     const body = String(formData.get('body') || '').trim();
@@ -132,6 +156,21 @@ export async function POST(req, { params }) {
     }
 
     const message = await prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT "id" FROM "ChatParticipant" WHERE "chatId" = ${params.chatId} FOR UPDATE
+      `;
+      const currentParticipants = await transaction.chatParticipant.findMany({
+        where: { chatId: params.chatId },
+        select: { id: true, blockedAt: true },
+      });
+      const currentChat = await transaction.chat.findUnique({
+        where: { id: params.chatId },
+        select: { isGroup: true },
+      });
+      if (!currentChat?.isGroup && currentParticipants.some(({ blockedAt }) => blockedAt)) {
+        return null;
+      }
+
       const created = await transaction.chatMessage.create({
         data: {
           chatId: params.chatId,
@@ -153,14 +192,26 @@ export async function POST(req, { params }) {
         where: { chatId_userId: { chatId: params.chatId, userId: auth.user.id } },
         data: { lastReadAt: created.createdAt },
       });
+      await transaction.chatParticipant.updateMany({
+        where: { chatId: params.chatId },
+        data: { hiddenAt: null },
+      });
       return created;
     });
+    if (!message) return NextResponse.json({ error: 'Отправка сообщений в этот чат приостановлена' }, { status: 403 });
 
     const recipients = await prisma.chatParticipant.findMany({
-      where: { chatId: params.chatId, userId: { not: auth.user.id } },
-      select: { userId: true },
+      where: {
+        chatId: params.chatId,
+        userId: { not: auth.user.id },
+      },
+      select: { userId: true, isMuted: true, mutedUntil: true },
     });
-    if (recipients.length) {
+    const now = new Date();
+    const activeRecipients = recipients.filter(({ isMuted, mutedUntil }) => (
+      !isMuted || (mutedUntil && mutedUntil <= now)
+    ));
+    if (activeRecipients.length) {
       const chat = await prisma.chat.findUnique({ where: { id: params.chatId }, select: { name: true, isGroup: true } });
       const senderName = auth.user.name || 'Пользователь';
       const chatName = chat?.name || 'чат';
@@ -174,7 +225,7 @@ export async function POST(req, { params }) {
         : `Новое сообщение от ${senderName}`;
 
       const pushResult = await sendToUsers(
-        recipients.map(({ userId }) => userId),
+        activeRecipients.map(({ userId }) => userId),
         {
           title: pushTitle,
           body: pushBody,

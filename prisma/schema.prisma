@@ -44,12 +44,17 @@ model Chat {
 }
 
 model ChatParticipant {
-  id         String   @id @default(uuid())
-  chatId     String
-  userId     String
-  lastReadAt DateTime?
-  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid())
+  chatId         String
+  userId         String
+  lastReadAt     DateTime?
+  historyClearedAt DateTime?
+  hiddenAt       DateTime?
+  isMuted        Boolean  @default(false)
+  mutedUntil     DateTime?
+  blockedAt      DateTime?
+  chat           Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([chatId, userId])
   @@index([userId])
@@ -63,6 +68,7 @@ model ChatMessage {
   body        String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @default(now()) @updatedAt
+  editedAt    DateTime?
   isDeleted   Boolean          @default(false)
   chat        Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender      User             @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)

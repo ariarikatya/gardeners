@@ -7,6 +7,7 @@ import InstallNotificationsGuideModal from '@/components/InstallNotificationsGui
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
 import ChatNavLink from '@/components/ChatNavLink';
+import SettingsMenu from '@/components/SettingsMenu';
 import apiFetch, { getNormalizedUrlCacheKey } from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, filterOrdersForOffline, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -1962,12 +1963,15 @@ export default function GardenerDashboard() {
             </span>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          <PushButton className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap" />
-          <a href="tel:88452650206" className="text-[11px] sm:text-xs bg-emerald-700 hover:bg-emerald-600 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap">
-            📞 Диспетчер
-          </a>
-          <button type="button" onClick={handleLogout} className="text-[11px] sm:text-xs bg-emerald-700 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg whitespace-nowrap">Выйти</button>
+        <div className="flex items-center justify-end">
+          <SettingsMenu>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+            <PushButton className="bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600" />
+            <a href="tel:88452650206" className="block rounded-lg bg-emerald-700 px-3 py-2 text-sm text-white hover:bg-emerald-600">
+              📞 Диспетчер
+            </a>
+            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-left text-sm text-white hover:bg-emerald-600">Выйти</button>
+          </SettingsMenu>
         </div>
       </header>
 

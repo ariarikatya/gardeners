@@ -28,11 +28,11 @@ export default function ChatNavLink({ className = '', children = '💬 Чаты'
   }, []);
 
   return (
-    <Link href="/chats" className={`relative ${className}`}>
+    <Link href="/chats" className={`relative pr-7 ${className}`}>
       {children}
       {unreadCount > 0 && (
         <span
-          className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white"
+          className="pointer-events-none absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white"
           aria-label={`${unreadCount} непрочитанных сообщений`}
           title={`${unreadCount} непрочитанных сообщений`}
         >

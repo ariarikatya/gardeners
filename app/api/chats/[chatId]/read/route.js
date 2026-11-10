@@ -9,25 +9,37 @@ export async function POST(req, { params }) {
   try {
     const membership = await prisma.chatParticipant.findUnique({
       where: { chatId_userId: { chatId: params.chatId, userId: auth.user.id } },
-      select: { id: true },
+      select: { id: true, hiddenAt: true, historyClearedAt: true },
     });
-    if (!membership) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
+    if (!membership || membership.hiddenAt) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
 
     const lastReadAt = await prisma.$transaction(async (transaction) => {
       const lastMessage = await transaction.chatMessage.findFirst({
-        where: { chatId: params.chatId },
+        where: {
+          chatId: params.chatId,
+          ...(membership.historyClearedAt ? { createdAt: { gt: membership.historyClearedAt } } : {}),
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: { createdAt: true },
       });
       if (!lastMessage) return null;
 
-      const incomingMessages = await transaction.$queryRaw`
-        SELECT "id" FROM "ChatMessage"
-        WHERE "chatId" = ${params.chatId}
-          AND "senderId" <> ${auth.user.id}
-          AND "createdAt" <= ${lastMessage.createdAt}
-        FOR UPDATE
-      `;
+      const incomingMessages = membership.historyClearedAt
+        ? await transaction.$queryRaw`
+          SELECT "id" FROM "ChatMessage"
+          WHERE "chatId" = ${params.chatId}
+            AND "senderId" <> ${auth.user.id}
+            AND "createdAt" > ${membership.historyClearedAt}
+            AND "createdAt" <= ${lastMessage.createdAt}
+          FOR UPDATE
+        `
+        : await transaction.$queryRaw`
+          SELECT "id" FROM "ChatMessage"
+          WHERE "chatId" = ${params.chatId}
+            AND "senderId" <> ${auth.user.id}
+            AND "createdAt" <= ${lastMessage.createdAt}
+          FOR UPDATE
+        `;
       const readAt = new Date();
       if (incomingMessages.length) {
         await transaction.chatMessageRead.createMany({

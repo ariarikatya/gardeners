@@ -89,10 +89,11 @@ export async function PATCH(req, { params }) {
         return { error: 'Сообщение нельзя редактировать: участники уже прочитали его или истекло время', status: 403 };
       }
 
+      const editedAt = new Date();
       const updated = await transaction.chatMessage.update({
         where: { id: current.id },
-        data: { body: text || null, updatedAt: new Date() },
-        select: { id: true, body: true, updatedAt: true },
+        data: { body: text || null, updatedAt: editedAt, editedAt },
+        select: { id: true, body: true, updatedAt: true, editedAt: true },
       });
       return {
         message: {
