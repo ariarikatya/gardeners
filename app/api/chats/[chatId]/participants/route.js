@@ -31,14 +31,30 @@ export async function GET(req, { params }) {
     const participants = await prisma.chatParticipant.findMany({
       where: { chatId: params.chatId },
       select: {
-        user: { select: { id: true, name: true, role: true, lastActive: true } },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            lastActive: true,
+            phone: true,
+            gardener: { select: { phone: true, photo: true } },
+          },
+        },
       },
       orderBy: { user: { name: 'asc' } },
     });
     const now = Date.now();
     return NextResponse.json({
       participants: participants.map(({ user }) => ({
-        ...user,
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        lastActive: user.lastActive,
+        ...(membership.chat.isGroup ? {} : {
+          phone: user.gardener?.phone || user.phone,
+          photo: user.gardener?.photo || null,
+        }),
         isOnline: Boolean(
           user.lastActive
           && now >= new Date(user.lastActive).getTime()

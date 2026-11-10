@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { detectPwaEnv, subscribeToDisplayModeChange, CLIENT_VERSION } from '@/lib/pwa-env';
 import { clientLog } from '@/lib/clientLog';
 
@@ -80,15 +80,30 @@ export default function PushButton({ className = '' }) {
   const [testingPush, setTestingPush] = useState(false);
   const [showIosPushHint, setShowIosPushHint] = useState(false);
   const [isIosNonPwa, setIsIosNonPwa] = useState(false);
-  const [envInfo, setEnvInfo] = useState(() => detectPwaEnv());
-  const [showTools, setShowTools] = useState(false);
+  const [showCacheTools, setShowCacheTools] = useState(false);
+  const cacheToolsRef = useRef(null);
+
+  useEffect(() => {
+    if (!showCacheTools) return undefined;
+    const handlePointerDown = (event) => {
+      if (!cacheToolsRef.current?.contains(event.target)) setShowCacheTools(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setShowCacheTools(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showCacheTools]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const updateEnvStatus = () => {
       const freshEnv = detectPwaEnv();
-      setEnvInfo(freshEnv);
       const nonPwa = freshEnv.isIos && !freshEnv.isStandalone && !freshEnv.probableStandalone;
       setIsIosNonPwa(nonPwa);
 
@@ -349,7 +364,6 @@ export default function PushButton({ className = '' }) {
     if (pushLoading) return;
 
     const freshEnv = detectPwaEnv();
-    setEnvInfo(freshEnv);
     clientLog('toggle_click', { pushState, forceReSubscribe, freshEnv });
 
     sessionStorage.setItem('push_flow_active', '1');
@@ -509,10 +523,8 @@ export default function PushButton({ className = '' }) {
 
   if (pushState === 'unsupported') return null;
 
-  const statusSelfTestStr = `${CLIENT_VERSION} | mode: ${envInfo.displayMode} | perm: ${envInfo.notificationPermission} | sub: ${pushState === 'enabled' ? 'yes' : pushState === 'orphan' ? 'lost' : 'no'}`;
-
   return (
-    <div className="inline-flex flex-col items-start gap-1">
+    <div ref={cacheToolsRef} className="inline-flex flex-col items-start gap-1">
       {showIosPushHint && (
         <div className="fixed top-2 left-2 right-2 z-50 bg-emerald-50 border border-emerald-300 text-slate-900 px-3.5 py-2.5 rounded-xl text-xs flex justify-between items-start shadow-xl">
           <div className="leading-relaxed">
@@ -539,7 +551,7 @@ export default function PushButton({ className = '' }) {
               onClick={() => handleTogglePush(false)}
               disabled={pushLoading}
               className={className || "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-              title={`Нажмите, чтобы отключить push-уведомления (${statusSelfTestStr})`}
+              title="Отключить push-уведомления"
             >
               🔔 {pushLoading ? '...' : 'Отключить уведомления'}
             </button>
@@ -559,7 +571,7 @@ export default function PushButton({ className = '' }) {
             onClick={handleReSubscribe}
             disabled={pushLoading}
             className={className || "flex items-center gap-1.5 bg-amber-700 hover:bg-amber-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-            title={`Подписка на устройстве не найдена, разрешите заново (${statusSelfTestStr})`}
+            title="Восстановить подписку на устройстве"
           >
             ⚠️ {pushLoading ? '...' : 'Восстановить подписку'}
           </button>
@@ -568,7 +580,7 @@ export default function PushButton({ className = '' }) {
             type="button"
             onClick={() => alert('Уведомления заблокированы браузером. Разрешите их в настройках сайта.')}
             className={className || "flex items-center gap-1.5 bg-rose-700 hover:bg-rose-600 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-            title={`Разрешите уведомления в настройках сайта (${statusSelfTestStr})`}
+            title="Разрешить уведомления в настройках сайта"
           >
             🔕 Разрешите уведомления
           </button>
@@ -578,7 +590,7 @@ export default function PushButton({ className = '' }) {
             onClick={() => handleTogglePush(false)}
             disabled={pushLoading || pushState === 'loading'}
             className={className || "flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap text-xs"}
-            title={isIosNonPwa ? `Добавьте приложение на экран Домой на iPhone (${statusSelfTestStr})` : statusSelfTestStr}
+            title={isIosNonPwa ? 'Добавьте приложение на экран Домой на iPhone' : 'Включить уведомления'}
           >
             🔔 {pushLoading ? '...' : 'Включить уведомления'}
           </button>
@@ -586,38 +598,25 @@ export default function PushButton({ className = '' }) {
 
         <button
           type="button"
-          onClick={() => setShowTools(!showTools)}
-          className="text-[10px] text-slate-400 hover:text-slate-200 px-1 py-0.5 rounded border border-slate-700/50"
-          title="Сведения о системе и инструменты"
+          onClick={() => setShowCacheTools((open) => !open)}
+          aria-label="Очистить кэш"
+          aria-expanded={showCacheTools}
+          className="rounded border border-slate-300 px-2 py-1 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          title="Очистить кэш"
         >
           ℹ️
         </button>
       </div>
 
-      {showTools && (
-        <div className="bg-slate-900 text-slate-200 border border-slate-700 p-2 rounded-lg text-[10px] space-y-1 z-40 max-w-xs shadow-lg font-mono">
-          <div className="text-[9px] text-slate-400 border-b border-slate-800 pb-1">
-            {statusSelfTestStr}
-          </div>
-          <div className="flex gap-2 pt-1">
-            {(pushState === 'enabled' || pushState === 'orphan') && (
-              <button
-                type="button"
-                onClick={handleReSubscribe}
-                disabled={pushLoading}
-                className="bg-emerald-800 hover:bg-emerald-700 text-white px-2 py-0.5 rounded text-[10px]"
-              >
-                🔄 Перепроверить
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleClearAllCaches}
-              className="bg-slate-700 hover:bg-slate-600 text-white px-2 py-0.5 rounded text-[10px]"
-            >
-              🗑️ Сбросить кэш
-            </button>
-          </div>
+      {showCacheTools && (
+        <div role="group" aria-label="Очистка кэша" className="mt-1 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-lg">
+          <button
+            type="button"
+            onClick={handleClearAllCaches}
+            className="whitespace-nowrap rounded bg-slate-700 px-2 py-1 text-xs text-white hover:bg-slate-600"
+          >
+            🗑️ Очистить кэш
+          </button>
         </div>
       )}
     </div>

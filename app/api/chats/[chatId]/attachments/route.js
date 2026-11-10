@@ -9,12 +9,18 @@ export async function GET(req, { params }) {
   try {
     const membership = await prisma.chatParticipant.findUnique({
       where: { chatId_userId: { chatId: params.chatId, userId: auth.user.id } },
-      select: { id: true },
+      select: { id: true, hiddenAt: true, historyClearedAt: true },
     });
-    if (!membership) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
+    if (!membership || membership.hiddenAt) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
 
     const attachments = await prisma.chatAttachment.findMany({
-      where: { message: { chatId: params.chatId, isDeleted: false } },
+      where: {
+        message: {
+          chatId: params.chatId,
+          isDeleted: false,
+          ...(membership.historyClearedAt ? { createdAt: { gt: membership.historyClearedAt } } : {}),
+        },
+      },
       select: {
         id: true,
         messageId: true,

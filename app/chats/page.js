@@ -40,12 +40,23 @@ function formatParticipantCount(count) {
 }
 
 function isEditedMessage(message) {
-  if (!message.createdAt || !message.updatedAt) return false;
+  if (!message.createdAt || !message.editedAt) return false;
   const createdAt = new Date(message.createdAt).getTime();
-  const updatedAt = new Date(message.updatedAt).getTime();
+  const editedAt = new Date(message.editedAt).getTime();
   return Number.isFinite(createdAt)
-    && Number.isFinite(updatedAt)
-    && updatedAt - createdAt > 1000;
+    && Number.isFinite(editedAt)
+    && editedAt - createdAt > 1000;
+}
+
+function formatRelativeOnline(lastActive) {
+  if (!lastActive) return 'Не в сети';
+  const diffMs = Date.now() - new Date(lastActive).getTime();
+  if (diffMs < 60 * 1000) return 'В сети только что';
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  return 'Был в сети давно';
 }
 
 async function requestJson(url, options = {}) {
@@ -195,6 +206,15 @@ export default function ChatsPage() {
   const [chatParticipants, setChatParticipants] = useState([]);
   const [participantsCanManage, setParticipantsCanManage] = useState(false);
   const [chatPresence, setChatPresence] = useState({});
+  const [chatSettings, setChatSettings] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [recordingAudio, setRecordingAudio] = useState(false);
+  const [audioRecorder, setAudioRecorder] = useState(null);
+  const [voiceDuration, setVoiceDuration] = useState(0);
+  const [voiceDraft, setVoiceDraft] = useState(null);
+  const voiceTimerRef = useRef(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [participantSearch, setParticipantSearch] = useState('');
   const [participantUsers, setParticipantUsers] = useState([]);
@@ -383,18 +403,26 @@ export default function ChatsPage() {
   useEffect(() => {
     if (!activeChatId) {
       setChatPresence({});
+      setChatSettings(null);
       return undefined;
     }
 
     let cancelled = false;
     const loadPresence = async () => {
       try {
-        const presence = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/presence`);
+        const [presence, settings] = await Promise.all([
+          requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/presence`),
+          requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/settings`),
+        ]);
         if (!cancelled) {
           setChatPresence(Object.fromEntries(presence.map((participant) => [participant.userId, participant])));
+          setChatSettings(settings.settings || {});
         }
       } catch (requestError) {
-        if (!cancelled) setError(requestError.message || 'Не удалось обновить статус участников');
+        if (!cancelled) {
+          setChatSettings({});
+          setError(requestError.message || 'Не удалось обновить статус участников');
+        }
       }
     };
 
@@ -408,7 +436,11 @@ export default function ChatsPage() {
 
   useEffect(() => () => {
     document.body.style.overflow = '';
-  }, []);
+    if (voiceTimerRef.current) window.clearInterval(voiceTimerRef.current);
+    if (audioRecorder && recordingAudio) {
+      try { audioRecorder.stop(); } catch (error) { /* no-op */ }
+    }
+  }, [audioRecorder, recordingAudio]);
 
   const chooseChat = (chatId) => {
     setError('');
@@ -620,13 +652,116 @@ export default function ChatsPage() {
     setActiveChatId('');
     setMessages([]);
     setParticipantsOpen(false);
+    setSettingsOpen(false);
+    setProfileOpen(false);
+    setSearchOpen(false);
+    setVoiceDraft(null);
     window.history.replaceState(null, '', '/chats');
+  };
+
+  const applyChatSetting = async (action, duration) => {
+    if (!activeChatId) return;
+    try {
+      const payload = { action };
+      if (duration) payload.duration = duration;
+      const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      setChatSettings(data.settings || {});
+      await loadChats();
+      setSettingsOpen(false);
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось изменить настройки чата');
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    if (!activeChatId || !navigator.mediaDevices?.getUserMedia) {
+      setError('Запись голоса недоступна в этом браузере');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        if (!blob.size) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const file = new File([blob], `voice-${Date.now()}.webm`, {
+          type: blob.type || 'audio/webm',
+        });
+        const url = URL.createObjectURL(blob);
+        setVoiceDraft({ file, url, duration: voiceDuration });
+        stream.getTracks().forEach((track) => track.stop());
+      };
+      recorder.start();
+      setAudioRecorder(recorder);
+      setRecordingAudio(true);
+      setVoiceDraft(null);
+      setVoiceDuration(0);
+      voiceTimerRef.current = window.setInterval(() => {
+        setVoiceDuration((current) => current + 1);
+      }, 1000);
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось начать запись голоса');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (!audioRecorder || !recordingAudio) return;
+    try {
+      audioRecorder.stop();
+    } catch (error) {
+      // no-op
+    } finally {
+      setRecordingAudio(false);
+      if (voiceTimerRef.current) {
+        window.clearInterval(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
+    }
+  };
+
+  const sendVoiceMessage = async () => {
+    if (!voiceDraft || !activeChatId) return;
+    try {
+      setSending(true);
+      const formData = new FormData();
+      formData.append('files', voiceDraft.file);
+      const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/messages`, {
+        method: 'POST',
+        body: formData,
+      });
+      setMessages((current) => [...current, data.message]);
+      latestMessageRef.current = data.message.id;
+      setVoiceDraft(null);
+      setVoiceDuration(0);
+      await markRead(activeChatId);
+      await loadChats();
+      requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось отправить голосовое сообщение');
+    } finally {
+      setSending(false);
+    }
   };
 
   const activeChatRecipient = activeChat && !activeChat.isGroup
     ? activeChat.participants[0]
     : null;
   const recipientIsOnline = Boolean(activeChatRecipient && chatPresence[activeChatRecipient.id]?.isOnline);
+  const recipientStatusText = activeChatRecipient
+    ? (recipientIsOnline ? 'В сети' : formatRelativeOnline(activeChatRecipient.lastActive))
+    : (activeChat?.isGroup ? `${activeChat.participants.length} участников` : 'Личный чат');
   const homePath = user?.role === 'ADMIN' ? '/admin' : user?.role === 'LEADER' ? '/leader' : '/gardener';
   return (
     <main className="chat-page flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-800">
@@ -708,44 +843,48 @@ export default function ChatsPage() {
           ) : (
             <>
               <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-3 sm:px-5">
-                <button type="button" onClick={openParticipants} aria-label={`Открыть участников чата ${chatTitle(activeChat, user?.id)}`} className="min-w-0 text-left">
-                  <h2 className="truncate font-semibold">{chatTitle(activeChat, user?.id)}</h2>
-                  <p className="truncate text-xs text-slate-500">
-                    {activeChat.isGroup
-                      ? `Группа · ${formatParticipantCount(activeChat.participants.length + 1)}`
-                      : (
-                        <span className="inline-flex max-w-full items-center gap-1.5">
-                          <span className="truncate">{ROLE_LABELS[activeChatRecipient?.role] || 'Пользователь'}</span>
-                          {activeChatRecipient && (
-                            <span
-                              className={`h-2 w-2 shrink-0 rounded-full ${recipientIsOnline ? 'bg-green-500' : 'bg-slate-300'}`}
-                              role="img"
-                              aria-label={recipientIsOnline ? 'Онлайн' : 'Не в сети'}
-                              title={recipientIsOnline ? 'Онлайн' : 'Не в сети'}
-                            />
-                          )}
-                        </span>
+                <div className="flex min-w-0 items-center gap-3">
+                  <button type="button" onClick={() => setProfileOpen(true)} className="flex min-w-0 items-center gap-3 text-left">
+                    <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-emerald-100 text-sm font-bold text-emerald-800">
+                      {activeChatRecipient?.photo ? (
+                        <img src={activeChatRecipient.photo} alt={chatTitle(activeChat, user?.id)} className="h-full w-full object-cover" />
+                      ) : (
+                        <span>{(chatTitle(activeChat, user?.id) || 'Ч').trim().charAt(0).toUpperCase()}</span>
                       )}
-                  </p>
-                </button>
-                <button type="button" onClick={openAttachments} className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50">
-                  📎 <span className="hidden sm:inline">Файлы и медиа</span>
-                </button>
+                      {activeChatRecipient && (
+                        <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${recipientIsOnline ? 'bg-green-500' : 'bg-slate-300'}`} />
+                      )}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-slate-800">{chatTitle(activeChat, user?.id)}</span>
+                      <span className="block truncate text-[11px] text-slate-500">{activeChat.isGroup ? `Группа · ${formatParticipantCount(activeChat.participants.length + 1)}` : `${ROLE_LABELS[activeChatRecipient?.role] || 'Пользователь'} · ${recipientStatusText}`}</span>
+                    </span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => { setSearchOpen((value) => !value); if (!searchOpen) setMessageSearch(''); }} className="rounded-lg border border-slate-200 p-2 text-lg text-slate-600 hover:bg-slate-50" aria-label="Поиск в чате">⌕</button>
+                  <button type="button" onClick={() => setSettingsOpen((value) => !value)} className="rounded-lg border border-slate-200 p-2 text-xl text-slate-600 hover:bg-slate-50" aria-label="Настройки чата">⋮</button>
+                </div>
               </div>
 
-              <div className="sticky top-0 z-[100] h-[68px] shrink-0 border-b border-slate-100 bg-white p-3">
-                <label className="sr-only" htmlFor="chat-search">Поиск по переписке</label>
-                <input
-                  id="chat-search"
-                  type="search"
-                  value={messageSearch}
-                  onChange={(event) => setMessageSearch(event.target.value)}
-                  onFocus={() => { document.body.style.overflow = 'hidden'; }}
-                  onBlur={() => { document.body.style.overflow = ''; }}
-                  placeholder="Поиск по сообщениям…"
-                  className="h-full w-full rounded-lg border border-slate-200 px-3 py-2 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                />
-              </div>
+              {searchOpen && (
+                <div className="sticky top-0 z-[100] h-[68px] shrink-0 border-b border-slate-100 bg-white p-3">
+                  <div className="flex h-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
+                    <span aria-hidden="true" className="text-slate-400">⌕</span>
+                    <input
+                      id="chat-search"
+                      type="search"
+                      value={messageSearch}
+                      onChange={(event) => setMessageSearch(event.target.value)}
+                      onFocus={() => { document.body.style.overflow = 'hidden'; }}
+                      onBlur={() => { document.body.style.overflow = ''; }}
+                      placeholder="Поиск по сообщениям…"
+                      className="h-full w-full bg-transparent text-base text-slate-700 outline-none placeholder:text-slate-400"
+                    />
+                    <button type="button" onClick={() => { setSearchOpen(false); setMessageSearch(''); }} className="text-xs font-semibold text-slate-500">Отмена</button>
+                  </div>
+                </div>
+              )}
 
               <div ref={messagesContainerRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50 p-3 sm:p-5">
                 <div className="space-y-3">
@@ -758,10 +897,12 @@ export default function ChatsPage() {
                   return (
                     <article key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-[88%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] ${own ? 'rounded-br-sm bg-emerald-100 text-emerald-950' : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800'}`}>
-                        <div className="mb-2 flex flex-wrap items-baseline gap-x-1.5 text-[10px] leading-4" style={{ color: '#888' }}>
-                          <span className="font-semibold" style={{ color: '#7a7a7a' }}>{message.sender.name}</span>
-                          <span className="opacity-80">{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
-                        </div>
+                        {!own && (
+                          <div className="mb-2 flex items-center gap-1.5 text-[10px] leading-4 text-slate-500">
+                            <span className="font-semibold text-slate-600">{message.sender.name}</span>
+                            <span className="opacity-80">{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
+                          </div>
+                        )}
                         {editingMessageId === message.id ? (
                           <form onSubmit={(event) => saveEditedMessage(event, message)} className="space-y-2">
                             <textarea
@@ -781,7 +922,7 @@ export default function ChatsPage() {
                         ) : message.isDeleted ? (
                           <p className="text-sm italic text-slate-500">Сообщение удалено</p>
                         ) : message.body && (
-                          <p className="whitespace-pre-wrap break-words text-sm">
+                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
                             {message.body}
                             {isEditedMessage(message)
                               ? <span className="ml-1 text-xs text-slate-500">(изменено)</span>
@@ -802,7 +943,7 @@ export default function ChatsPage() {
                             ))}
                           </div>
                         )}
-                        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-slate-500">
+                        <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-slate-500">
                           <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
                           {own && message.canEdit && editingMessageId !== message.id && (
                             <button
@@ -812,7 +953,7 @@ export default function ChatsPage() {
                               title="Редактировать"
                               className="ml-1 rounded p-1 text-slate-500 hover:bg-white hover:text-emerald-800"
                             >
-                              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                 <path d="m13.5 3.5 3 3M4 16l3.8-.8L17 6a2.1 2.1 0 0 0-3-3L4.8 12.2 4 16Z" />
                               </svg>
                             </button>
@@ -825,7 +966,7 @@ export default function ChatsPage() {
                               title="Удалить"
                               className="rounded p-1 text-slate-500 hover:bg-white hover:text-rose-700"
                             >
-                              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                 <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
                               </svg>
                             </button>
@@ -867,6 +1008,13 @@ export default function ChatsPage() {
                     ))}
                   </div>
                 )}
+                {voiceDraft && (
+                  <div className="mb-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                    <audio controls src={voiceDraft.url} className="h-10 w-full" />
+                    <button type="button" onClick={() => setVoiceDraft(null)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-white">Удалить</button>
+                    <button type="button" onClick={sendVoiceMessage} disabled={sending} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">Отправить</button>
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
                   <div className="relative shrink-0">
                     <button
@@ -874,7 +1022,7 @@ export default function ChatsPage() {
                       onClick={() => fileInputRef.current?.click()}
                       title="Добавить фото или файл"
                       aria-label="Добавить фото или файл"
-                      className="rounded-lg border border-slate-200 p-2 text-lg hover:bg-slate-50"
+                      className="rounded-lg border border-slate-200 p-2 text-lg text-slate-500 hover:bg-slate-50"
                     >📎</button>
                   </div>
                   <input ref={fileInputRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx" multiple onChange={addFiles} className="hidden" />
@@ -894,12 +1042,29 @@ export default function ChatsPage() {
                     }}
                     rows={1}
                     maxLength={4000}
-                    placeholder="Написать сообщение…"
-                    className="chat-input-textarea min-w-0 flex-1 rounded-xl border border-slate-300 text-base outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    placeholder="Сообщение"
+                    className="chat-input-textarea min-w-0 flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-base text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                   />
-                  <button disabled={sending || (!draft.trim() && selectedFiles.length === 0)} type="submit" className="min-h-10 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
-                    {sending ? '…' : 'Отправить'}
-                  </button>
+                  {!draft.trim() && selectedFiles.length === 0 ? (
+                    <button
+                      type="button"
+                      aria-label={recordingAudio ? 'Остановить запись' : 'Голосовое сообщение'}
+                      onPointerDown={async () => {
+                        if (recordingAudio) return;
+                        await startVoiceRecording();
+                      }}
+                      onPointerUp={stopVoiceRecording}
+                      onPointerLeave={stopVoiceRecording}
+                      onPointerCancel={stopVoiceRecording}
+                      className={`shrink-0 rounded-xl border border-slate-200 p-3 text-lg ${recordingAudio ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    >
+                      {recordingAudio ? '■' : '🎙'}
+                    </button>
+                  ) : (
+                    <button disabled={sending || (!draft.trim() && selectedFiles.length === 0)} type="submit" className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-700 text-lg font-bold text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50">
+                      {sending ? '…' : '↑'}
+                    </button>
+                  )}
                 </div>
               </form>
             </>
@@ -1061,6 +1226,93 @@ export default function ChatsPage() {
           initialIndex={mediaIndex}
           onClose={() => setMediaGallery(null)}
         />
+      )}
+
+      {settingsOpen && activeChat && (
+        <div className="fixed inset-0 z-50 flex items-end justify-end bg-slate-950/30 sm:items-start sm:justify-end" onClick={() => setSettingsOpen(false)}>
+          <div className="w-full max-w-sm rounded-t-2xl bg-white p-4 shadow-2xl sm:rounded-b-2xl sm:rounded-l-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold">Настройки чата</h3>
+              <button type="button" onClick={() => setSettingsOpen(false)} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+            <div className="space-y-3 text-sm">
+              <button type="button" onClick={() => { setSearchOpen(true); setSettingsOpen(false); }} className="flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-left text-slate-700 hover:bg-slate-100">
+                <span>Найти</span>
+                <span aria-hidden="true">⌕</span>
+              </button>
+              <button type="button" onClick={openParticipants} className="flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-left text-slate-700 hover:bg-slate-100">
+                <span>Участники</span>
+                <span aria-hidden="true">👥</span>
+              </button>
+              <div className="rounded-xl border border-slate-200 p-2">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Уведомления</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {['1h', '4h', '24h', 'forever'].map((duration) => (
+                    <button key={duration} type="button" onClick={() => applyChatSetting(chatSettings?.isMuted ? 'unmute' : 'mute', chatSettings?.isMuted ? undefined : duration)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs hover:bg-slate-50">
+                      {duration === 'forever' ? 'Навсегда' : duration === '1h' ? 'На 1 час' : duration === '4h' ? 'На 4 часа' : 'На 24 часа'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {activeChat && !activeChat.isGroup && (
+                <button type="button" onClick={() => {
+                  const nextAction = chatSettings?.blockedByMe ? 'unblock' : 'block';
+                  const confirmText = nextAction === 'block' ? 'Заблокировать этого пользователя?' : 'Разблокировать пользователя?';
+                  if (window.confirm(confirmText)) applyChatSetting(nextAction);
+                }} className="w-full rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-left text-sm font-medium text-rose-700 hover:bg-rose-100">
+                  {chatSettings?.blockedByMe ? 'Разблокировать' : 'Заблокировать'}
+                </button>
+              )}
+              <button type="button" onClick={() => {
+                if (window.confirm('Очистить историю сообщений для вас?')) applyChatSetting('clearHistory');
+              }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Очистить историю</button>
+              <button type="button" onClick={() => {
+                if (window.confirm('Удалить чат только для вас?')) applyChatSetting('deleteChat');
+              }} className="w-full rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-left text-sm font-medium text-rose-700 hover:bg-rose-100">Удалить чат</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileOpen && activeChatRecipient && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-3 sm:items-center" onClick={() => setProfileOpen(false)}>
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <button type="button" onClick={() => setProfileOpen(false)} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">←</button>
+              <button type="button" onClick={() => setSettingsOpen(true)} className="rounded-lg px-2 py-1 text-2xl text-slate-500 hover:bg-slate-100">⋮</button>
+            </div>
+            <div className="space-y-5 p-5">
+              <div className="flex flex-col items-center text-center">
+                <span className="relative mb-3 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-emerald-100 text-2xl font-bold text-emerald-800">
+                  {activeChatRecipient.photo ? <img src={activeChatRecipient.photo} alt={activeChatRecipient.name} className="h-full w-full object-cover" /> : (activeChatRecipient.name || 'Ч').charAt(0).toUpperCase()}
+                </span>
+                <h3 className="text-xl font-bold text-slate-800">{activeChatRecipient.name}</h3>
+                <p className="text-sm text-slate-500">{ROLE_LABELS[activeChatRecipient.role] || activeChatRecipient.role}</p>
+                <p className="mt-2 text-sm text-slate-600">{recipientStatusText}</p>
+              </div>
+              <div className="flex gap-2">
+                {activeChatRecipient.phone && (
+                  <a href={`tel:${activeChatRecipient.phone}`} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-3 py-3 text-sm font-semibold text-white">📞 Звонок</a>
+                )}
+                <button type="button" onClick={() => { setProfileOpen(false); setSearchOpen(true); setMessageSearch(''); }} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">⌕ Найти</button>
+                <button type="button" onClick={() => setSettingsOpen(true)} className="flex h-[48px] w-[48px] items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-xl text-slate-600">⋯</button>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-slate-700">Вложения</h4>
+                  <button type="button" onClick={openAttachments} className="text-xs font-medium text-emerald-700">Открыть</button>
+                </div>
+                <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto">
+                  {allAttachments.length === 0 ? <p className="col-span-2 text-xs text-slate-500">Нет вложений</p> : allAttachments.slice(0, 8).map((attachment) => (
+                    <button key={attachment.id} type="button" onClick={() => { setProfileOpen(false); openMedia(attachment); }} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      <AttachmentPreview attachment={attachment} compact onOpenMedia={openMedia} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <footer className="px-4 pb-4 text-center text-[11px] text-slate-400 md:hidden">

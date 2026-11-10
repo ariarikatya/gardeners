@@ -7,6 +7,7 @@ import InstallNotificationsGuideModal from '@/components/InstallNotificationsGui
 import EnablePushOnPwaModal from '@/components/EnablePushOnPwaModal';
 import PhotoViewer from '@/components/PhotoViewer';
 import ChatNavLink from '@/components/ChatNavLink';
+import SettingsMenu from '@/components/SettingsMenu';
 import apiFetch from '@/lib/apiFetch';
 import { clientNotify } from '@/lib/clientNotify';
 import { saveCache, getCache, activateOfflineSession, resolveOfflineRoleFromCaches, isOfflineSessionValid, touchOfflineSession, requestStoragePersistence } from '@/lib/offlineStore';
@@ -2532,7 +2533,7 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
+    <div className="min-h-screen bg-slate-50 pb-20 text-slate-800 sm:pb-0">
       {/* Шапка */}
       <header className="bg-emerald-900 text-white py-3 px-3 sm:px-6 shadow-md">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2543,89 +2544,17 @@ export default function AdminDashboard() {
           Выйти
         </button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
-          <a
-            href="/admin/amo-connect"
-            className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
-          >
-            🔌 amoCRM
-          </a>
-          <PushButton className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap" />
-          <button
-            onClick={async () => {
-              try {
-                const res = await apiFetch('/api/sync-amo');
-                const data = await res.json();
-                alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
-                window.location.reload();
-              } catch (e) {
-                alert('Ошибка при синхронизации с amoCRM');
-              }
-            }}
-            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all whitespace-nowrap"
-          >
-            🔄 Синхронизация
-          </button>
-          {currentUser?.role === 'LEADER' && (
-            <Link
-              href="/admin/users"
-              className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg px-2.5 py-1 transition-all"
-            >
-              👥 Пользователи
-            </Link>
-          )}
-          <div className="flex items-center gap-1 bg-emerald-800/50 rounded-lg px-2 py-1">
-            <span className="text-xs font-medium text-emerald-100">📊 Экспорт в Excel:</span>
-            <select
-              value={exportPeriod}
-              onChange={e => {
-                const val = e.target.value;
-                setExportPeriod(val);
-                if (val !== 'custom') {
-                  window.location.href = getExportUrl(val);
-                }
-              }}
-              className="bg-emerald-600 text-white text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-emerald-500 font-semibold cursor-pointer"
-            >
-              <option value="all">За всё время</option>
-              <option value="month">Этот месяц</option>
-              <option value="year">Этот год</option>
-              <option value="custom">Свой диапазон</option>
-            </select>
-            {exportPeriod === 'custom' && (
-              <div className="flex items-center gap-1">
-                <input type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600" />
-                <span className="text-emerald-200">—</span>
-                <input type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="text-xs rounded-lg px-2 py-1 border border-emerald-600" />
-                <a
-                  href={getExportUrl('custom')}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded text-xs font-bold"
-                >
-                  Скачать
-                </a>
-              </div>
-            )}
-          </div>
-          <button
-            onClick={handleSyncSheets}
-            disabled={syncing}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
-          >
-            {syncing ? '...' : <>🔄 <span className="hidden sm:inline">Google </span>Таблицы</>}
-          </button>
-
-          {/* Масштаб таблицы */}
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm">
           <div className="flex items-center gap-1">
             <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">-</button>
             <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
             <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="text-xs bg-emerald-600 text-white border rounded px-2">+</button>
           </div>
-
         </div>
       </header>
 
       {/* Меню вкладок */}
-      <div className="bg-white border-b border-slate-200 flex overflow-x-auto px-3 sm:px-6 py-2 gap-2 sm:gap-4 text-sm sm:text-base">
+      <div className="bg-white border-b border-slate-200 flex items-center overflow-visible px-3 sm:px-6 py-2 gap-2 sm:gap-4 text-sm sm:text-base">
         <button
           onClick={() => setActiveTab('calendar')}
           className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'calendar' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
@@ -2638,31 +2567,8 @@ export default function AdminDashboard() {
           💬 Чаты
         </ChatNavLink>
         <button
-          onClick={() => setActiveTab('gardeners')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'gardeners' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
-        >
-          🧑‍🌾 Садовники
-        </button>
-        <button
-          onClick={() => setActiveTab('services')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium whitespace-nowrap ${activeTab === 'services' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
-        >
-          🌿 Услуги
-        </button>
-        <button
-          onClick={() => setActiveTab('auction')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'auction' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
-        >
-          🔔 Аукцион
-          {auctionOrders.filter(o => o.status === 'Аукцион').length > 0 && (
-            <span className="ml-2 px-1.5 py-0.5 text-xs bg-amber-500 text-white rounded-full">
-              {auctionOrders.filter(o => o.status === 'Аукцион').length}
-            </span>
-          )}
-        </button>
-        <button
           onClick={() => setActiveTab('webleads')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+          className={`hidden sm:inline-flex px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           🌐 Заявки
           {webLeads.filter(l => l.status === 'Новая').length > 0 && (
@@ -2673,7 +2579,7 @@ export default function AdminDashboard() {
         </button>
         <button
           onClick={() => setActiveTab('refusals')}
-          className={`px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'refusals' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
+          className={`hidden sm:inline-flex px-3 sm:px-4 py-2 rounded-lg font-medium relative whitespace-nowrap ${activeTab === 'refusals' ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'}`}
         >
           ❌ Отказы
           {orders.filter(o => o.status === 'Отказ').length > 0 && (
@@ -2682,7 +2588,101 @@ export default function AdminDashboard() {
             </span>
           )}
         </button>
+        <div className="ml-auto">
+          <SettingsMenu>
+            <section className="space-y-2 border-b border-slate-200 pb-3">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Разделы</h2>
+              <div className="grid grid-cols-1 gap-1">
+                {[
+                  ['gardeners', '🧑‍🌾 Садовники'],
+                  ['services', '🌿 Услуги'],
+                  ['auction', '🔔 Аукцион'],
+                ].map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    data-dismiss-settings
+                    onClick={() => setActiveTab(tab)}
+                    className={`w-full rounded-lg px-3 py-2 text-left text-sm ${activeTab === tab ? 'bg-emerald-100 font-semibold text-emerald-800' : 'hover:bg-slate-100'}`}
+                  >
+                    {label}{tab === 'auction' && auctionOrders.filter(o => o.status === 'Аукцион').length > 0 ? ` (${auctionOrders.filter(o => o.status === 'Аукцион').length})` : ''}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section className="space-y-2">
+              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+              <div className="flex flex-wrap gap-2">
+                <a href="/admin/amo-connect" className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500">🔌 amoCRM</a>
+                <PushButton className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-2 text-sm font-medium text-white hover:bg-emerald-500" />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await apiFetch('/api/sync-amo');
+                      const data = await res.json();
+                      alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
+                      window.location.reload();
+                    } catch (e) {
+                      alert('Ошибка при синхронизации с amoCRM');
+                    }
+                  }}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                >
+                  🔄 Синхронизация
+                </button>
+                {currentUser?.role === 'LEADER' && <Link href="/admin/users" className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-500">👥 Пользователи</Link>}
+                <button
+                  type="button"
+                  onClick={handleSyncSheets}
+                  disabled={syncing}
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {syncing ? 'Синхронизация...' : '🔄 Google Таблицы'}
+                </button>
+              </div>
+              <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+                <label htmlFor="admin-export-period" className="block text-sm font-medium">📊 Экспорт в Excel</label>
+                <select
+                  id="admin-export-period"
+                  value={exportPeriod}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setExportPeriod(val);
+                    if (val !== 'custom') window.location.href = getExportUrl(val);
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+                >
+                  <option value="all">За всё время</option>
+                  <option value="month">Этот месяц</option>
+                  <option value="year">Этот год</option>
+                  <option value="custom">Свой диапазон</option>
+                </select>
+                {exportPeriod === 'custom' && (
+                  <div className="space-y-2">
+                    <label className="sr-only" htmlFor="admin-export-start">Начало периода</label>
+                    <input id="admin-export-start" type="date" value={exportCustomStart} onChange={e => setExportCustomStart(e.target.value)} className="w-full rounded-lg border px-2 py-2 text-sm" />
+                    <label className="sr-only" htmlFor="admin-export-end">Конец периода</label>
+                    <input id="admin-export-end" type="date" value={exportCustomEnd} onChange={e => setExportCustomEnd(e.target.value)} className="w-full rounded-lg border px-2 py-2 text-sm" />
+                    <a href={getExportUrl('custom')} className="inline-block rounded bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-500">Скачать</a>
+                  </div>
+                )}
+              </div>
+            </section>
+          </SettingsMenu>
+        </div>
       </div>
+
+      <nav aria-label="Основная навигация" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-2 gap-2 border-t border-slate-200 bg-white px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(15,23,42,0.12)] sm:hidden">
+        <button type="button" onClick={() => setActiveTab('webleads')} className={`relative rounded-lg px-3 py-2 text-sm font-semibold ${activeTab === 'webleads' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700'}`}>
+          🌐 Заявки
+          {webLeads.filter(l => l.status === 'Новая').length > 0 && <span className="ml-1 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] text-white">{webLeads.filter(l => l.status === 'Новая').length}</span>}
+        </button>
+        <button type="button" onClick={() => setActiveTab('refusals')} className={`relative rounded-lg px-3 py-2 text-sm font-semibold ${activeTab === 'refusals' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-700'}`}>
+          ❌ Отказы
+          {orders.filter(o => o.status === 'Отказ').length > 0 && <span className="ml-1 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] text-white">{orders.filter(o => o.status === 'Отказ').length}</span>}
+        </button>
+      </nav>
 
       {/* Баннер оффлайн-режима */}
       {(isOffline || pendingQueueCount > 0 || conflictItems.length > 0) && (

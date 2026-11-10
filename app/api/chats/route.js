@@ -8,14 +8,24 @@ export async function GET(req) {
 
   try {
     const chats = await prisma.chat.findMany({
-      where: { participants: { some: { userId: auth.user.id } } },
+      where: { participants: { some: { userId: auth.user.id, hiddenAt: null } } },
       include: {
         participants: {
           include: {
-            user: { select: { id: true, name: true, role: true } },
+            user: {
+              select: {
+                id: true,
+                name: true,
+                role: true,
+                phone: true,
+                lastActive: true,
+                gardener: { select: { phone: true, photo: true } },
+              },
+            },
           },
         },
         messages: {
+          where: { isDeleted: false },
           orderBy: { createdAt: 'desc' },
           take: 1,
           include: {
@@ -29,18 +39,45 @@ export async function GET(req) {
 
     const result = await Promise.all(chats.map(async (chat) => {
       const currentParticipant = chat.participants.find((participant) => participant.userId === auth.user.id);
+      const visibleLastMessage = chat.messages[0]
+        && (!currentParticipant?.historyClearedAt
+          || chat.messages[0].createdAt > currentParticipant.historyClearedAt)
+        ? chat.messages[0]
+        : null;
       const unreadCount = await prisma.chatMessage.count({
         where: {
           chatId: chat.id,
           isDeleted: false,
           senderId: { not: auth.user.id },
-          ...(currentParticipant?.lastReadAt ? { createdAt: { gt: currentParticipant.lastReadAt } } : {}),
+          ...((currentParticipant?.lastReadAt || currentParticipant?.historyClearedAt)
+            ? {
+              createdAt: {
+                gt: [currentParticipant.lastReadAt, currentParticipant.historyClearedAt]
+                  .filter(Boolean)
+                  .reduce((latest, date) => date > latest ? date : latest),
+              },
+            }
+            : {}),
         },
       });
 
-      const otherParticipants = chat.participants
-        .filter((participant) => participant.userId !== auth.user.id)
-        .map((participant) => participant.user);
+      const otherMemberships = chat.participants.filter((participant) => participant.userId !== auth.user.id);
+      const otherParticipants = otherMemberships.map(({ user }) => chat.isGroup ? ({
+        id: user.id,
+        name: user.name,
+        role: user.role,
+      }) : ({
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        phone: user.gardener?.phone || user.phone,
+        photo: user.gardener?.photo || null,
+        lastActive: user.lastActive,
+      }));
+      const muteActive = Boolean(
+        currentParticipant?.isMuted
+        && (!currentParticipant.mutedUntil || currentParticipant.mutedUntil > new Date())
+      );
 
       return {
         id: chat.id,
@@ -48,8 +85,12 @@ export async function GET(req) {
         isGroup: chat.isGroup,
         updatedAt: chat.updatedAt,
         participants: otherParticipants,
-        lastMessage: chat.messages[0] || null,
+        lastMessage: visibleLastMessage,
         unreadCount,
+        isMuted: muteActive,
+        mutedUntil: muteActive ? currentParticipant.mutedUntil : null,
+        blockedByMe: Boolean(currentParticipant?.blockedAt),
+        isBlocked: chat.participants.some(({ blockedAt }) => Boolean(blockedAt)),
       };
     }));
 
@@ -100,6 +141,10 @@ export async function POST(req) {
             })),
           },
         },
+      });
+      await prisma.chatParticipant.update({
+        where: { chatId_userId: { chatId: chat.id, userId: auth.user.id } },
+        data: { hiddenAt: null },
       });
     } else {
       const name = typeof body.name === 'string' ? body.name.trim().slice(0, 100) : '';

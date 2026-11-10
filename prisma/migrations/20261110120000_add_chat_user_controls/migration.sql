@@ -1,0 +1,9 @@
+ALTER TABLE "ChatParticipant"
+ADD COLUMN "historyClearedAt" TIMESTAMP(3),
+ADD COLUMN "hiddenAt" TIMESTAMP(3),
+ADD COLUMN "isMuted" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "mutedUntil" TIMESTAMP(3),
+ADD COLUMN "blockedAt" TIMESTAMP(3);
+
+ALTER TABLE "ChatMessage"
+ADD COLUMN "editedAt" TIMESTAMP(3);
