@@ -383,6 +383,8 @@ export default function ChatsPage() {
   const [notificationsDropdownOpen, setNotificationsDropdownOpen] = useState(false);
   const voiceTimerRef = useRef(null);
   const voiceAnimationFrameRef = useRef(null);
+  const voiceVisualizerRef = useRef(null);
+  const voiceBarCountRef = useRef(32);
   const audioContextRef = useRef(null);
   const audioAnalyserRef = useRef(null);
   const voiceDurationRef = useRef(0);
@@ -873,9 +875,7 @@ export default function ChatsPage() {
     setProfileAttachmentsModalOpen(false);
     setProfileOpen(true);
     try {
-      const senderId = activeChatRecipient?.id;
-      const senderQuery = senderId ? `?senderId=${encodeURIComponent(senderId)}` : '';
-      const data = await requestJson(`/api/chats/${encodeURIComponent(chatId)}/attachments${senderQuery}`);
+      const data = await requestJson(`/api/chats/${encodeURIComponent(chatId)}/attachments`);
       if (activeChatRef.current !== chatId) return;
       setAllAttachments(data.attachments || []);
     } catch (requestError) {
@@ -1045,11 +1045,11 @@ export default function ChatsPage() {
         console.error('Не удалось закрыть аудиоконтекст записи:', closeError);
       });
     }
-    setVoiceLevels(Array(32).fill(0.08));
+    setVoiceLevels(Array(voiceBarCountRef.current).fill(0.08));
   };
 
   const animateVoiceLevels = (analyser, audioContext) => {
-    const samples = new Uint8Array(analyser.frequencyBinCount);
+    const samples = new Uint8Array(analyser.fftSize);
     let lastUpdatedAt = 0;
     const drawLevels = (timestamp) => {
       if (
@@ -1061,8 +1061,20 @@ export default function ChatsPage() {
         return;
       }
       if (timestamp - lastUpdatedAt > 55) {
-        analyser.getByteFrequencyData(samples);
-        setVoiceLevels(Array.from(samples, (sample) => Math.max(0.08, sample / 255)));
+        analyser.getByteTimeDomainData(samples);
+        const barCount = voiceBarCountRef.current;
+        const levels = Array.from({ length: barCount }, (_, index) => {
+          const start = Math.floor(index * samples.length / barCount);
+          const end = Math.max(start + 1, Math.floor((index + 1) * samples.length / barCount));
+          let sumSquares = 0;
+          for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+            const amplitude = (samples[sampleIndex] - 128) / 128;
+            sumSquares += amplitude * amplitude;
+          }
+          const rms = Math.sqrt(sumSquares / (end - start));
+          return Math.max(0.08, Math.min(1, rms * 3));
+        });
+        setVoiceLevels(levels);
         lastUpdatedAt = timestamp;
       }
       voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
@@ -1070,12 +1082,32 @@ export default function ChatsPage() {
     voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
   };
 
+  useEffect(() => {
+    const visualizer = voiceVisualizerRef.current;
+    if (!visualizer) return undefined;
+
+    const updateBarCount = () => {
+      const nextCount = Math.max(8, Math.floor(visualizer.clientWidth / 6));
+      voiceBarCountRef.current = nextCount;
+    };
+    updateBarCount();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateBarCount);
+      return () => window.removeEventListener('resize', updateBarCount);
+    }
+
+    const observer = new ResizeObserver(updateBarCount);
+    observer.observe(visualizer);
+    return () => observer.disconnect();
+  }, [recordingAudio, voicePaused]);
+
   const startVoiceVisualization = async (stream) => {
     const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextConstructor) throw new Error('Визуализация записи недоступна в этом браузере');
     const audioContext = new AudioContextConstructor();
     const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 64;
+    analyser.fftSize = 256;
     audioContext.createMediaStreamSource(stream).connect(analyser);
     audioContextRef.current = audioContext;
     audioAnalyserRef.current = analyser;
@@ -1349,10 +1381,7 @@ export default function ChatsPage() {
   const activeChatRecipient = activeChat && !activeChat.isGroup
     ? activeChat.participants[0]
     : null;
-  const profileAttachments = useMemo(
-    () => allAttachments.filter((attachment) => attachment.message.sender.id === activeChatRecipient?.id),
-    [activeChatRecipient?.id, allAttachments]
-  );
+  const profileAttachments = allAttachments;
   const recipientIsOnline = Boolean(activeChatRecipient && chatPresence[activeChatRecipient.id]?.isOnline);
   const recipientStatusText = activeChatRecipient
     ? (recipientIsOnline ? 'В сети' : formatRelativeOnline(activeChatRecipient.lastActive))
@@ -1834,11 +1863,11 @@ export default function ChatsPage() {
                 {(recordingAudio || voicePaused) && (
                   <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50 px-2 py-2 text-sm text-slate-600">
                     <span className="shrink-0 text-xs tabular-nums">{voicePaused ? 'Пауза' : `${Math.floor(voiceDuration / 60)}:${String(voiceDuration % 60).padStart(2, '0')}`}</span>
-                    <div className="flex h-9 min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden" role="img" aria-label="Визуализация громкости записи">
+                    <div ref={voiceVisualizerRef} className="flex h-9 min-w-0 flex-1 items-center gap-0.5 overflow-hidden" role="img" aria-label="Визуализация громкости записи">
                       {voiceLevels.map((level, index) => (
                         <span
                           key={index}
-                          className={`w-1 shrink-0 rounded-full ${voicePaused ? 'bg-slate-400' : 'bg-rose-500'}`}
+                          className={`min-w-0 flex-1 rounded-full ${voicePaused ? 'bg-slate-400' : 'bg-rose-500'}`}
                           style={{ height: `${Math.max(4, Math.round(level * 32))}px` }}
                         />
                       ))}
@@ -2188,8 +2217,8 @@ export default function ChatsPage() {
           <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
               <div>
-                <h2 id="profile-attachments-title" className="font-bold">Вложения пользователя</h2>
-                <p className="text-xs text-slate-500">{activeChatRecipient.name} · {profileAttachments.length} вложений в чате</p>
+                <h2 id="profile-attachments-title" className="font-bold">Вложения чата</h2>
+                <p className="text-xs text-slate-500">Все участники · {profileAttachments.length} вложений</p>
               </div>
               <button type="button" onClick={() => setProfileAttachmentsModalOpen(false)} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
             </div>
