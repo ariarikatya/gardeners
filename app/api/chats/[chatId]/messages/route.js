@@ -5,7 +5,8 @@ import { saveUploadedFile } from '@/lib/uploads';
 import { sendToUsers } from '@/lib/webPush';
 
 const MAX_FILES_PER_MESSAGE = 10;
-const MAX_TOTAL_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_MULTIPART_BODY_BYTES = MAX_TOTAL_FILE_BYTES + 1024 * 1024;
 const MAX_MESSAGE_LENGTH = 4000;
 
 async function findMembership(chatId, userId) {
@@ -31,6 +32,10 @@ export async function GET(req, { params }) {
     if (!membership || membership.hiddenAt) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
 
     const search = new URL(req.url).searchParams.get('q')?.trim() || '';
+    const participants = await prisma.chatParticipant.findMany({
+      where: { chatId: params.chatId },
+      select: { userId: true },
+    });
     const messages = await prisma.chatMessage.findMany({
       where: {
         chatId: params.chatId,
@@ -55,7 +60,6 @@ export async function GET(req, { params }) {
             body: true,
             isDeleted: true,
             sender: { select: { id: true, name: true, role: true } },
-            attachments: { select: { id: true, filename: true, mimeType: true, size: true } },
           },
         },
         forwardedFromUser: { select: { id: true, name: true } },
@@ -71,10 +75,6 @@ export async function GET(req, { params }) {
       take: 200,
     });
 
-    const participants = await prisma.chatParticipant.findMany({
-      where: { chatId: params.chatId },
-      select: { userId: true },
-    });
     const now = Date.now();
     const participantIds = participants.map(({ userId }) => userId);
     const result = messages.reverse().map((message) => {
@@ -105,10 +105,7 @@ export async function GET(req, { params }) {
         replyToMessage: message.replyToMessage ? {
           ...message.replyToMessage,
           body: message.replyToMessage.isDeleted ? null : message.replyToMessage.body,
-          attachments: message.replyToMessage.isDeleted ? [] : message.replyToMessage.attachments.map((attachment) => ({
-            ...attachment,
-            url: `/api/chats/attachments/${attachment.id}`,
-          })),
+          attachments: [],
         } : null,
         forwardedBody: message.forwardedFromMessage?.body || null,
         readReceipts: undefined,
@@ -138,6 +135,11 @@ export async function POST(req, { params }) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {
+    const requestLength = Number(req.headers.get('content-length'));
+    if (Number.isFinite(requestLength) && requestLength > MAX_MULTIPART_BODY_BYTES) {
+      return NextResponse.json({ error: 'Размер сообщения с вложениями превышает лимит 100 МБ. Уменьшите файлы и попробуйте снова.' }, { status: 413 });
+    }
+
     const membership = await findMembership(params.chatId, auth.user.id);
     if (!membership || membership.hiddenAt) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 });
 
@@ -157,6 +159,7 @@ export async function POST(req, { params }) {
     const body = String(formData.get('body') || '').trim();
     const replyToMessageId = String(formData.get('replyToMessageId') || '').trim() || null;
     const forwardedFromMessageId = String(formData.get('forwardedFromMessageId') || '').trim() || null;
+    const forwardedFromUserId = String(formData.get('forwardedFromUserId') || '').trim() || null;
     const files = formData.getAll('files').filter((file) => file && typeof file.arrayBuffer === 'function');
 
     if (replyToMessageId && forwardedFromMessageId) {
@@ -171,7 +174,7 @@ export async function POST(req, { params }) {
 
     const totalBytes = files.reduce((total, file) => total + file.size, 0);
     if (totalBytes > MAX_TOTAL_FILE_BYTES) {
-      return NextResponse.json({ error: 'Общий размер вложений не должен превышать 25 МБ' }, { status: 400 });
+      return NextResponse.json({ error: 'Общий размер вложений не должен превышать 100 МБ' }, { status: 413 });
     }
     if (!body && files.length === 0 && !forwardedFromMessageId) {
       return NextResponse.json({ error: 'Введите сообщение или прикрепите файл' }, { status: 400 });
@@ -216,6 +219,9 @@ export async function POST(req, { params }) {
       if (!forwardedSource) {
         return NextResponse.json({ error: 'Исходное сообщение для пересылки не найдено' }, { status: 404 });
       }
+      if (forwardedFromUserId && forwardedFromUserId !== forwardedSource.senderId) {
+        return NextResponse.json({ error: 'Отправитель исходного сообщения не совпадает' }, { status: 400 });
+      }
       const sourceHistoryClearedAt = forwardedSource.chat.participants[0]?.historyClearedAt;
       if (sourceHistoryClearedAt && forwardedSource.createdAt <= sourceHistoryClearedAt) {
         return NextResponse.json({ error: 'Исходное сообщение для пересылки не найдено' }, { status: 404 });
@@ -228,7 +234,7 @@ export async function POST(req, { params }) {
     const totalAttachmentBytes = files.reduce((total, file) => total + file.size, 0)
       + (forwardedSource?.attachments.reduce((total, attachment) => total + attachment.size, 0) || 0);
     if (totalAttachmentBytes > MAX_TOTAL_FILE_BYTES) {
-      return NextResponse.json({ error: 'Общий размер вложений не должен превышать 25 МБ' }, { status: 400 });
+      return NextResponse.json({ error: 'Общий размер вложений не должен превышать 100 МБ' }, { status: 413 });
     }
 
     const uploaded = [];
@@ -243,7 +249,10 @@ export async function POST(req, { params }) {
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
-      const url = await saveUploadedFile(buffer, { filename: file.name });
+      const url = await saveUploadedFile(buffer, {
+        filename: file.name,
+        maxSizeBytes: MAX_TOTAL_FILE_BYTES,
+      });
       uploaded.push({
         filename: String(file.name || 'file').slice(0, 255),
         mimeType: mimeType.slice(0, 127),
@@ -273,10 +282,10 @@ export async function POST(req, { params }) {
           chatId: params.chatId,
           senderId: auth.user.id,
           body: body || null,
-          ...(replyTarget ? { replyToMessage: { connect: { id: replyTarget.id } } } : {}),
+          ...(replyTarget ? { replyToMessageId: replyTarget.id } : {}),
           ...(forwardedSource ? {
-            forwardedFromMessage: { connect: { id: forwardedSource.id } },
-            forwardedFromUser: { connect: { id: forwardedSource.senderId } },
+            forwardedFromMessageId: forwardedSource.id,
+            forwardedFromUserId: forwardedSource.senderId,
           } : {}),
           attachments: (uploaded.length || forwardedSource?.attachments.length) ? {
             create: [
@@ -392,8 +401,8 @@ export async function POST(req, { params }) {
     }, { status: 201 });
   } catch (error) {
     console.error('Ошибка POST /api/chats/[chatId]/messages:', error);
-    if (/formdata|request body/i.test(error.message || '')) {
-      return NextResponse.json({ error: 'Не удалось прочитать вложения. Проверьте размер файлов и попробуйте снова.' }, { status: 400 });
+    if (/formdata|request body|body size limit|entity too large|payload too large/i.test(error.message || '')) {
+      return NextResponse.json({ error: 'Размер сообщения с вложениями превышает лимит 100 МБ. Уменьшите файлы и попробуйте снова.' }, { status: 413 });
     }
     return NextResponse.json({ error: error.message || 'Не удалось отправить сообщение' }, { status: 500 });
   }

@@ -822,7 +822,7 @@ export default function LeaderDashboard() {
           <h1 className="text-base sm:text-lg font-bold">🌿 Руководитель</h1>
           <p className="text-[11px] sm:text-xs text-emerald-100">Статистика, прогнозы и распределение бонусов</p>
         </div>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-3 md:flex-nowrap">
           <div className="flex items-center gap-1 text-xs text-white">
             <span>Масштаб {Math.round(leaderScale * 100)}%</span>
             <button type="button" onClick={() => setLeaderScale(s => Math.max(0.7, +(s - 0.1).toFixed(1)))} aria-label="Уменьшить масштаб" className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 hover:bg-emerald-200">−</button>
