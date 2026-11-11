@@ -62,11 +62,7 @@ export async function GET(req) {
       });
 
       const otherMemberships = chat.participants.filter((participant) => participant.userId !== auth.user.id);
-      const otherParticipants = otherMemberships.map(({ user }) => chat.isGroup ? ({
-        id: user.id,
-        name: user.name,
-        role: user.role,
-      }) : ({
+      const otherParticipants = otherMemberships.map(({ user }) => ({
         id: user.id,
         name: user.name,
         role: user.role,

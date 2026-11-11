@@ -1963,7 +1963,7 @@ export default function GardenerDashboard() {
             </span>
           )}
         </div>
-        <div className="flex items-center justify-end">
+        <div className="ml-auto flex items-center justify-end">
           <SettingsMenu>
             <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />

@@ -27,6 +27,7 @@ model User {
   gardener             Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
   chatParticipants     ChatParticipant[]
   sentChatMessages    ChatMessage[] @relation("ChatMessageSender")
+  forwardedChatMessages ChatMessage[]     @relation("ChatMessageForwardedBy")
   chatMessageReads    ChatMessageRead[]
 }
 
@@ -70,14 +71,25 @@ model ChatMessage {
   updatedAt   DateTime         @default(now()) @updatedAt
   editedAt    DateTime?
   isDeleted   Boolean          @default(false)
+  replyToMessageId       String?
+  forwardedFromMessageId String?
+  forwardedFromUserId    String?
   chat        Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sender      User             @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  replyToMessage ChatMessage?  @relation("ChatMessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies     ChatMessage[]    @relation("ChatMessageReplies")
+  forwardedFromMessage ChatMessage? @relation("ChatMessageForwards", fields: [forwardedFromMessageId], references: [id], onDelete: SetNull)
+  forwardedMessages ChatMessage[] @relation("ChatMessageForwards")
+  forwardedFromUser User?      @relation("ChatMessageForwardedBy", fields: [forwardedFromUserId], references: [id], onDelete: SetNull)
   attachments ChatAttachment[]
   readReceipts ChatMessageRead[]
 
   @@index([chatId, createdAt])
   @@index([senderId])
   @@index([isDeleted])
+  @@index([replyToMessageId])
+  @@index([forwardedFromMessageId])
+  @@index([forwardedFromUserId])
 }
 
 model ChatMessageRead {

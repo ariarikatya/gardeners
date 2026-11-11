@@ -2575,7 +2575,7 @@ export default function AdminDashboard() {
           >
             Синхронизация
           </button>
-          {currentUser?.role === 'LEADER' && <Link href="/admin/users" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">Пользователи</Link>}
+          {currentUser?.role === 'LEADER' && <Link href="/leader/users" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">Пользователи</Link>}
           <button
             type="button"
             onClick={handleSyncSheets}
@@ -2620,13 +2620,16 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-slate-50 pb-20 text-slate-800 sm:pb-0">
       {/* Шапка */}
       <header className="bg-emerald-900 text-white py-3 px-3 sm:px-6 shadow-md">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base sm:text-xl font-bold flex items-center gap-2">
+        <div className="flex flex-nowrap items-center justify-between gap-2">
+        <h1 className="min-w-0 truncate text-base font-bold flex items-center gap-2 sm:text-xl">
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <button onClick={handleLogout} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-200 sm:px-4 sm:py-2 sm:text-sm">
-          Выйти
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button onClick={handleLogout} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-200 sm:px-4 sm:py-2 sm:text-sm">
+            Выйти
+          </button>
+          {adminSettingsMenu}
+        </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-xs sm:text-sm">
           <div className="flex items-center gap-1">
@@ -2634,7 +2637,6 @@ export default function AdminDashboard() {
             <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
             <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">+</button>
           </div>
-          {adminSettingsMenu}
         </div>
       </header>
 
