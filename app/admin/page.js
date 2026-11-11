@@ -2626,10 +2626,7 @@ export default function AdminDashboard() {
         <h1 className="min-w-0 truncate text-base font-bold flex items-center gap-2 sm:text-xl">
           🌲 <span className="hidden sm:inline">Анемон Агро — </span>Панель Диспетчера
         </h1>
-        <div className="flex shrink-0 items-center gap-2">
-          <button onClick={handleLogout} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-200 sm:px-4 sm:py-2 sm:text-sm">
-            Выйти
-          </button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <div className="hidden items-center gap-1 md:flex">
             <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">-</button>
             <div className="px-2 text-xs text-white">Масштаб {Math.round(tableScale * 100)}%</div>

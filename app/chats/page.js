@@ -390,6 +390,9 @@ export default function ChatsPage() {
   const voicePreviewUrlRef = useRef('');
   const voiceDraftUrlRef = useRef('');
   const voicePreviewAudioRef = useRef(null);
+  const voiceMediaStreamRef = useRef(null);
+  const voiceStartInProgressRef = useRef(false);
+  const voiceStartVersionRef = useRef(0);
   const discardRecordingRef = useRef(false);
   const sendVoiceAfterStopRef = useRef(false);
   const audioRecorderRef = useRef(null);
@@ -644,6 +647,7 @@ export default function ChatsPage() {
   }, [activeChatId]);
 
   useEffect(() => () => {
+    voiceStartVersionRef.current += 1;
     document.body.style.overflow = '';
     if (voiceTimerRef.current) window.clearInterval(voiceTimerRef.current);
     if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
@@ -659,10 +663,14 @@ export default function ChatsPage() {
       discardRecordingRef.current = true;
       try { audioRecorderRef.current.stop(); } catch (error) { /* no-op */ }
     }
+    voiceMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceMediaStreamRef.current = null;
   }, []);
 
   const chooseChat = (chatId, keepForwardDraft = false) => {
     setError('');
+    if (chatId !== activeChatId) deleteVoiceRecording();
+    activeChatRef.current = chatId;
     if (!keepForwardDraft && chatId !== activeChatId) {
       setForwardingMessage(null);
       setForwardingTargetChosen(false);
@@ -825,6 +833,10 @@ export default function ChatsPage() {
       await loadChats();
       requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
     } catch (requestError) {
+      console.error(
+        forwardingMessage && forwardingTargetChosen ? 'Не удалось переслать сообщение:' : 'Не удалось отправить сообщение:',
+        requestError
+      );
       setError(requestError.message || 'Не удалось отправить сообщение');
     } finally {
       setSending(false);
@@ -982,6 +994,7 @@ export default function ChatsPage() {
   };
 
   const closeChat = () => {
+    activeChatRef.current = '';
     setActiveChatId('');
     setMessages([]);
     setParticipantsOpen(false);
@@ -1057,15 +1070,26 @@ export default function ChatsPage() {
   };
 
   const startVoiceRecording = async () => {
-    if (audioRecorderRef.current) return;
+    if (audioRecorderRef.current || voiceStartInProgressRef.current) return;
     if (!activeChatId || !navigator.mediaDevices?.getUserMedia) {
       setError('Запись голоса недоступна в этом браузере');
       return;
     }
 
-    let stream;
+    const chatId = activeChatId;
+    const startVersion = voiceStartVersionRef.current;
+    voiceStartInProgressRef.current = true;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream = voiceMediaStreamRef.current;
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (startVersion !== voiceStartVersionRef.current || activeChatRef.current !== chatId) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        voiceMediaStreamRef.current = stream;
+      }
+      if (!stream.active) throw new Error('Поток микрофона остановлен. Отмените запись и попробуйте снова.');
       if (typeof MediaRecorder === 'undefined') throw new Error('Запись голоса недоступна в этом браузере');
       startVoiceVisualization(stream);
       const recorder = new MediaRecorder(stream);
@@ -1085,7 +1109,6 @@ export default function ChatsPage() {
       recorder.onstop = () => {
         if (discardRecordingRef.current) {
           discardRecordingRef.current = false;
-          stream.getTracks().forEach((track) => track.stop());
           audioRecorderRef.current = null;
           voiceChunksRef.current = [];
           stopVoiceVisualization();
@@ -1094,7 +1117,6 @@ export default function ChatsPage() {
         const mimeType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(chunks, { type: mimeType });
         if (!blob.size) {
-          stream.getTracks().forEach((track) => track.stop());
           audioRecorderRef.current = null;
           voiceChunksRef.current = [];
           stopVoiceVisualization();
@@ -1116,7 +1138,6 @@ export default function ChatsPage() {
         voiceDraftUrlRef.current = url;
         const completedDraft = { file, url, duration: voiceDurationRef.current };
         setVoiceDraft(completedDraft);
-        stream.getTracks().forEach((track) => track.stop());
         audioRecorderRef.current = null;
         stopVoiceVisualization();
         if (voiceTimerRef.current) {
@@ -1147,9 +1168,10 @@ export default function ChatsPage() {
         setVoiceDuration(voiceDurationRef.current);
       }, 1000);
     } catch (requestError) {
-      stream?.getTracks().forEach((track) => track.stop());
       stopVoiceVisualization();
       setError(requestError.message || 'Не удалось начать запись голоса');
+    } finally {
+      voiceStartInProgressRef.current = false;
     }
   };
 
@@ -1244,6 +1266,7 @@ export default function ChatsPage() {
   };
 
   const deleteVoiceRecording = () => {
+    voiceStartVersionRef.current += 1;
     const recorder = audioRecorderRef.current;
     sendVoiceAfterStopRef.current = false;
     if (recorder) {
@@ -1256,6 +1279,8 @@ export default function ChatsPage() {
         }
       }
     }
+    voiceMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceMediaStreamRef.current = null;
     setRecordingAudio(false);
     setVoicePaused(false);
     stopVoiceVisualization();
@@ -1563,6 +1588,8 @@ export default function ChatsPage() {
                     && !message.body
                     && !message.forwardedBody
                     && message.attachments?.length > 0;
+                  const mediaMetadataOverlay = onlyMedia
+                    && message.attachments.every((attachment) => isImageAttachment(attachment) || isVideoAttachment(attachment));
                   const shortMediaMessage = Boolean(
                     hasAttachments
                     && message.body
@@ -1593,7 +1620,7 @@ export default function ChatsPage() {
                         </div>
                       )}
                       <article
-                        className={`flex items-end gap-2 ${own ? 'justify-end' : 'justify-start'}`}
+                        className={`flex gap-2 ${own ? 'items-end justify-end' : 'items-start justify-start'}`}
                         onContextMenu={(event) => {
                           event.preventDefault();
                           if (!longPressTriggeredRef.current) openMessageMenu(message, event.clientX, event.clientY);
@@ -1666,7 +1693,7 @@ export default function ChatsPage() {
                           ) : (
                             <>
                               {message.attachments?.length > 0 && (
-                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2' : ''} relative grid gap-2 sm:grid-cols-2`}>
+                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2' : ''} relative grid grid-cols-1 gap-2 ${message.attachments.length > 1 ? 'sm:grid-cols-2' : ''}`}>
                                   {message.attachments.map((attachment) => (
                                     <div key={attachment.id} className="min-w-0">
                                       <AttachmentPreview
@@ -1676,10 +1703,12 @@ export default function ChatsPage() {
                                       />
                                     </div>
                                   ))}
-                                  <div className={`absolute bottom-1 right-1 z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[9px] text-white ${onlyMedia ? '' : 'shadow-sm'}`}>
-                                    {time}
-                                    {own && <MessageReadReceipt readByAll={message.readByAll} className="text-white" />}
-                                  </div>
+                                  {mediaMetadataOverlay && (
+                                    <div className={`absolute bottom-1 ${own ? 'right-1' : 'left-1'} z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[9px] text-white`}>
+                                      {time}
+                                      {own && <MessageReadReceipt readByAll={message.readByAll} className="text-white" />}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               {message.body && (
@@ -1696,9 +1725,9 @@ export default function ChatsPage() {
                               )}
                             </>
                           )}
-                          {((!shortText && !hasAttachments) || showMessageActions) && (
+                          {((!shortText && !mediaMetadataOverlay) || showMessageActions) && (
                             <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-slate-500">
-                              {!shortText && !hasAttachments && time}
+                              {!shortText && !mediaMetadataOverlay && time}
                               {own && message.canEdit && editingMessageId !== message.id && (
                                 <button
                                   type="button"
@@ -1725,7 +1754,7 @@ export default function ChatsPage() {
                                   </svg>
                                 </button>
                               )}
-                              {own && !shortText && !hasAttachments && (
+                              {own && !shortText && !mediaMetadataOverlay && (
                                 <MessageReadReceipt readByAll={message.readByAll} className={receiptColor} />
                               )}
                             </div>
@@ -1818,7 +1847,7 @@ export default function ChatsPage() {
                       className="p-2 text-slate-500 hover:text-slate-800"
                     >
                       {voicePaused
-                        ? <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M6 4.5a1 1 0 0 1 1.5-.86l7 4.5a2.2 2.2 0 0 1 0 3.72l-7 4.5A1 1 0 0 1 6 15.5z" /></svg>
+                        ? <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="7" y="2.5" width="6" height="10" rx="3" /><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5m-3 0h6" /></svg>
                         : <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M5.5 4.5h3v11h-3zm6 0h3v11h-3z" /></svg>}
                     </button>
                     {voicePaused && voicePreviewUrl && (
@@ -1936,31 +1965,6 @@ export default function ChatsPage() {
                 <input value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} placeholder="Название группы (необязательно)" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
               )}
 
-              {forwardPickerOpen && forwardingMessage && (
-                <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-labelledby="forward-chat-title" onClick={cancelForwarding}>
-                  <div className="flex max-h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
-                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-                      <h2 id="forward-chat-title" className="font-bold">Переслать в чат</h2>
-                      <button type="button" onClick={cancelForwarding} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
-                    </div>
-                    <div className="overflow-y-auto p-2">
-                      {chats.map((chat) => (
-                        <button key={chat.id} type="button" onClick={() => chooseForwardChat(chat.id)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-emerald-50">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-800">
-                            {(chatTitle(chat, user?.id) || 'Ч').trim().charAt(0).toUpperCase()}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{chatTitle(chat, user?.id)}</span>
-                          {chat.isGroup && <span className="text-xs text-slate-400">Группа</span>}
-                        </button>
-                      ))}
-                      {chats.length === 0 && <p className="px-3 py-6 text-center text-sm text-slate-500">Чатов пока нет</p>}
-                    </div>
-                    <div className="border-t border-slate-200 p-3">
-                      <button type="button" onClick={() => { setForwardPickerOpen(false); setNewChatOpen(true); }} className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600">+ Новый чат</button>
-                    </div>
-                  </div>
-                </div>
-              )}
               <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
                 {users.length === 0 ? <p className="p-4 text-sm text-slate-500">Пользователи не найдены</p> : users.map((candidate) => (
                   <label key={candidate.id} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-emerald-50">
@@ -1980,6 +1984,32 @@ export default function ChatsPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {forwardPickerOpen && forwardingMessage && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-labelledby="forward-chat-title" onClick={cancelForwarding}>
+          <div className="flex max-h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h2 id="forward-chat-title" className="font-bold">Переслать в чат</h2>
+              <button type="button" onClick={cancelForwarding} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
+            </div>
+            <div className="overflow-y-auto p-2">
+              {chats.map((chat) => (
+                <button key={chat.id} type="button" onClick={() => chooseForwardChat(chat.id)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-emerald-50">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-800">
+                    {(chatTitle(chat, user?.id) || 'Ч').trim().charAt(0).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{chatTitle(chat, user?.id)}</span>
+                  {chat.isGroup && <span className="text-xs text-slate-400">Группа</span>}
+                </button>
+              ))}
+              {chats.length === 0 && <p className="px-3 py-6 text-center text-sm text-slate-500">Чатов пока нет</p>}
+            </div>
+            <div className="border-t border-slate-200 p-3">
+              <button type="button" onClick={() => { setForwardPickerOpen(false); setNewChatOpen(true); }} className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600">+ Новый чат</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2139,7 +2169,9 @@ export default function ChatsPage() {
                   className="flex w-full items-center justify-between text-left text-sm font-semibold text-slate-700 hover:text-emerald-800"
                 >
                   <span>Вложения{profileAttachments.length ? ` (${profileAttachments.length})` : ''}</span>
-                  <span aria-hidden="true" className="text-lg leading-none text-slate-500">&gt;</span>
+                  <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m7 4 6 6-6 6" />
+                  </svg>
                 </button>
               </div>
             </div>
