@@ -1970,7 +1970,9 @@ export default function GardenerDashboard() {
             <a href="tel:88452650206" className="block rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-800 hover:bg-emerald-200">
               Диспетчер
             </a>
-            <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm text-emerald-800 hover:bg-emerald-200">Выйти</button>
+            <div className="border-t border-slate-200 pt-2">
+              <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-rose-50 px-3 py-2 text-left text-sm text-red-600 hover:bg-rose-100">Выйти</button>
+            </div>
           </SettingsMenu>
         </div>
       </header>
