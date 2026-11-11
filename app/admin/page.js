@@ -23,6 +23,7 @@ const emptyOrderForm = {
 
 const WEEKDAY_LABELS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const SEARCH_HORIZON_DAYS = 60;
+const ADMIN_ORDER_CACHE_TTL_MS = 60 * 1000;
 const DEFAULT_DISTRICTS = [
   'Шумейка', 'Генеральское', 'Малая Тополевка', 'Усть-Курдюм', 'Зоналка',
   'Юбилейный', 'Кумысная поляна', 'Центр', 'Поливановка', 'Ленинский район',
@@ -788,7 +789,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData(true);
   }, [currentMonth]);
 
   useEffect(() => {
@@ -929,7 +930,7 @@ export default function AdminDashboard() {
     return !navigator.onLine;
   };
 
-  const fetchData = async () => {
+  const fetchData = async (allowFreshOrderCache = false) => {
     const seq = ++fetchSeqRef.current;
     setLoading(true);
     setMonthLoading(true);
@@ -956,12 +957,16 @@ export default function AdminDashboard() {
 
     // Instant cache display on month change: first show canonical-key; if absent, fall back to cumulative admin_orders
     let hasImmediateCache = false;
+    let cachedOrdersForRequest = null;
+    let cachedDayCommentsForRequest = null;
+    let useFreshOrderCache = false;
     try {
       const cachedOrdersObj = await getCache(canonicalOrdersKey);
       let cachedOrders = cachedOrdersObj?.data;
       let cachedDayComments = (await getCache(canonicalCommentsKey))?.data;
       let isStale = false;
       let cacheTs = cachedOrdersObj?.updatedAt || null;
+      const canonicalCacheTs = cachedOrdersObj?.updatedAt;
 
       if (!cachedOrders) {
         const cumulativeObj = await getCache('admin_orders');
@@ -987,6 +992,19 @@ export default function AdminDashboard() {
       const cachedBlockedDays = (await getCache('admin_blockedDays'))?.data || [];
       const cachedWebLeads = (await getCache('admin_webLeads'))?.data || [];
       const cachedMe = (await getCache('admin_me'))?.data || null;
+      cachedOrdersForRequest = Array.isArray(cachedOrders) ? cachedOrders : null;
+      cachedDayCommentsForRequest = Array.isArray(cachedDayComments) ? cachedDayComments : null;
+      const canonicalCacheTimestamp = typeof canonicalCacheTs === 'number'
+        ? canonicalCacheTs
+        : Date.parse(canonicalCacheTs || '');
+      const cacheAge = Date.now() - canonicalCacheTimestamp;
+      useFreshOrderCache = allowFreshOrderCache
+        && !isStale
+        && Array.isArray(cachedOrdersForRequest)
+        && Array.isArray(cachedDayCommentsForRequest)
+        && Number.isFinite(canonicalCacheTimestamp)
+        && cacheAge >= 0
+        && cacheAge < ADMIN_ORDER_CACHE_TTL_MS;
 
       if (seq === fetchSeqRef.current && (cachedOrders || cachedGardeners.length > 0)) {
         hasImmediateCache = true;
@@ -1003,6 +1021,10 @@ export default function AdminDashboard() {
         if (cachedWebLeads.length > 0) setWebLeads(cachedWebLeads);
         if (cachedDayComments) setDayComments(cachedDayComments || []);
         if (cachedMe) setCurrentUser(cachedMe);
+      }
+      if (hasImmediateCache && seq === fetchSeqRef.current) {
+        setLoading(false);
+        setMonthLoading(false);
       }
     } catch (cacheErr) {
       console.warn('Error reading instant cache on month switch:', cacheErr);
@@ -1042,14 +1064,16 @@ export default function AdminDashboard() {
     try {
       const [resG, resO, resD, resB, resS, resMe] = await Promise.all([
         apiFetch('/api/admin/gardeners'),
-        apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
+        useFreshOrderCache
+          ? Promise.resolve(null)
+          : apiFetch(`/api/admin/orders?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         apiFetch(`/api/admin/dayoff?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         apiFetch(`/api/admin/blockday?start=${encodeURIComponent(startOfMonth.toISOString())}&end=${encodeURIComponent(endOfMonth.toISOString())}`),
         apiFetch('/api/admin/services'),
         apiFetch('/api/auth/me')
       ]);
 
-      if (!resG.ok || !resO.ok) {
+      if (!resG.ok || (resO && !resO.ok)) {
         throw new Error('Server returned error or offline 503');
       }
 
@@ -1059,7 +1083,9 @@ export default function AdminDashboard() {
         saveCache('admin_me', meData.user || null);
       }
       const dataG = await resG.json();
-      const dataO = await resO.json();
+      const dataO = useFreshOrderCache
+        ? { orders: cachedOrdersForRequest || [], dayComments: cachedDayCommentsForRequest || [] }
+        : await resO.json();
       const dataD = resD.ok ? await resD.json() : {};
       const dataB = resB.ok ? await resB.json() : {};
       const dataS = resS.ok ? await resS.json() : {};
@@ -1095,15 +1121,16 @@ export default function AdminDashboard() {
       // 1.3: Save canonical and cumulative cache immediately (incrementally) so data is on disk
       // Do not overwrite canonical key with empty array if there was already non-empty data in cache
       const prevCanonicalOrders = (await getCache(canonicalOrdersKey))?.data;
-      const shouldSaveCanonicalOrders = allOrd.length > 0 || !Array.isArray(prevCanonicalOrders) || prevCanonicalOrders.length === 0;
+      const shouldSaveCanonicalOrders = !useFreshOrderCache
+        && (allOrd.length > 0 || !Array.isArray(prevCanonicalOrders) || prevCanonicalOrders.length === 0);
 
       await Promise.all([
         shouldSaveCanonicalOrders ? saveCache(canonicalOrdersKey, allOrd) : Promise.resolve(),
-        saveCache(canonicalCommentsKey, comments),
+        useFreshOrderCache ? Promise.resolve() : saveCache(canonicalCommentsKey, comments),
       ]);
       await Promise.all([
-        saveCache('admin_orders', mergedOrders),
-        saveCache('admin_day_comments', mergedComments),
+        useFreshOrderCache ? Promise.resolve() : saveCache('admin_orders', mergedOrders),
+        useFreshOrderCache ? Promise.resolve() : saveCache('admin_day_comments', mergedComments),
         saveCache('admin_gardeners', dataG.gardeners || []),
         saveCache('admin_services', dataS.services || []),
         saveCache('admin_dayOffs', dataD.dayOffs || []),
