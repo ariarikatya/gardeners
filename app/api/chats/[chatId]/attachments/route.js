@@ -7,6 +7,7 @@ export async function GET(req, { params }) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {
+    const senderId = new URL(req.url).searchParams.get('senderId');
     const membership = await prisma.chatParticipant.findUnique({
       where: { chatId_userId: { chatId: params.chatId, userId: auth.user.id } },
       select: { id: true, hiddenAt: true },
@@ -18,6 +19,7 @@ export async function GET(req, { params }) {
         message: {
           chatId: params.chatId,
           isDeleted: false,
+          ...(senderId ? { senderId } : {}),
         },
       },
       select: {

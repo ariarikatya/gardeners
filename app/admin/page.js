@@ -2585,7 +2585,6 @@ export default function AdminDashboard() {
           >
             {syncing ? 'Синхронизация...' : 'Google Таблицы'}
           </button>
-          <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm text-emerald-800 hover:bg-emerald-100">Выйти</button>
         </div>
         <div className="space-y-2 rounded-lg bg-slate-50 p-2">
           <label htmlFor="admin-export-period" className="block text-sm font-medium">Экспорт в Excel</label>
@@ -2614,6 +2613,7 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
+        <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-rose-50 px-3 py-2 text-left text-sm text-red-600 hover:bg-rose-100">Выйти</button>
       </section>
     </SettingsMenu>
   );
