@@ -18,6 +18,7 @@ export async function GET(req, { params }) {
         message: {
           chatId: params.chatId,
           isDeleted: false,
+          replyToMessageId: null,
         },
       },
       select: {

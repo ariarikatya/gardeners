@@ -30,9 +30,18 @@ function formatDate(value) {
   return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
 
-function formatMessageDate(value) {
+function formatDateSeparator(value) {
   if (!value) return '';
-  return new Date(value).toLocaleDateString('ru-RU', {
+  const date = new Date(value);
+  const today = new Date();
+  date.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  const dateDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const dayDifference = (todayDay - dateDay) / 86_400_000;
+  if (dayDifference === 0) return 'Сегодня';
+  if (dayDifference === 1) return 'Вчера';
+  return date.toLocaleDateString('ru-RU', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
@@ -341,6 +350,7 @@ export default function ChatsPage() {
   const [user, setUser] = useState(null);
   const [chats, setChats] = useState([]);
   const [users, setUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [activeChatId, setActiveChatId] = useState('');
   const [messages, setMessages] = useState([]);
   const [messageSearch, setMessageSearch] = useState('');
@@ -443,16 +453,14 @@ export default function ChatsPage() {
     async function initialize() {
       try {
         setLoading(true);
-        const [me, chatData, userData] = await Promise.all([
+        const [me, chatData] = await Promise.all([
           requestJson('/api/auth/me'),
           loadChats(),
-          requestJson('/api/chats/users'),
         ]);
         if (cancelled) return;
         if (!me.user) throw new Error('Пользователь не найден');
         setUser(me.user);
         setChats(chatData);
-        setUsers(userData.users || []);
         const requestedChat = new URLSearchParams(window.location.search).get('chat');
         const firstChat = requestedChat && chatData.some((chat) => chat.id === requestedChat)
           ? requestedChat
@@ -550,20 +558,24 @@ export default function ChatsPage() {
   }, [activeChatId, loadChats, loadMessages, markRead, messageSearch, user?.id]);
 
   useEffect(() => {
+    if (!newChatOpen) return undefined;
     let cancelled = false;
+    setLoadingUsers(true);
     const timer = window.setTimeout(async () => {
       try {
         const data = await requestJson(`/api/chats/users?q=${encodeURIComponent(userSearch.trim())}`);
         if (!cancelled) setUsers(data.users || []);
       } catch (requestError) {
         if (!cancelled) setError(requestError.message || 'Не удалось найти пользователей');
+      } finally {
+        if (!cancelled) setLoadingUsers(false);
       }
     }, 250);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [userSearch]);
+  }, [newChatOpen, userSearch]);
 
   useEffect(() => {
     if (!participantsOpen || !showAddParticipant) return undefined;
@@ -1648,7 +1660,7 @@ export default function ChatsPage() {
                       {startsNewDay && (
                         <div className="mb-3 mt-4 flex justify-center">
                           <span className="rounded-full bg-slate-200/80 px-3 py-1 text-[11px] font-medium text-slate-600">
-                            {formatMessageDate(message.createdAt)}
+                            {formatDateSeparator(message.createdAt)}
                           </span>
                         </div>
                       )}
@@ -1999,15 +2011,19 @@ export default function ChatsPage() {
               )}
 
               <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
-                {users.length === 0 ? <p className="p-4 text-sm text-slate-500">Пользователи не найдены</p> : users.map((candidate) => (
-                  <label key={candidate.id} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-emerald-50">
-                    <input type="checkbox" checked={selectedUserIds.includes(candidate.id)} onChange={() => toggleSelectedUser(candidate.id)} className="h-4 w-4 accent-emerald-700" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold">{candidate.name}</span>
-                      <span className="block text-xs text-slate-500">{ROLE_LABELS[candidate.role] || candidate.role}</span>
-                    </span>
-                  </label>
-                ))}
+                {loadingUsers
+                  ? <p className="p-4 text-sm text-slate-500">Загрузка пользователей…</p>
+                  : users.length === 0
+                    ? <p className="p-4 text-sm text-slate-500">Пользователи не найдены</p>
+                    : users.map((candidate) => (
+                        <label key={candidate.id} className="flex cursor-pointer items-center gap-3 px-3 py-3 hover:bg-emerald-50">
+                          <input type="checkbox" checked={selectedUserIds.includes(candidate.id)} onChange={() => toggleSelectedUser(candidate.id)} className="h-4 w-4 accent-emerald-700" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-semibold">{candidate.name}</span>
+                            <span className="block text-xs text-slate-500">{ROLE_LABELS[candidate.role] || candidate.role}</span>
+                          </span>
+                        </label>
+                  ))}
               </div>
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
