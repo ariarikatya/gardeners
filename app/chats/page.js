@@ -30,6 +30,21 @@ function formatDate(value) {
   return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 }
 
+function formatMessageDate(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function formatAttachmentDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return `${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })} · ${formatTime(value)}`;
+}
+
 function formatParticipantCount(count) {
   const lastTwoDigits = count % 100;
   const lastDigit = count % 10;
@@ -61,6 +76,24 @@ function formatRelativeOnline(lastActive) {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} ч назад`;
   return 'Был в сети давно';
+}
+
+function formatLastSeen(lastActive) {
+  if (!lastActive) return 'Был в сети давно';
+  const date = new Date(lastActive);
+  if (!Number.isFinite(date.getTime())) return 'Был в сети давно';
+  const now = new Date();
+  const minutes = Math.max(0, Math.round((now.getTime() - date.getTime()) / 60_000));
+  if (minutes < 60) return `Был в сети ${minutes} мин назад`;
+  if (minutes < 24 * 60) return `Был в сети ${Math.round(minutes / 60)} ч назад`;
+  const sameDay = date.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const wasYesterday = date.toDateString() === yesterday.toDateString();
+  const time = formatTime(date);
+  if (sameDay) return `Был в сети сегодня, ${time}`;
+  if (wasYesterday) return `Был в сети вчера, ${time}`;
+  return `Был в сети ${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}, ${time}`;
 }
 
 async function requestJson(url, options = {}) {
@@ -241,6 +274,12 @@ function sameMessageContent(left, right) {
     || left.canDelete !== right.canDelete
     || left.isDeleted !== right.isDeleted
     || left.editedAt !== right.editedAt
+    || left.replyToMessage?.id !== right.replyToMessage?.id
+    || left.replyToMessage?.body !== right.replyToMessage?.body
+    || left.replyToMessage?.isDeleted !== right.replyToMessage?.isDeleted
+    || left.forwardedFromUser?.id !== right.forwardedFromUser?.id
+    || left.forwardedBody !== right.forwardedBody
+    || left.sender?.photo !== right.sender?.photo
   ) return false;
   const leftAttachments = left.attachments || [];
   const rightAttachments = right.attachments || [];
@@ -297,6 +336,7 @@ export default function ChatsPage() {
   const [creatingChat, setCreatingChat] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [allAttachments, setAllAttachments] = useState([]);
+  const [profileAttachmentsOpen, setProfileAttachmentsOpen] = useState(false);
   const [mediaGallery, setMediaGallery] = useState(null);
   const [mediaIndex, setMediaIndex] = useState(0);
   const [participantsOpen, setParticipantsOpen] = useState(false);
@@ -310,11 +350,24 @@ export default function ChatsPage() {
   const [recordingAudio, setRecordingAudio] = useState(false);
   const [voicePaused, setVoicePaused] = useState(false);
   const [voiceDuration, setVoiceDuration] = useState(0);
+  const [voiceLevels, setVoiceLevels] = useState(Array(32).fill(0.08));
   const [voiceDraft, setVoiceDraft] = useState(null);
+  const [replyingToMessage, setReplyingToMessage] = useState(null);
+  const [forwardingMessage, setForwardingMessage] = useState(null);
+  const [forwardingTargetChosen, setForwardingTargetChosen] = useState(false);
+  const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
+  const [messageMenu, setMessageMenu] = useState(null);
+  const [notificationsDropdownOpen, setNotificationsDropdownOpen] = useState(false);
   const voiceTimerRef = useRef(null);
+  const voiceAnimationFrameRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const audioAnalyserRef = useRef(null);
   const voiceDurationRef = useRef(0);
   const discardRecordingRef = useRef(false);
+  const sendVoiceAfterStopRef = useRef(false);
   const audioRecorderRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [participantSearch, setParticipantSearch] = useState('');
   const [participantUsers, setParticipantUsers] = useState([]);
@@ -566,14 +619,25 @@ export default function ChatsPage() {
   useEffect(() => () => {
     document.body.style.overflow = '';
     if (voiceTimerRef.current) window.clearInterval(voiceTimerRef.current);
+    if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
+    if (voiceAnimationFrameRef.current) window.cancelAnimationFrame(voiceAnimationFrameRef.current);
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch((closeError) => {
+        console.error('Не удалось закрыть аудиоконтекст записи:', closeError);
+      });
+    }
     if (audioRecorderRef.current && audioRecorderRef.current.state !== 'inactive') {
       discardRecordingRef.current = true;
       try { audioRecorderRef.current.stop(); } catch (error) { /* no-op */ }
     }
   }, []);
 
-  const chooseChat = (chatId) => {
+  const chooseChat = (chatId, keepForwardDraft = false) => {
     setError('');
+    if (!keepForwardDraft && chatId !== activeChatId) {
+      setForwardingMessage(null);
+      setForwardingTargetChosen(false);
+    }
     if (chatId !== activeChatId) {
       setMessages([]);
       latestMessageRef.current = '';
@@ -584,6 +648,8 @@ export default function ChatsPage() {
     setAttachmentsOpen(false);
     setParticipantsOpen(false);
     setEditingMessageId('');
+    setReplyingToMessage(null);
+    setMessageMenu(null);
   };
 
   const toggleSelectedUser = (id) => {
@@ -611,7 +677,8 @@ export default function ChatsPage() {
       setSelectedUserIds([]);
       setUserSearch('');
       setGroupName('');
-      chooseChat(data.chatId);
+      if (forwardingMessage) setForwardingTargetChosen(true);
+      chooseChat(data.chatId, Boolean(forwardingMessage));
     } catch (requestError) {
       setError(requestError.message || 'Не удалось создать чат');
     } finally {
@@ -619,11 +686,71 @@ export default function ChatsPage() {
     }
   };
 
+  const openMessageMenu = (message, x, y) => {
+    if (message.isDeleted) return;
+    setMessageMenu({
+      message,
+      x: Math.max(8, Math.min(x, window.innerWidth - 200)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 120)),
+    });
+  };
+
+  const startMessageReply = (message) => {
+    setReplyingToMessage(message);
+    setForwardingMessage(null);
+    setForwardingTargetChosen(false);
+    setMessageMenu(null);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+  };
+
+  const startMessageForward = (message) => {
+    setForwardingMessage(message);
+    setForwardingTargetChosen(false);
+    setReplyingToMessage(null);
+    setMessageMenu(null);
+    setForwardPickerOpen(true);
+  };
+
+  const chooseForwardChat = (chatId) => {
+    setForwardPickerOpen(false);
+    setReplyingToMessage(null);
+    chooseChat(chatId, true);
+    setForwardingTargetChosen(true);
+  };
+
+  const cancelForwarding = () => {
+    setForwardPickerOpen(false);
+    setForwardingMessage(null);
+    setForwardingTargetChosen(false);
+  };
+
+  const startMessageLongPress = (event, message) => {
+    if (event.target.closest('button, a, input, textarea')) return;
+    const point = event.touches?.[0];
+    if (!point) return;
+    longPressTriggeredRef.current = false;
+    window.clearTimeout(longPressTimerRef.current);
+    const { clientX, clientY } = point;
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      openMessageMenu(message, clientX, clientY);
+    }, 550);
+  };
+
+  const cancelMessageLongPress = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   const sendMessage = async (event) => {
     event.preventDefault();
-    if (!activeChatId || sending || (!draft.trim() && selectedFiles.length === 0)) return;
+    if (!activeChatId || sending || (!draft.trim() && selectedFiles.length === 0 && !(forwardingMessage && forwardingTargetChosen))) return;
     const formData = new FormData();
     formData.set('body', draft.trim());
+    if (replyingToMessage) formData.set('replyToMessageId', replyingToMessage.id);
+    if (forwardingMessage && forwardingTargetChosen) formData.set('forwardedFromMessageId', forwardingMessage.id);
 
     try {
       setSending(true);
@@ -652,6 +779,9 @@ export default function ChatsPage() {
       setDraft('');
       if (messageInputRef.current) messageInputRef.current.style.height = '';
       setSelectedFiles([]);
+      setReplyingToMessage(null);
+      setForwardingMessage(null);
+      setForwardingTargetChosen(false);
       await markRead(activeChatId);
       await loadChats();
       requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
@@ -689,6 +819,7 @@ export default function ChatsPage() {
 
   const openProfile = async (chatId = activeChatId) => {
     if (!chatId) return;
+    setProfileAttachmentsOpen(false);
     setProfileOpen(true);
     try {
       const data = await requestJson(`/api/chats/${encodeURIComponent(chatId)}/attachments`);
@@ -819,6 +950,11 @@ export default function ChatsPage() {
     setProfileOpen(false);
     setSearchOpen(false);
     setAttachmentsOpen(false);
+    setReplyingToMessage(null);
+    setForwardingMessage(null);
+    setForwardingTargetChosen(false);
+    setForwardPickerOpen(false);
+    setMessageMenu(null);
     deleteVoiceRecording();
     loadedChatIdRef.current = '';
     window.history.replaceState(null, '', '/chats');
@@ -842,6 +978,45 @@ export default function ChatsPage() {
     }
   };
 
+  const stopVoiceVisualization = () => {
+    if (voiceAnimationFrameRef.current) {
+      window.cancelAnimationFrame(voiceAnimationFrameRef.current);
+      voiceAnimationFrameRef.current = null;
+    }
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    audioAnalyserRef.current = null;
+    if (audioContext && audioContext.state !== 'closed') {
+      audioContext.close().catch((closeError) => {
+        console.error('Не удалось закрыть аудиоконтекст записи:', closeError);
+      });
+    }
+    setVoiceLevels(Array(32).fill(0.08));
+  };
+
+  const startVoiceVisualization = (stream) => {
+    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextConstructor) throw new Error('Визуализация записи недоступна в этом браузере');
+    const audioContext = new AudioContextConstructor();
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 64;
+    audioContext.createMediaStreamSource(stream).connect(analyser);
+    audioContextRef.current = audioContext;
+    audioAnalyserRef.current = analyser;
+    const samples = new Uint8Array(analyser.frequencyBinCount);
+    let lastUpdatedAt = 0;
+    const drawLevels = (timestamp) => {
+      if (audioRecorderRef.current?.state !== 'recording') return;
+      if (timestamp - lastUpdatedAt > 55) {
+        analyser.getByteFrequencyData(samples);
+        setVoiceLevels(Array.from(samples, (sample) => Math.max(0.08, sample / 255)));
+        lastUpdatedAt = timestamp;
+      }
+      voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
+    };
+    voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
+  };
+
   const startVoiceRecording = async () => {
     if (audioRecorderRef.current) return;
     if (!activeChatId || !navigator.mediaDevices?.getUserMedia) {
@@ -849,8 +1024,11 @@ export default function ChatsPage() {
       return;
     }
 
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (typeof MediaRecorder === 'undefined') throw new Error('Запись голоса недоступна в этом браузере');
+      startVoiceVisualization(stream);
       const recorder = new MediaRecorder(stream);
       const chunks = [];
       recorder.ondataavailable = (event) => {
@@ -861,6 +1039,7 @@ export default function ChatsPage() {
           discardRecordingRef.current = false;
           stream.getTracks().forEach((track) => track.stop());
           audioRecorderRef.current = null;
+          stopVoiceVisualization();
           return;
         }
         const mimeType = recorder.mimeType || 'audio/webm';
@@ -868,6 +1047,9 @@ export default function ChatsPage() {
         if (!blob.size) {
           stream.getTracks().forEach((track) => track.stop());
           audioRecorderRef.current = null;
+          stopVoiceVisualization();
+          sendVoiceAfterStopRef.current = false;
+          setError('Не удалось создать голосовое сообщение: запись пуста');
           return;
         }
         const extension = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
@@ -875,9 +1057,19 @@ export default function ChatsPage() {
           type: blob.type || mimeType,
         });
         const url = URL.createObjectURL(blob);
-        setVoiceDraft({ file, url, duration: voiceDurationRef.current });
+        const completedDraft = { file, url, duration: voiceDurationRef.current };
+        setVoiceDraft(completedDraft);
         stream.getTracks().forEach((track) => track.stop());
         audioRecorderRef.current = null;
+        stopVoiceVisualization();
+        if (voiceTimerRef.current) {
+          window.clearInterval(voiceTimerRef.current);
+          voiceTimerRef.current = null;
+        }
+        if (sendVoiceAfterStopRef.current) {
+          sendVoiceAfterStopRef.current = false;
+          sendVoiceMessage(completedDraft);
+        }
       };
       recorder.start();
       audioRecorderRef.current = recorder;
@@ -886,11 +1078,15 @@ export default function ChatsPage() {
       setVoiceDraft(null);
       setVoiceDuration(0);
       voiceDurationRef.current = 0;
+      setVoiceLevels(Array(32).fill(0.08));
+      sendVoiceAfterStopRef.current = false;
       voiceTimerRef.current = window.setInterval(() => {
         voiceDurationRef.current += 1;
         setVoiceDuration(voiceDurationRef.current);
       }, 1000);
     } catch (requestError) {
+      stream?.getTracks().forEach((track) => track.stop());
+      stopVoiceVisualization();
       setError(requestError.message || 'Не удалось начать запись голоса');
     }
   };
@@ -901,10 +1097,12 @@ export default function ChatsPage() {
     try {
       recorder.stop();
     } catch (requestError) {
+      sendVoiceAfterStopRef.current = false;
       setError(requestError.message || 'Не удалось завершить запись');
     } finally {
       setRecordingAudio(false);
       setVoicePaused(false);
+      stopVoiceVisualization();
       if (voiceTimerRef.current) {
         window.clearInterval(voiceTimerRef.current);
         voiceTimerRef.current = null;
@@ -918,6 +1116,10 @@ export default function ChatsPage() {
     recorder.pause();
     setRecordingAudio(false);
     setVoicePaused(true);
+    if (voiceAnimationFrameRef.current) {
+      window.cancelAnimationFrame(voiceAnimationFrameRef.current);
+      voiceAnimationFrameRef.current = null;
+    }
     if (voiceTimerRef.current) {
       window.clearInterval(voiceTimerRef.current);
       voiceTimerRef.current = null;
@@ -930,6 +1132,26 @@ export default function ChatsPage() {
     recorder.resume();
     setRecordingAudio(true);
     setVoicePaused(false);
+    if (audioContextRef.current?.state === 'suspended') {
+      audioContextRef.current.resume().catch((resumeError) => {
+        setError(resumeError.message || 'Не удалось возобновить визуализацию записи');
+      });
+    }
+    if (audioAnalyserRef.current) {
+      const analyser = audioAnalyserRef.current;
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+      let lastUpdatedAt = 0;
+      const drawLevels = (timestamp) => {
+        if (audioRecorderRef.current?.state !== 'recording') return;
+        if (timestamp - lastUpdatedAt > 55) {
+          analyser.getByteFrequencyData(samples);
+          setVoiceLevels(Array.from(samples, (sample) => Math.max(0.08, sample / 255)));
+          lastUpdatedAt = timestamp;
+        }
+        voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
+      };
+      voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
+    }
     voiceTimerRef.current = window.setInterval(() => {
       voiceDurationRef.current += 1;
       setVoiceDuration(voiceDurationRef.current);
@@ -938,6 +1160,7 @@ export default function ChatsPage() {
 
   const deleteVoiceRecording = () => {
     const recorder = audioRecorderRef.current;
+    sendVoiceAfterStopRef.current = false;
     if (recorder) {
       discardRecordingRef.current = true;
       if (recorder.state !== 'inactive') {
@@ -950,6 +1173,7 @@ export default function ChatsPage() {
     }
     setRecordingAudio(false);
     setVoicePaused(false);
+    stopVoiceVisualization();
     if (voiceDraft?.url) URL.revokeObjectURL(voiceDraft.url);
     setVoiceDraft(null);
     setVoiceDuration(0);
@@ -960,20 +1184,22 @@ export default function ChatsPage() {
     }
   };
 
-  const sendVoiceMessage = async () => {
-    if (!voiceDraft || !activeChatId) return;
+  const sendVoiceMessage = async (draftToSend = voiceDraft) => {
+    if (!draftToSend || !activeChatId) return;
     try {
       setSending(true);
       const formData = new FormData();
-      formData.append('files', voiceDraft.file);
+      formData.append('files', draftToSend.file);
+      if (replyingToMessage) formData.set('replyToMessageId', replyingToMessage.id);
       const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/messages`, {
         method: 'POST',
         body: formData,
       });
       setMessages((current) => [...current, data.message]);
       latestMessageRef.current = data.message.id;
-      URL.revokeObjectURL(voiceDraft.url);
+      URL.revokeObjectURL(draftToSend.url);
       setVoiceDraft(null);
+      setReplyingToMessage(null);
       setVoiceDuration(0);
       voiceDurationRef.current = 0;
       await markRead(activeChatId);
@@ -986,8 +1212,15 @@ export default function ChatsPage() {
     }
   };
 
+  const sendPausedVoiceRecording = () => {
+    if (!audioRecorderRef.current || audioRecorderRef.current.state !== 'paused') return;
+    sendVoiceAfterStopRef.current = true;
+    stopVoiceRecording();
+  };
+
   const toggleChatSettings = () => {
     setProfileOpen(false);
+    setNotificationsDropdownOpen(false);
     setSettingsOpen((open) => !open);
   };
 
@@ -998,6 +1231,7 @@ export default function ChatsPage() {
   const recipientStatusText = activeChatRecipient
     ? (recipientIsOnline ? 'В сети' : formatRelativeOnline(activeChatRecipient.lastActive))
     : (activeChat?.isGroup ? `${activeChat.participants.length} участников` : 'Личный чат');
+  const forwardingDraftMessage = forwardingTargetChosen ? forwardingMessage : null;
   const homePath = user?.role === 'ADMIN' ? '/admin' : user?.role === 'LEADER' ? '/leader' : '/gardener';
   return (
     <main className="chat-page flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-slate-100 text-slate-800">
@@ -1023,6 +1257,26 @@ export default function ChatsPage() {
           <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
             <span>{error}</span>
             <button type="button" onClick={() => setError('')} aria-label="Закрыть сообщение об ошибке">×</button>
+          </div>
+        </div>
+      )}
+
+      {messageMenu && (
+        <div
+          className="fixed inset-0 z-[200]"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setMessageMenu(null);
+          }}
+          onContextMenu={(event) => { event.preventDefault(); setMessageMenu(null); }}
+        >
+          <div
+            role="menu"
+            className="fixed z-[201] w-48 rounded-xl border border-slate-200 bg-white p-1.5 text-sm shadow-xl"
+            style={{ left: messageMenu.x, top: messageMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button type="button" role="menuitem" onClick={() => startMessageReply(messageMenu.message)} className="w-full rounded-lg px-3 py-2 text-left hover:bg-slate-50">Ответить</button>
+            <button type="button" role="menuitem" onClick={() => startMessageForward(messageMenu.message)} className="w-full rounded-lg px-3 py-2 text-left hover:bg-slate-50">Переслать</button>
           </div>
         </div>
       )}
@@ -1122,14 +1376,37 @@ export default function ChatsPage() {
                           </button>
                         </div>
                         <div className="mt-2 border-t border-slate-100 pt-2">
-                          <p className="px-2.5 pb-1 text-xs font-semibold text-slate-500">Уведомления</p>
-                          <div className="space-y-1">
-                            {['1h', '4h', '24h', 'forever'].map((duration) => (
-                              <button key={duration} type="button" onClick={() => applyChatSetting(chatSettings?.isMuted ? 'unmute' : 'mute', chatSettings?.isMuted ? undefined : duration)} className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-slate-50">
-                                {duration === 'forever' ? 'Навсегда' : duration === '1h' ? 'На 1 час' : duration === '4h' ? 'На 4 часа' : 'На 24 часа'}
-                              </button>
-                            ))}
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setNotificationsDropdownOpen((open) => !open)}
+                            aria-expanded={notificationsDropdownOpen}
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left font-semibold hover:bg-slate-50"
+                          >
+                            <span>Уведомления</span>
+                            <span aria-hidden="true" className="text-slate-400">{notificationsDropdownOpen ? '⌄' : '›'}</span>
+                          </button>
+                          {notificationsDropdownOpen && (
+                            <div className="px-2.5 pb-1">
+                              <p className="pb-1 text-[11px] text-slate-400">Отключить уведомления</p>
+                              <div className="space-y-1">
+                                {[
+                                  ['1h', 'На 1 час'],
+                                  ['4h', 'На 4 часа'],
+                                  ['24h', 'На 24 часа'],
+                                  ['forever', 'Навсегда'],
+                                ].map(([duration, label]) => (
+                                  <button key={duration} type="button" onClick={() => applyChatSetting('mute', duration)} className="w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-slate-50">
+                                    {label}
+                                  </button>
+                                ))}
+                                {chatSettings?.isMuted && (
+                                  <button type="button" onClick={() => applyChatSetting('unmute')} className="w-full rounded-lg px-2 py-1.5 text-left text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                                    Включить уведомления
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                         {!activeChat.isGroup && (
                           <button type="button" onClick={() => {
@@ -1154,19 +1431,21 @@ export default function ChatsPage() {
 
               {searchOpen && (
                 <div className="sticky top-0 z-10 h-[68px] shrink-0 border-b border-slate-100 bg-white p-3">
-                  <div className="flex h-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
-                    <span aria-hidden="true" className="text-slate-400">⌕</span>
-                    <input
-                      id="chat-search"
-                      type="search"
-                      value={messageSearch}
-                      onChange={(event) => setMessageSearch(event.target.value)}
-                      onFocus={() => { document.body.style.overflow = 'hidden'; }}
-                      onBlur={() => { document.body.style.overflow = ''; }}
-                      placeholder="Поиск по сообщениям…"
-                      className="h-full w-full bg-transparent text-base text-slate-700 outline-none placeholder:text-slate-400"
-                    />
-                    <button type="button" onClick={() => { setSearchOpen(false); setMessageSearch(''); }} className="text-xs font-semibold text-slate-500">Отмена</button>
+                  <div className="flex h-full items-center gap-2">
+                    <div className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3">
+                      <span aria-hidden="true" className="text-slate-400">⌕</span>
+                      <input
+                        id="chat-search"
+                        type="search"
+                        value={messageSearch}
+                        onChange={(event) => setMessageSearch(event.target.value)}
+                        onFocus={() => { document.body.style.overflow = 'hidden'; }}
+                        onBlur={() => { document.body.style.overflow = ''; }}
+                        placeholder="Поиск по сообщениям…"
+                        className="h-full w-full bg-transparent text-base text-slate-700 outline-none placeholder:text-slate-400"
+                      />
+                    </div>
+                    <button type="button" onClick={() => { setSearchOpen(false); setMessageSearch(''); }} className="shrink-0 text-sm font-semibold text-rose-600">Отмена</button>
                   </div>
                 </div>
               )}
@@ -1177,105 +1456,187 @@ export default function ChatsPage() {
                 {!loadingMessages && messages.length === 0 ? (
                   <p className="py-12 text-center text-sm text-slate-500">{messageSearch ? 'Ничего не найдено' : 'Сообщений пока нет. Напишите первым!'}</p>
                 ) : null}
-                {messages.map((message) => {
+                {messages.map((message, index) => {
                   const own = message.senderId === user?.id;
+                  const previousMessage = messages[index - 1];
+                  const startsNewDay = !previousMessage
+                    || new Date(previousMessage.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
+                  const hasAttachments = !message.isDeleted && message.attachments?.length > 0;
+                  const onlyMedia = !message.isDeleted
+                    && !message.body
+                    && !message.forwardedBody
+                    && message.attachments?.length > 0;
+                  const mediaEdgeClass = onlyMedia
+                    ? ''
+                    : `-mx-3 ${message.replyToMessage || message.forwardedFromUser || (!own && activeChat.isGroup) ? '' : '-mt-2'}`;
+                  const shortText = Boolean(
+                    message.body
+                    && !message.attachments?.length
+                    && message.body.trim().split('\n').length <= 2
+                    && message.body.length <= 60
+                    && !message.forwardedBody
+                  );
                   return (
-                    <article key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[88%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] ${own ? 'rounded-br-sm bg-emerald-100 text-emerald-950' : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800'}`}>
-                        {!own && activeChat.isGroup && (
-                          <div className="mb-2 flex items-center gap-1.5 text-[10px] leading-4 text-slate-500">
-                            <span className="font-semibold text-slate-600">{message.sender.name}</span>
-                            <span className="opacity-80">{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
-                          </div>
-                        )}
-                        {editingMessageId === message.id ? (
-                          <form onSubmit={(event) => saveEditedMessage(event, message)} className="space-y-2">
-                            <textarea
-                              autoFocus
-                              value={editDraft}
-                              onChange={(event) => setEditDraft(event.target.value)}
-                              maxLength={4000}
-                              rows={3}
-                              className="box-border min-h-11 w-full resize-none overflow-y-auto rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base leading-[1.5] text-slate-900 outline-none focus:border-emerald-600"
-                              aria-label="Редактировать сообщение"
-                            />
-                            <div className="flex justify-end gap-2">
-                              <button type="button" onClick={() => { setEditingMessageId(''); setEditDraft(''); }} className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-white">Отмена</button>
-                              <button type="submit" disabled={savingEdit} className="rounded bg-emerald-700 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">{savingEdit ? 'Сохранение…' : 'Сохранить'}</button>
-                            </div>
-                          </form>
-                        ) : message.isDeleted ? (
-                          <p className="text-sm italic text-slate-500">Сообщение удалено</p>
-                        ) : message.body && (
-                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                            {message.body}
-                            {isEditedMessage(message)
-                              ? <span className="ml-1 text-xs text-slate-500">(изменено)</span>
-                              : null}
-                          </p>
-                        )}
-                        {!message.isDeleted && message.attachments?.length > 0 && (
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            {message.attachments.map((attachment) => (
-                              <div key={attachment.id} className="min-w-0">
-                                <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
-                                {isImageAttachment(attachment)
-                                  ? <p className="mt-1 max-w-64 truncate text-xs text-slate-500" title={attachment.filename}>{attachment.filename}</p>
-                                  : isVideoAttachment(attachment)
-                                    ? <a href={attachment.url} target="_blank" rel="noreferrer" className="mt-1 block max-w-64 truncate text-xs text-emerald-800 underline">{attachment.filename}</a>
-                                    : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-slate-500">
-                          <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
-                          {own && message.canEdit && editingMessageId !== message.id && (
-                            <button
-                              type="button"
-                              onClick={() => { setEditingMessageId(message.id); setEditDraft(message.body || ''); }}
-                              aria-label="Редактировать сообщение"
-                              title="Редактировать"
-                              className="ml-1 rounded p-1 text-slate-500 hover:bg-white hover:text-emerald-800"
-                            >
-                              <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                <path d="m13.5 3.5 3 3M4 16l3.8-.8L17 6a2.1 2.1 0 0 0-3-3L4.8 12.2 4 16Z" />
-                              </svg>
-                            </button>
-                          )}
-                          {own && message.canDelete && (
-                            <button
-                              type="button"
-                              onClick={() => deleteMessage(message)}
-                              aria-label="Удалить сообщение"
-                              title="Удалить"
-                              className="rounded p-1 text-slate-500 hover:bg-white hover:text-rose-700"
-                            >
-                              <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
-                              </svg>
-                            </button>
-                          )}
-                          {own && (
-                            <svg
-                              aria-label={message.readByAll ? 'Прочитано всеми' : 'Отправлено'}
-                              role="img"
-                              viewBox="0 0 18 12"
-                              className={`h-3 w-[18px] ${message.readByAll ? 'text-sky-600' : 'text-slate-500'}`}
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              {message.readByAll
-                                ? <path d="m1 6 3.2 3.2L10.8 2M6.5 6l3.2 3.2L17.3 2" />
-                                : <path d="m3 6 3.2 3.2L12.8 2" />}
-                            </svg>
-                          )}
+                    <div key={message.id}>
+                      {startsNewDay && (
+                        <div className="mb-3 mt-4 flex justify-center">
+                          <span className="rounded-full bg-slate-200/80 px-3 py-1 text-[11px] font-medium text-slate-600">
+                            {formatMessageDate(message.createdAt)}
+                          </span>
                         </div>
-                      </div>
-                    </article>
+                      )}
+                      <article
+                        className={`flex items-end gap-2 ${own ? 'justify-end' : 'justify-start'}`}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          if (!longPressTriggeredRef.current) openMessageMenu(message, event.clientX, event.clientY);
+                          longPressTriggeredRef.current = false;
+                        }}
+                        onTouchStart={(event) => startMessageLongPress(event, message)}
+                        onTouchEnd={cancelMessageLongPress}
+                        onTouchMove={cancelMessageLongPress}
+                      >
+                        {!own && activeChat.isGroup && (
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-800">
+                            {message.sender.photo
+                              ? <img src={message.sender.photo} alt="" className="h-full w-full object-cover" />
+                              : (message.sender.name || '?').trim().charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                        <div className={`min-w-0 ${onlyMedia ? 'relative max-w-[min(50vw,24rem)] overflow-hidden' : `max-w-[88%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] ${hasAttachments ? 'overflow-hidden' : ''} ${own ? 'rounded-br-sm bg-emerald-100 text-emerald-950' : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800'}`}`}>
+                          {!own && activeChat.isGroup && !onlyMedia && (
+                            <div className="mb-2 flex items-center gap-1.5 text-[10px] leading-4 text-slate-500">
+                              <span className="font-semibold text-slate-600">{message.sender.name}</span>
+                              <span className="opacity-80">{ROLE_LABELS[message.sender.role] || message.sender.role}</span>
+                            </div>
+                          )}
+                          {message.replyToMessage && !message.isDeleted && (
+                            <div className="mb-2 flex max-w-full items-center gap-2 border-l-2 border-emerald-600 bg-black/[0.04] px-2 py-1 text-xs">
+                              {message.replyToMessage.attachments?.some((attachment) => isImageAttachment(attachment)) && (
+                                <span className="h-9 w-9 shrink-0 overflow-hidden rounded">
+                                  <AttachmentPreview
+                                    attachment={message.replyToMessage.attachments.find((attachment) => isImageAttachment(attachment))}
+                                    compact
+                                    onOpenMedia={openMedia}
+                                  />
+                                </span>
+                              )}
+                              <span className="min-w-0">
+                                <span className="block truncate font-semibold text-emerald-800">{message.replyToMessage.sender.name}</span>
+                                <span className="block truncate text-slate-600">
+                                  {message.replyToMessage.body
+                                    || (message.replyToMessage.attachments?.length
+                                      ? fileKind(message.replyToMessage.attachments[0].mimeType, message.replyToMessage.attachments[0].filename)
+                                      : 'Сообщение удалено')}
+                                </span>
+                              </span>
+                            </div>
+                          )}
+                          {message.forwardedFromUser && !message.isDeleted && (
+                            <div className="mb-2 border-l-2 border-sky-500 bg-black/[0.04] px-2 py-1 text-xs">
+                              <span className="block font-semibold text-sky-700">Переслано от {message.forwardedFromUser.name}</span>
+                              {message.forwardedBody && <span className="mt-0.5 block whitespace-pre-wrap break-words text-slate-700">{message.forwardedBody}</span>}
+                            </div>
+                          )}
+                          {editingMessageId === message.id ? (
+                            <form onSubmit={(event) => saveEditedMessage(event, message)} className="space-y-2">
+                              <textarea
+                                autoFocus
+                                value={editDraft}
+                                onChange={(event) => setEditDraft(event.target.value)}
+                                maxLength={4000}
+                                rows={3}
+                                className="box-border min-h-11 w-full resize-none overflow-y-auto rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base leading-[1.5] text-slate-900 outline-none focus:border-emerald-600"
+                                aria-label="Редактировать сообщение"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button type="button" onClick={() => { setEditingMessageId(''); setEditDraft(''); }} className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-white">Отмена</button>
+                                <button type="submit" disabled={savingEdit} className="rounded bg-emerald-700 px-2 py-1 text-xs font-semibold text-white disabled:opacity-50">{savingEdit ? 'Сохранение…' : 'Сохранить'}</button>
+                              </div>
+                            </form>
+                          ) : message.isDeleted ? (
+                            <p className="text-sm italic text-slate-500">Сообщение удалено</p>
+                          ) : (
+                            <>
+                              {!message.forwardedFromUser && message.attachments?.length > 0 && (
+                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2' : ''} grid gap-2 sm:grid-cols-2`}>
+                                  {message.attachments.map((attachment) => (
+                                    <div key={attachment.id} className="min-w-0">
+                                      <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {message.body && !message.forwardedFromUser && (
+                                <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${shortText ? 'inline' : ''}`}>
+                                  {message.body}
+                                  {isEditedMessage(message) ? <span className="ml-1 text-xs text-slate-500">(изменено)</span> : null}
+                                  {shortText && <time dateTime={message.createdAt} className="ml-2 inline text-[9px] text-slate-500">{formatTime(message.createdAt)}</time>}
+                                </p>
+                              )}
+                              {message.forwardedFromUser && message.attachments?.length > 0 && (
+                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2 mt-1' : 'mt-1'} grid gap-2 sm:grid-cols-2`}>
+                                  {message.attachments.map((attachment) => (
+                                    <div key={attachment.id} className="min-w-0">
+                                      <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {message.body && message.forwardedFromUser && (
+                                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.body}</p>
+                              )}
+                            </>
+                          )}
+                          <div className={`${onlyMedia ? 'absolute bottom-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-white' : `${shortText ? 'mt-0.5' : 'mt-1'} text-slate-500`} flex items-center justify-end gap-1 text-[9px]`}>
+                              {(!shortText || onlyMedia) && <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>}
+                              {own && message.canEdit && editingMessageId !== message.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setEditingMessageId(message.id); setEditDraft(message.body || ''); }}
+                                  aria-label="Редактировать сообщение"
+                                  title="Редактировать"
+                                  className={`ml-1 rounded p-1 ${onlyMedia ? 'text-white hover:bg-black/30' : 'text-slate-500 hover:bg-white hover:text-emerald-800'}`}
+                                >
+                                  <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <path d="m13.5 3.5 3 3M4 16l3.8-.8L17 6a2.1 2.1 0 0 0-3-3L4.8 12.2 4 16Z" />
+                                  </svg>
+                                </button>
+                              )}
+                              {own && message.canDelete && (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteMessage(message)}
+                                  aria-label="Удалить сообщение"
+                                  title="Удалить"
+                                  className={`rounded p-1 ${onlyMedia ? 'text-white hover:bg-black/30' : 'text-slate-500 hover:bg-white hover:text-rose-700'}`}
+                                >
+                                  <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
+                                  </svg>
+                                </button>
+                              )}
+                              {own && (
+                                <svg
+                                  aria-label={message.readByAll ? 'Прочитано всеми' : 'Отправлено'}
+                                  role="img"
+                                  viewBox="0 0 18 12"
+                                  className={`h-3 w-[18px] ${onlyMedia ? 'text-white' : message.readByAll ? 'text-sky-600' : 'text-slate-500'}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  {message.readByAll
+                                    ? <path d="m1 6 3.2 3.2L10.8 2M6.5 6l3.2 3.2L17.3 2" />
+                                    : <path d="m3 6 3.2 3.2L12.8 2" />}
+                                </svg>
+                              )}
+                          </div>
+                        </div>
+                      </article>
+                    </div>
                   );
                 })}
                 </div>
@@ -1283,7 +1644,42 @@ export default function ChatsPage() {
               </div>
 
               <form onSubmit={sendMessage} className="sticky bottom-0 z-10 shrink-0 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:p-4">
-                {selectedFiles.length > 0 && (
+                {replyingToMessage && !recordingAudio && !voicePaused && !voiceDraft && (
+                  <div className="mb-2 flex items-center gap-2 border-l-2 border-emerald-600 bg-emerald-50 px-3 py-2">
+                    {replyingToMessage.attachments?.some((attachment) => isImageAttachment(attachment)) && (
+                      <img
+                        src={replyingToMessage.attachments.find((attachment) => isImageAttachment(attachment)).url}
+                        alt=""
+                        className="h-9 w-9 shrink-0 rounded object-cover"
+                      />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold text-emerald-800">Ответ {replyingToMessage.sender?.name || 'пользователю'}</span>
+                      <span className="block truncate text-xs text-slate-600">
+                        {replyingToMessage.body
+                          || (replyingToMessage.attachments?.length
+                            ? fileKind(replyingToMessage.attachments[0].mimeType, replyingToMessage.attachments[0].filename)
+                            : 'Сообщение')}
+                      </span>
+                    </span>
+                    <button type="button" onClick={() => setReplyingToMessage(null)} aria-label="Отменить ответ" className="shrink-0 rounded px-2 py-1 text-slate-500 hover:bg-white">×</button>
+                  </div>
+                )}
+                {forwardingDraftMessage && !recordingAudio && !voicePaused && !voiceDraft && (
+                  <div className="mb-2 flex items-center gap-2 border-l-2 border-sky-500 bg-sky-50 px-3 py-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold text-sky-700">Переслано от {forwardingDraftMessage.sender?.name || 'пользователя'}</span>
+                      <span className="block truncate text-xs text-slate-600">
+                        {forwardingDraftMessage.body
+                          || (forwardingDraftMessage.attachments?.length
+                            ? fileKind(forwardingDraftMessage.attachments[0].mimeType, forwardingDraftMessage.attachments[0].filename)
+                            : 'Сообщение')}
+                      </span>
+                    </span>
+                    <button type="button" onClick={cancelForwarding} aria-label="Отменить пересылку" className="shrink-0 rounded px-2 py-1 text-slate-500 hover:bg-white">×</button>
+                  </div>
+                )}
+                {!recordingAudio && !voicePaused && !voiceDraft && selectedFiles.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {selectedFiles.map((file, index) => (
                       <span key={`${file.name}-${file.lastModified}-${index}`} className="inline-flex max-w-full items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
@@ -1301,14 +1697,23 @@ export default function ChatsPage() {
                         <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
                       </svg>
                     </button>
-                    <button type="button" onClick={sendVoiceMessage} disabled={sending} aria-label="Отправить голосовое сообщение" title="Отправить" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-50">
+                    <button type="button" onClick={() => sendVoiceMessage()} disabled={sending} aria-label="Отправить голосовое сообщение" title="Отправить" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-50">
                       {sending ? <span className="text-sm">…</span> : <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h13m-5-5 5 5-5 5" /></svg>}
                     </button>
                   </div>
                 )}
                 {(recordingAudio || voicePaused) && (
-                  <div className="mb-2 flex items-center gap-3 px-1 text-sm text-slate-600">
-                    <span className="min-w-0 flex-1 truncate">{voicePaused ? 'Запись на паузе' : `Запись ${voiceDuration} с`}</span>
+                  <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50 px-2 py-2 text-sm text-slate-600">
+                    <span className="shrink-0 text-xs tabular-nums">{voicePaused ? 'Пауза' : `${Math.floor(voiceDuration / 60)}:${String(voiceDuration % 60).padStart(2, '0')}`}</span>
+                    <div className="flex h-9 min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden" role="img" aria-label="Визуализация громкости записи">
+                      {voiceLevels.map((level, index) => (
+                        <span
+                          key={index}
+                          className={`w-1 shrink-0 rounded-full ${voicePaused ? 'bg-slate-400' : 'bg-rose-500'}`}
+                          style={{ height: `${Math.max(4, Math.round(level * 32))}px` }}
+                        />
+                      ))}
+                    </div>
                     <button
                       type="button"
                       onClick={voicePaused ? resumeVoiceRecording : pauseVoiceRecording}
@@ -1320,9 +1725,11 @@ export default function ChatsPage() {
                         ? <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M6 4.5a1 1 0 0 1 1.5-.86l7 4.5a2.2 2.2 0 0 1 0 3.72l-7 4.5A1 1 0 0 1 6 15.5z" /></svg>
                         : <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M5.5 4.5h3v11h-3zm6 0h3v11h-3z" /></svg>}
                     </button>
-                    <button type="button" onClick={stopVoiceRecording} aria-label="Завершить запись" title="Готово" className="p-2 text-slate-500 hover:text-slate-800">
-                      <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><rect x="5" y="5" width="10" height="10" rx="1.5" /></svg>
-                    </button>
+                    {voicePaused && (
+                      <button type="button" onClick={sendPausedVoiceRecording} disabled={sending} aria-label="Отправить голосовое сообщение" title="Отправить" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-50">
+                        <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h13m-5-5 5 5-5 5" /></svg>
+                      </button>
+                    )}
                     <button type="button" onClick={deleteVoiceRecording} aria-label="Удалить запись" title="Удалить запись" className="p-2 text-rose-600 hover:text-rose-700">
                       <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
@@ -1330,7 +1737,8 @@ export default function ChatsPage() {
                     </button>
                   </div>
                 )}
-                <div className="flex items-end gap-2">
+                {!recordingAudio && !voicePaused && !voiceDraft && (
+                  <div className="flex items-end gap-2">
                   <div className="shrink-0">
                     <button
                       type="button"
@@ -1361,10 +1769,10 @@ export default function ChatsPage() {
                     }}
                     rows={1}
                     maxLength={4000}
-                    placeholder="Сообщение"
+                    placeholder={replyingToMessage ? 'Ответить на сообщение…' : forwardingDraftMessage ? 'Комментарий к пересылке…' : 'Сообщение'}
                     className="chat-input-textarea min-w-0 flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-base text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                   />
-                  {!draft.trim() && selectedFiles.length === 0 && !voiceDraft && !recordingAudio && !voicePaused ? (
+                  {!draft.trim() && selectedFiles.length === 0 && !forwardingDraftMessage && !replyingToMessage ? (
                     <button
                       type="button"
                       aria-label="Записать голосовое сообщение"
@@ -1375,12 +1783,13 @@ export default function ChatsPage() {
                         <rect x="7" y="2.5" width="6" height="10" rx="3" /><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5m-3 0h6" />
                       </svg>
                     </button>
-                  ) : (draft.trim() || selectedFiles.length > 0) ? (
-                    <button disabled={sending || (!draft.trim() && selectedFiles.length === 0)} type="submit" aria-label="Отправить сообщение" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50">
+                  ) : (draft.trim() || selectedFiles.length > 0 || forwardingDraftMessage) ? (
+                    <button disabled={sending || (!draft.trim() && selectedFiles.length === 0 && !forwardingDraftMessage)} type="submit" aria-label="Отправить сообщение" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50">
                       {sending ? '…' : <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4m-5 5 5-5 5 5" /></svg>}
                     </button>
                   ) : null}
-                </div>
+                  </div>
+                )}
               </form>
             </>
           )}
@@ -1395,12 +1804,44 @@ export default function ChatsPage() {
                 <h2 id="new-chat-title" className="font-bold">Новый чат</h2>
                 <p className="text-xs text-slate-500">Один человек — личная переписка, несколько — группа</p>
               </div>
-              <button type="button" onClick={() => setNewChatOpen(false)} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
+              <button type="button" onClick={() => {
+                setNewChatOpen(false);
+                if (forwardingMessage && !forwardingTargetChosen) {
+                  setForwardingMessage(null);
+                  setForwardingTargetChosen(false);
+                }
+              }} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
             </div>
             <div className="space-y-3 overflow-y-auto p-4">
               <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Найти пользователя…" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
               {selectedUserIds.length > 1 && (
                 <input value={groupName} onChange={(event) => setGroupName(event.target.value)} maxLength={100} placeholder="Название группы (необязательно)" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+              )}
+
+              {forwardPickerOpen && forwardingMessage && (
+                <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-labelledby="forward-chat-title" onClick={cancelForwarding}>
+                  <div className="flex max-h-[85dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                      <h2 id="forward-chat-title" className="font-bold">Переслать в чат</h2>
+                      <button type="button" onClick={cancelForwarding} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
+                    </div>
+                    <div className="overflow-y-auto p-2">
+                      {chats.map((chat) => (
+                        <button key={chat.id} type="button" onClick={() => chooseForwardChat(chat.id)} className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left hover:bg-emerald-50">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-800">
+                            {(chatTitle(chat, user?.id) || 'Ч').trim().charAt(0).toUpperCase()}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{chatTitle(chat, user?.id)}</span>
+                          {chat.isGroup && <span className="text-xs text-slate-400">Группа</span>}
+                        </button>
+                      ))}
+                      {chats.length === 0 && <p className="px-3 py-6 text-center text-sm text-slate-500">Чатов пока нет</p>}
+                    </div>
+                    <div className="border-t border-slate-200 p-3">
+                      <button type="button" onClick={() => { setForwardPickerOpen(false); setNewChatOpen(true); }} className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600">+ Новый чат</button>
+                    </div>
+                  </div>
+                </div>
               )}
               <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
                 {users.length === 0 ? <p className="p-4 text-sm text-slate-500">Пользователи не найдены</p> : users.map((candidate) => (
@@ -1438,8 +1879,10 @@ export default function ChatsPage() {
               <div className="divide-y divide-slate-100">
                 {chatParticipants.map((participant) => (
                   <div key={participant.id} className="flex items-center gap-3 px-2 py-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-800">
-                      {(participant.name || '?').trim().charAt(0).toUpperCase()}
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-100 font-semibold text-emerald-800">
+                      {participant.photo
+                        ? <img src={participant.photo} alt="" className="h-full w-full object-cover" />
+                        : (participant.name || '?').trim().charAt(0).toUpperCase()}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold">
@@ -1447,7 +1890,9 @@ export default function ChatsPage() {
                       </span>
                       <span className="block text-xs text-slate-500">
                         {ROLE_LABELS[participant.role] || participant.role}
-                        {participant.isOnline && <span className="ml-1 font-medium text-emerald-700">· В сети</span>}
+                        {participant.isOnline
+                          ? <span className="ml-1 font-medium text-emerald-700">· В сети</span>
+                          : <span className="ml-1">· {formatLastSeen(participant.lastActive)}</span>}
                       </span>
                     </span>
                     {participantsCanManage && participant.id !== user?.id && (
@@ -1524,7 +1969,7 @@ export default function ChatsPage() {
                   <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-semibold" title={attachment.filename}>{attachment.filename}</p>
-                    <p className="text-[11px] text-slate-500">{fileKind(attachment.mimeType)} · {attachment.message.sender.name} · {formatDate(attachment.createdAt)}</p>
+                    <p className="text-[11px] text-slate-500">{fileKind(attachment.mimeType)} · {attachment.message.sender.name} · {formatAttachmentDateTime(attachment.createdAt)}</p>
                   </div>
                 </article>
               ))}
@@ -1568,16 +2013,26 @@ export default function ChatsPage() {
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-slate-700">Вложения</h4>
-                  <button type="button" onClick={() => { setProfileOpen(false); openAttachments(); }} aria-label="Открыть все вложения" title="Открыть все вложения" className="p-1 text-lg leading-none text-slate-500 hover:text-slate-800">›</button>
+                  <button type="button" onClick={() => setProfileAttachmentsOpen((open) => !open)} aria-expanded={profileAttachmentsOpen} className="flex w-full items-center justify-between text-left">
+                    <span className="text-sm font-semibold text-slate-700">Вложения</span>
+                    <span aria-hidden="true" className="p-1 text-lg leading-none text-slate-500">{profileAttachmentsOpen ? '⌄' : '›'}</span>
+                  </button>
                 </div>
-                <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto">
-                  {allAttachments.slice(0, 8).map((attachment) => (
-                    <button key={attachment.id} type="button" onClick={() => { setProfileOpen(false); openMedia(attachment); }} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                      <AttachmentPreview attachment={attachment} compact onOpenMedia={openMedia} />
-                    </button>
-                  ))}
-                </div>
+                {profileAttachmentsOpen && (
+                  <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto">
+                    {allAttachments.slice(0, 8).map((attachment) => (
+                      <div key={attachment.id} className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                        <AttachmentPreview
+                          attachment={attachment}
+                          compact
+                          onOpenMedia={() => { setProfileOpen(false); openMedia(attachment); }}
+                        />
+                        <p className="px-1.5 py-1 text-[10px] text-slate-500">{formatAttachmentDateTime(attachment.createdAt)}</p>
+                      </div>
+                    ))}
+                    {allAttachments.length === 0 && <p className="col-span-2 py-2 text-xs text-slate-500">Вложений пока нет</p>}
+                  </div>
+                )}
               </div>
             </div>
           </div>

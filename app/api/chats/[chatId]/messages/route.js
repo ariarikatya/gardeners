@@ -38,9 +38,32 @@ export async function GET(req, { params }) {
         ...(search ? { body: { contains: search, mode: 'insensitive' } } : {}),
       },
       include: {
-        sender: { select: { id: true, name: true, role: true } },
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            gardener: { select: { photo: true } },
+          },
+        },
         attachments: {
           select: { id: true, filename: true, mimeType: true, size: true },
+        },
+        replyToMessage: {
+          select: {
+            id: true,
+            body: true,
+            isDeleted: true,
+            sender: { select: { id: true, name: true, role: true } },
+            attachments: { select: { id: true, filename: true, mimeType: true, size: true } },
+          },
+        },
+        forwardedFromUser: { select: { id: true, name: true } },
+        forwardedFromMessage: {
+          select: {
+            body: true,
+            isDeleted: true,
+          },
         },
         readReceipts: { select: { userId: true, readAt: true } },
       },
@@ -68,11 +91,26 @@ export async function GET(req, { params }) {
 
       return {
         ...message,
+        sender: {
+          id: message.sender.id,
+          name: message.sender.name,
+          role: message.sender.role,
+          photo: message.sender.gardener?.photo || null,
+        },
         body: message.isDeleted ? null : message.body,
         attachments: message.isDeleted ? [] : message.attachments.map((attachment) => ({
           ...attachment,
           url: `/api/chats/attachments/${attachment.id}`,
         })),
+        replyToMessage: message.replyToMessage ? {
+          ...message.replyToMessage,
+          body: message.replyToMessage.isDeleted ? null : message.replyToMessage.body,
+          attachments: message.replyToMessage.isDeleted ? [] : message.replyToMessage.attachments.map((attachment) => ({
+            ...attachment,
+            url: `/api/chats/attachments/${attachment.id}`,
+          })),
+        } : null,
+        forwardedBody: message.forwardedFromMessage?.body || null,
         readReceipts: undefined,
         readByAll,
         canEdit: own && !message.isDeleted && (
@@ -117,8 +155,13 @@ export async function POST(req, { params }) {
 
     const formData = await req.formData();
     const body = String(formData.get('body') || '').trim();
+    const replyToMessageId = String(formData.get('replyToMessageId') || '').trim() || null;
+    const forwardedFromMessageId = String(formData.get('forwardedFromMessageId') || '').trim() || null;
     const files = formData.getAll('files').filter((file) => file && typeof file.arrayBuffer === 'function');
 
+    if (replyToMessageId && forwardedFromMessageId) {
+      return NextResponse.json({ error: 'Нельзя одновременно ответить и переслать сообщение' }, { status: 400 });
+    }
     if (body.length > MAX_MESSAGE_LENGTH) {
       return NextResponse.json({ error: `Сообщение не должно превышать ${MAX_MESSAGE_LENGTH} символов` }, { status: 400 });
     }
@@ -130,8 +173,62 @@ export async function POST(req, { params }) {
     if (totalBytes > MAX_TOTAL_FILE_BYTES) {
       return NextResponse.json({ error: 'Общий размер вложений не должен превышать 25 МБ' }, { status: 400 });
     }
-    if (!body && files.length === 0) {
+    if (!body && files.length === 0 && !forwardedFromMessageId) {
       return NextResponse.json({ error: 'Введите сообщение или прикрепите файл' }, { status: 400 });
+    }
+
+    let replyTarget = null;
+    if (replyToMessageId) {
+      replyTarget = await prisma.chatMessage.findFirst({
+        where: { id: replyToMessageId, chatId: params.chatId, isDeleted: false },
+        select: { id: true },
+      });
+      if (!replyTarget) return NextResponse.json({ error: 'Исходное сообщение для ответа не найдено' }, { status: 404 });
+    }
+
+    let forwardedSource = null;
+    if (forwardedFromMessageId) {
+      forwardedSource = await prisma.chatMessage.findFirst({
+        where: {
+          id: forwardedFromMessageId,
+          isDeleted: false,
+          chat: { participants: { some: { userId: auth.user.id, hiddenAt: null } } },
+        },
+        select: {
+          id: true,
+          chatId: true,
+          senderId: true,
+          body: true,
+          createdAt: true,
+          attachments: {
+            select: { filename: true, mimeType: true, size: true, storagePath: true },
+          },
+          chat: {
+            select: {
+              participants: {
+                where: { userId: auth.user.id },
+                select: { historyClearedAt: true },
+              },
+            },
+          },
+        },
+      });
+      if (!forwardedSource) {
+        return NextResponse.json({ error: 'Исходное сообщение для пересылки не найдено' }, { status: 404 });
+      }
+      const sourceHistoryClearedAt = forwardedSource.chat.participants[0]?.historyClearedAt;
+      if (sourceHistoryClearedAt && forwardedSource.createdAt <= sourceHistoryClearedAt) {
+        return NextResponse.json({ error: 'Исходное сообщение для пересылки не найдено' }, { status: 404 });
+      }
+    }
+    const totalAttachmentCount = files.length + (forwardedSource?.attachments.length || 0);
+    if (totalAttachmentCount > MAX_FILES_PER_MESSAGE) {
+      return NextResponse.json({ error: `Можно прикрепить не более ${MAX_FILES_PER_MESSAGE} файлов` }, { status: 400 });
+    }
+    const totalAttachmentBytes = files.reduce((total, file) => total + file.size, 0)
+      + (forwardedSource?.attachments.reduce((total, attachment) => total + attachment.size, 0) || 0);
+    if (totalAttachmentBytes > MAX_TOTAL_FILE_BYTES) {
+      return NextResponse.json({ error: 'Общий размер вложений не должен превышать 25 МБ' }, { status: 400 });
     }
 
     const uploaded = [];
@@ -176,11 +273,39 @@ export async function POST(req, { params }) {
           chatId: params.chatId,
           senderId: auth.user.id,
           body: body || null,
-          attachments: uploaded.length ? { create: uploaded } : undefined,
+          ...(replyTarget ? { replyToMessage: { connect: { id: replyTarget.id } } } : {}),
+          ...(forwardedSource ? {
+            forwardedFromMessage: { connect: { id: forwardedSource.id } },
+            forwardedFromUser: { connect: { id: forwardedSource.senderId } },
+          } : {}),
+          attachments: (uploaded.length || forwardedSource?.attachments.length) ? {
+            create: [
+              ...uploaded,
+              ...(forwardedSource?.attachments || []),
+            ],
+          } : undefined,
         },
         include: {
-          sender: { select: { id: true, name: true, role: true } },
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+              gardener: { select: { photo: true } },
+            },
+          },
           attachments: { select: { id: true, filename: true, mimeType: true, size: true } },
+          replyToMessage: {
+            select: {
+              id: true,
+              body: true,
+              isDeleted: true,
+              sender: { select: { id: true, name: true, role: true } },
+              attachments: { select: { id: true, filename: true, mimeType: true, size: true } },
+            },
+          },
+          forwardedFromUser: { select: { id: true, name: true } },
+          forwardedFromMessage: { select: { body: true, isDeleted: true } },
         },
       });
 
@@ -241,10 +366,25 @@ export async function POST(req, { params }) {
     return NextResponse.json({
       message: {
         ...message,
+        sender: {
+          id: message.sender.id,
+          name: message.sender.name,
+          role: message.sender.role,
+          photo: message.sender.gardener?.photo || null,
+        },
+        forwardedBody: message.forwardedFromMessage?.body || null,
+        forwardedFromMessage: undefined,
         attachments: message.attachments.map((attachment) => ({
           ...attachment,
           url: `/api/chats/attachments/${attachment.id}`,
         })),
+        replyToMessage: message.replyToMessage ? {
+          ...message.replyToMessage,
+          attachments: message.replyToMessage.attachments.map((attachment) => ({
+            ...attachment,
+            url: `/api/chats/attachments/${attachment.id}`,
+          })),
+        } : null,
         readByAll: false,
         canEdit: true,
         canDelete: true,

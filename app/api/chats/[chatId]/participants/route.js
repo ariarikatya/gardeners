@@ -51,10 +51,8 @@ export async function GET(req, { params }) {
         name: user.name,
         role: user.role,
         lastActive: user.lastActive,
-        ...(membership.chat.isGroup ? {} : {
-          phone: user.gardener?.phone || user.phone,
-          photo: user.gardener?.photo || null,
-        }),
+        phone: user.gardener?.phone || user.phone,
+        photo: user.gardener?.photo || null,
         isOnline: Boolean(
           user.lastActive
           && now >= new Date(user.lastActive).getTime()
