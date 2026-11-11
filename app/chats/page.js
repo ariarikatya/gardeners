@@ -873,7 +873,9 @@ export default function ChatsPage() {
     setProfileAttachmentsModalOpen(false);
     setProfileOpen(true);
     try {
-      const data = await requestJson(`/api/chats/${encodeURIComponent(chatId)}/attachments`);
+      const senderId = activeChatRecipient?.id;
+      const senderQuery = senderId ? `?senderId=${encodeURIComponent(senderId)}` : '';
+      const data = await requestJson(`/api/chats/${encodeURIComponent(chatId)}/attachments${senderQuery}`);
       if (activeChatRef.current !== chatId) return;
       setAllAttachments(data.attachments || []);
     } catch (requestError) {
@@ -1046,19 +1048,18 @@ export default function ChatsPage() {
     setVoiceLevels(Array(32).fill(0.08));
   };
 
-  const startVoiceVisualization = (stream) => {
-    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextConstructor) throw new Error('Визуализация записи недоступна в этом браузере');
-    const audioContext = new AudioContextConstructor();
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 64;
-    audioContext.createMediaStreamSource(stream).connect(analyser);
-    audioContextRef.current = audioContext;
-    audioAnalyserRef.current = analyser;
+  const animateVoiceLevels = (analyser, audioContext) => {
     const samples = new Uint8Array(analyser.frequencyBinCount);
     let lastUpdatedAt = 0;
     const drawLevels = (timestamp) => {
-      if (audioRecorderRef.current?.state !== 'recording') return;
+      if (
+        audioRecorderRef.current?.state !== 'recording'
+        || audioContextRef.current !== audioContext
+        || audioContext.state !== 'running'
+      ) {
+        voiceAnimationFrameRef.current = null;
+        return;
+      }
       if (timestamp - lastUpdatedAt > 55) {
         analyser.getByteFrequencyData(samples);
         setVoiceLevels(Array.from(samples, (sample) => Math.max(0.08, sample / 255)));
@@ -1067,6 +1068,20 @@ export default function ChatsPage() {
       voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
     };
     voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
+  };
+
+  const startVoiceVisualization = async (stream) => {
+    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextConstructor) throw new Error('Визуализация записи недоступна в этом браузере');
+    const audioContext = new AudioContextConstructor();
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 64;
+    audioContext.createMediaStreamSource(stream).connect(analyser);
+    audioContextRef.current = audioContext;
+    audioAnalyserRef.current = analyser;
+    if (audioContext.state !== 'running') await audioContext.resume();
+    if (audioContext.state !== 'running') throw new Error('Не удалось запустить визуализацию записи');
+    animateVoiceLevels(analyser, audioContext);
   };
 
   const startVoiceRecording = async () => {
@@ -1091,7 +1106,7 @@ export default function ChatsPage() {
       }
       if (!stream.active) throw new Error('Поток микрофона остановлен. Отмените запись и попробуйте снова.');
       if (typeof MediaRecorder === 'undefined') throw new Error('Запись голоса недоступна в этом браузере');
-      startVoiceVisualization(stream);
+      await startVoiceVisualization(stream);
       const recorder = new MediaRecorder(stream);
       voiceChunksRef.current = [];
       const chunks = voiceChunksRef.current;
@@ -1226,25 +1241,14 @@ export default function ChatsPage() {
     recorder.resume();
     setRecordingAudio(true);
     setVoicePaused(false);
-    if (audioContextRef.current?.state === 'suspended') {
-      audioContextRef.current.resume().catch((resumeError) => {
+    const audioContext = audioContextRef.current;
+    const analyser = audioAnalyserRef.current;
+    if (audioContext && analyser) {
+      audioContext.resume().then(() => {
+        animateVoiceLevels(analyser, audioContext);
+      }).catch((resumeError) => {
         setError(resumeError.message || 'Не удалось возобновить визуализацию записи');
       });
-    }
-    if (audioAnalyserRef.current) {
-      const analyser = audioAnalyserRef.current;
-      const samples = new Uint8Array(analyser.frequencyBinCount);
-      let lastUpdatedAt = 0;
-      const drawLevels = (timestamp) => {
-        if (audioRecorderRef.current?.state !== 'recording') return;
-        if (timestamp - lastUpdatedAt > 55) {
-          analyser.getByteFrequencyData(samples);
-          setVoiceLevels(Array.from(samples, (sample) => Math.max(0.08, sample / 255)));
-          lastUpdatedAt = timestamp;
-        }
-        voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
-      };
-      voiceAnimationFrameRef.current = window.requestAnimationFrame(drawLevels);
     }
     voiceTimerRef.current = window.setInterval(() => {
       voiceDurationRef.current += 1;
@@ -1704,7 +1708,7 @@ export default function ChatsPage() {
                                     </div>
                                   ))}
                                   {mediaMetadataOverlay && (
-                                    <div className={`absolute bottom-1 ${own ? 'right-1' : 'left-1'} z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[9px] text-white`}>
+                                    <div className="absolute bottom-1 right-1 z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[9px] text-white">
                                       {time}
                                       {own && <MessageReadReceipt readByAll={message.readByAll} className="text-white" />}
                                     </div>
