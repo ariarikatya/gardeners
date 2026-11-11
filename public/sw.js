@@ -192,13 +192,12 @@ async function normalizeCachedResponse(res) {
 // Helper for caching valid responses only
 function safeCachePut(cacheName, request, response) {
   if (!response || !response.ok || response.status >= 300 || response.redirected || response.type === 'opaque' || response.type === 'opaqueredirect') {
-    return;
+    return Promise.resolve(false);
   }
-  caches.open(cacheName).then((cache) => {
-    try {
-      cache.put(request, response.clone());
-    } catch (e) {}
-  }).catch(() => {});
+  return caches.open(cacheName)
+    .then((cache) => cache.put(request, response.clone()))
+    .then(() => true)
+    .catch(() => false);
 }
 
 // Helper to attach X-Offline-Served: 1 header to cached response
@@ -304,7 +303,6 @@ async function deleteOldCaches() {
 async function cacheRolePageAndChunks(path) {
   try {
     CACHE_NAME = getCacheName();
-    const cache = await caches.open(CACHE_NAME);
     const req = new Request(path, {
       credentials: 'omit',
       redirect: 'follow',
@@ -316,30 +314,16 @@ async function cacheRolePageAndChunks(path) {
       if (!text.includes('<!DOCTYPE html>') && !text.includes('<html')) {
         return false;
       }
-      safeCachePut(CACHE_NAME, new Request(path), res.clone());
-      safeCachePut(OFFLINE_DATA_CACHE, new Request(path), res.clone());
+      await safeCachePut(CACHE_NAME, new Request(path), res.clone());
+      await safeCachePut(OFFLINE_DATA_CACHE, new Request(path), res.clone());
       const metaKey = path === '/' ? '/login-meta' : `${path}-meta`;
       const metaRes = new Response(JSON.stringify({ ts: Date.now() }), {
         headers: { 'Content-Type': 'application/json' }
       });
-      safeCachePut(CACHE_NAME, new Request(metaKey), metaRes.clone());
-      safeCachePut(OFFLINE_DATA_CACHE, new Request(metaKey), metaRes);
+      await safeCachePut(CACHE_NAME, new Request(metaKey), metaRes.clone());
+      await safeCachePut(OFFLINE_DATA_CACHE, new Request(metaKey), metaRes);
 
-      const matches = text.matchAll(/(?:src|href)=["'](\/_next\/static\/chunks\/[^"']+)["']/g);
-      const chunkUrls = new Set();
-      for (const m of matches) {
-        if (m[1]) chunkUrls.add(m[1]);
-      }
-      await Promise.all(
-        Array.from(chunkUrls).map(async (chunkUrl) => {
-          try {
-            const chunkRes = await fetch(chunkUrl);
-            if (chunkRes && chunkRes.ok) {
-              safeCachePut(CACHE_NAME, new Request(chunkUrl), chunkRes);
-            }
-          } catch (e) {}
-        })
-      );
+      await cacheStaticAssetsFromHtml(text);
       return true;
     } else if (res && res.status >= 500) {
       console.warn(`[SW Server Error ${res.status}] Path: ${path}, Version: ${CACHE_NAME}`);
@@ -348,13 +332,53 @@ async function cacheRolePageAndChunks(path) {
         const pCache = await caches.open(OFFLINE_DATA_CACHE);
         const existingPage = await pCache.match(new Request(path));
         if (existingPage) {
-          safeCachePut(CACHE_NAME, new Request(path), existingPage.clone());
+          await safeCachePut(CACHE_NAME, new Request(path), existingPage.clone());
           return true;
         }
       } catch (e) {}
     }
   } catch (e) {}
   return false;
+}
+
+async function cacheStaticAssetsFromHtml(html) {
+  const queue = [];
+  const queuedAssets = new Set();
+  for (const match of html.matchAll(/(?:src|href)=["']([^"']*\/_next\/static\/[^"']+)["']/g)) {
+    if (!queuedAssets.has(match[1])) {
+      queue.push(match[1]);
+      queuedAssets.add(match[1]);
+    }
+  }
+  const cachedAssets = new Set();
+  const cache = await caches.open(CACHE_NAME);
+
+  while (queue.length) {
+    const batch = queue.splice(0, 8);
+    await Promise.all(batch.map(async (queuedUrl) => {
+      try {
+        const assetUrl = new URL(queuedUrl, self.location.origin);
+        if (assetUrl.origin !== self.location.origin || !assetUrl.pathname.startsWith('/_next/static/')) return;
+        if (cachedAssets.has(assetUrl.href)) return;
+        cachedAssets.add(assetUrl.href);
+
+        const response = await fetch(assetUrl.href);
+        if (!response || !response.ok || response.status !== 200 || response.redirected) return;
+        const assetText = assetUrl.pathname.endsWith('.css') ? await response.clone().text() : '';
+        await cache.put(assetUrl.href, response.clone());
+
+        for (const match of assetText.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g)) {
+          const referencedUrl = new URL(match[2], assetUrl);
+          if (referencedUrl.origin === self.location.origin && referencedUrl.pathname.startsWith('/_next/static/')) {
+            if (!queuedAssets.has(referencedUrl.href)) {
+              queue.push(referencedUrl.href);
+              queuedAssets.add(referencedUrl.href);
+            }
+          }
+        }
+      } catch (e) {}
+    }));
+  }
 }
 
 async function cacheLoginAndChunks() {
@@ -407,9 +431,10 @@ async function precacheAllRoles(retryCount = 0) {
                 }
               } catch (e) {}
             }
+            await cacheStaticAssetsFromHtml(text);
             if (shouldPut) {
-              safeCachePut(CACHE_NAME, new Request(pagePath), warmupRes.clone());
-              safeCachePut(OFFLINE_DATA_CACHE, new Request(pagePath), warmupRes);
+              await safeCachePut(CACHE_NAME, new Request(pagePath), warmupRes.clone());
+              await safeCachePut(OFFLINE_DATA_CACHE, new Request(pagePath), warmupRes);
             }
           }
         }
@@ -429,8 +454,8 @@ async function precacheAllRoles(retryCount = 0) {
               const usersData = await res.clone().json();
               const userList = Array.isArray(usersData) ? usersData : (Array.isArray(usersData?.users) ? usersData.users : []);
               if (userList.length > 0) {
-                safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
-                safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res.clone());
+                await safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+                await safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res.clone());
 
                 const cache = await caches.open(CACHE_NAME);
                 const pCache = await caches.open(OFFLINE_DATA_CACHE);
@@ -465,8 +490,8 @@ async function precacheAllRoles(retryCount = 0) {
               }
             } catch (err) {}
           } else {
-            safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
-            safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res);
+            await safeCachePut(CACHE_NAME, new Request(targetPath), res.clone());
+            await safeCachePut(OFFLINE_DATA_CACHE, new Request(targetPath), res);
           }
         }
       } catch (e) {}
@@ -1177,34 +1202,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // === СТАТИКА _next/static/ (с хэшами): Stale-While-Revalidate ===
+  // === Хешированная статика: Cache-First ===
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
       (async () => {
         const cached = await caches.match(request);
-        const fetchPromise = fetch(request).then((res) => {
-          if (res && res.status >= 500) {
-            console.warn(`[SW Server Error ${res.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
-          }
-          if (res && res.ok && res.status === 200 && !res.redirected) {
-            safeCachePut(CACHE_NAME, request, res.clone());
-            safeCachePut(OFFLINE_DATA_CACHE, request, res.clone());
-          }
-          return res;
-        }).catch(() => null);
-
-        if (cached && cached.ok && cached.status === 200) {
-          event.waitUntil(fetchPromise);
-          return cached;
-        }
-
         try {
-          const res = await fetchPromise;
-          if (res) return res;
-        } catch (e) {}
-
-        if (cached) return cached;
-        return new Response('Static asset unavailable', { status: 503 });
+          if (cached && cached.ok && cached.status === 200) return cached;
+          const response = await fetch(request);
+          if (response && response.status >= 500) {
+            console.warn(`[SW Server Error ${response.status}] Path: ${url.pathname}, Version: ${CACHE_NAME}`);
+          }
+          if (response && response.ok && response.status === 200 && !response.redirected) {
+            await safeCachePut(CACHE_NAME, request, response.clone());
+            await safeCachePut(OFFLINE_DATA_CACHE, request, response.clone());
+          }
+          return response;
+        } catch {
+          if (cached) return cached;
+          return new Response('Static asset unavailable', { status: 503 });
+        }
       })()
     );
     return;
