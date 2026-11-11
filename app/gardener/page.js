@@ -1946,7 +1946,7 @@ export default function GardenerDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-      <header className="bg-emerald-800 text-white py-3 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-x-2 gap-y-2 shadow">
+      <header className="bg-emerald-800 text-white py-3 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-x-2 gap-y-2 shadow md:flex-nowrap">
         <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
           <h1 className="text-base sm:text-lg font-bold flex items-center gap-1 whitespace-nowrap">🌿 Мой Кабинет</h1>
           {isSyncingQueue ? (
@@ -1963,7 +1963,7 @@ export default function GardenerDashboard() {
             </span>
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center justify-end md:flex-nowrap">
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-3 md:flex-nowrap">
           <SettingsMenu>
             <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
