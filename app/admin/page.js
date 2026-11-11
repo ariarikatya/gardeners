@@ -398,6 +398,7 @@ export default function AdminDashboard() {
   const [filterDistrict, setFilterDistrict] = useState('');
   const [selectedWeekdays, setSelectedWeekdays] = useState([0, 1, 2, 3, 4, 5, 6]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   // Поиск ближайшего окна под запрос клиента
   const [showQuickSearch, setShowQuickSearch] = useState(false);
@@ -2584,6 +2585,7 @@ export default function AdminDashboard() {
           >
             {syncing ? 'Синхронизация...' : 'Google Таблицы'}
           </button>
+          <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm text-emerald-800 hover:bg-emerald-100">Выйти</button>
         </div>
         <div className="space-y-2 rounded-lg bg-slate-50 p-2">
           <label htmlFor="admin-export-period" className="block text-sm font-medium">Экспорт в Excel</label>
@@ -2628,10 +2630,15 @@ export default function AdminDashboard() {
           <button onClick={handleLogout} className="rounded-lg bg-emerald-100 px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-200 sm:px-4 sm:py-2 sm:text-sm">
             Выйти
           </button>
+          <div className="hidden items-center gap-1 md:flex">
+            <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">-</button>
+            <div className="px-2 text-xs text-white">Масштаб {Math.round(tableScale * 100)}%</div>
+            <button onClick={() => setTableScale(s => Math.min(1.5, +(s + 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">+</button>
+          </div>
           {adminSettingsMenu}
         </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-xs sm:text-sm">
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-3 text-xs md:hidden">
           <div className="flex items-center gap-1">
             <button onClick={() => setTableScale(s => Math.max(0.6, +(s - 0.1).toFixed(1)))} className="rounded bg-emerald-100 px-2 text-xs text-emerald-800">-</button>
             <div className="text-xs px-2 text-white">Масштаб {Math.round(tableScale * 100)}%</div>
@@ -2986,7 +2993,17 @@ export default function AdminDashboard() {
               </div>
 
               {/* Фильтры отображения календаря */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 mb-2 flex flex-wrap gap-4 items-end text-xs">
+              <button
+                type="button"
+                aria-expanded={isFiltersOpen}
+                aria-controls="admin-calendar-filters"
+                onClick={() => setIsFiltersOpen((open) => !open)}
+                className="mb-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-sm font-semibold text-slate-700 shadow-sm md:hidden"
+              >
+                🔍 Поиск по заказам
+                <span className="float-right" aria-hidden="true">{isFiltersOpen ? '⌃' : '⌄'}</span>
+              </button>
+              <div id="admin-calendar-filters" className={`mb-2 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-2.5 text-xs shadow-sm transition-[max-height] duration-300 ease-in-out md:max-h-none md:overflow-visible ${isFiltersOpen ? 'max-h-[1000px]' : 'max-h-0 overflow-hidden'}`}>
                 <div className="relative min-w-[220px] flex-1">
                   <label className="block text-xs font-semibold text-slate-500 mb-1">🔍 Поиск по заказам</label>
                   <div className="relative">

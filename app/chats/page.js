@@ -8,7 +8,7 @@ import { compressImage, convertHeicIfNeeded } from '@/lib/imageCompress';
 import { compressChatVideo } from '@/lib/chatVideoCompress';
 import ChatMediaLightbox from '@/components/ChatMediaLightbox';
 
-const MAX_TOTAL_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_FILES_PER_MESSAGE = 10;
 
 const ROLE_LABELS = {
@@ -175,8 +175,29 @@ function isHeicAttachment(attachment) {
     || /\.(heic|heif)$/i.test(attachment.filename || '');
 }
 
-function AttachmentPreview({ attachment, compact = false, onOpenMedia }) {
+function MessageReadReceipt({ readByAll, className = '' }) {
+  return (
+    <svg
+      aria-label={readByAll ? 'Прочитано всеми' : 'Отправлено'}
+      role="img"
+      viewBox="0 0 18 12"
+      className={`h-3 w-[18px] ${className}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {readByAll
+        ? <path d="m1 6 3.2 3.2L10.8 2M6.5 6l3.2 3.2L17.3 2" />
+        : <path d="m3 6 3.2 3.2L12.8 2" />}
+    </svg>
+  );
+}
+
+function AttachmentPreview({ attachment, compact = false, flat = false, onOpenMedia }) {
   const className = compact ? 'h-24 w-24' : 'h-36 w-full';
+  const shapeClass = flat ? 'rounded-none' : 'rounded-lg';
   const isImage = isImageAttachment(attachment);
   const isHeic = isImage && isHeicAttachment(attachment);
   const [imageUrl, setImageUrl] = useState(isHeic ? '' : attachment.url);
@@ -222,26 +243,26 @@ function AttachmentPreview({ attachment, compact = false, onOpenMedia }) {
 
   if (isImage) {
     if (imageError) {
-      return <div role="status" className={`${className} flex items-center justify-center rounded-lg bg-slate-100 p-2 text-center text-xs text-slate-500`}>Не удалось загрузить фото</div>;
+      return <div role="status" className={`${className} ${shapeClass} flex items-center justify-center bg-slate-100 p-2 text-center text-xs text-slate-500`}>Не удалось загрузить фото</div>;
     }
     if (!imageUrl) {
-      return <div role="status" className={`${className} flex items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-500`}>Загрузка фото…</div>;
+      return <div role="status" className={`${className} ${shapeClass} flex items-center justify-center bg-slate-100 text-xs text-slate-500`}>Загрузка фото…</div>;
     }
     return (
-      <button type="button" onClick={() => onOpenMedia(attachment)} aria-label={`Открыть фото ${attachment.filename}`} className="block overflow-hidden rounded-lg">
+      <button type="button" onClick={() => onOpenMedia(attachment)} aria-label={`Открыть фото ${attachment.filename}`} className={`block w-full overflow-hidden ${shapeClass}`}>
         <img
           src={imageUrl}
           alt={attachment.filename}
           onError={() => setImageError(true)}
-          className={`${className} rounded-lg object-cover bg-slate-100`}
+          className={`${className} ${shapeClass} object-cover bg-slate-100`}
         />
       </button>
     );
   }
   if (isVideoAttachment(attachment)) {
     return (
-      <button type="button" onClick={() => onOpenMedia(attachment)} aria-label={`Открыть видео ${attachment.filename}`} className="block overflow-hidden rounded-lg">
-        <video src={attachment.url} preload="metadata" className={`${className} rounded-lg bg-black object-contain`} />
+      <button type="button" onClick={() => onOpenMedia(attachment)} aria-label={`Открыть видео ${attachment.filename}`} className={`block w-full overflow-hidden ${shapeClass}`}>
+        <video src={attachment.url} preload="metadata" className={`${className} ${shapeClass} bg-black object-contain`} />
       </button>
     );
   }
@@ -336,7 +357,7 @@ export default function ChatsPage() {
   const [creatingChat, setCreatingChat] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [allAttachments, setAllAttachments] = useState([]);
-  const [profileAttachmentsOpen, setProfileAttachmentsOpen] = useState(false);
+  const [profileAttachmentsModalOpen, setProfileAttachmentsModalOpen] = useState(false);
   const [mediaGallery, setMediaGallery] = useState(null);
   const [mediaIndex, setMediaIndex] = useState(0);
   const [participantsOpen, setParticipantsOpen] = useState(false);
@@ -352,6 +373,8 @@ export default function ChatsPage() {
   const [voiceDuration, setVoiceDuration] = useState(0);
   const [voiceLevels, setVoiceLevels] = useState(Array(32).fill(0.08));
   const [voiceDraft, setVoiceDraft] = useState(null);
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState('');
+  const [voicePreviewPlaying, setVoicePreviewPlaying] = useState(false);
   const [replyingToMessage, setReplyingToMessage] = useState(null);
   const [forwardingMessage, setForwardingMessage] = useState(null);
   const [forwardingTargetChosen, setForwardingTargetChosen] = useState(false);
@@ -363,6 +386,10 @@ export default function ChatsPage() {
   const audioContextRef = useRef(null);
   const audioAnalyserRef = useRef(null);
   const voiceDurationRef = useRef(0);
+  const voiceChunksRef = useRef([]);
+  const voicePreviewUrlRef = useRef('');
+  const voiceDraftUrlRef = useRef('');
+  const voicePreviewAudioRef = useRef(null);
   const discardRecordingRef = useRef(false);
   const sendVoiceAfterStopRef = useRef(false);
   const audioRecorderRef = useRef(null);
@@ -621,6 +648,8 @@ export default function ChatsPage() {
     if (voiceTimerRef.current) window.clearInterval(voiceTimerRef.current);
     if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
     if (voiceAnimationFrameRef.current) window.cancelAnimationFrame(voiceAnimationFrameRef.current);
+    if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+    if (voiceDraftUrlRef.current) URL.revokeObjectURL(voiceDraftUrlRef.current);
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close().catch((closeError) => {
         console.error('Не удалось закрыть аудиоконтекст записи:', closeError);
@@ -750,24 +779,34 @@ export default function ChatsPage() {
     const formData = new FormData();
     formData.set('body', draft.trim());
     if (replyingToMessage) formData.set('replyToMessageId', replyingToMessage.id);
-    if (forwardingMessage && forwardingTargetChosen) formData.set('forwardedFromMessageId', forwardingMessage.id);
+    if (forwardingMessage && forwardingTargetChosen) {
+      formData.set('forwardedFromMessageId', forwardingMessage.id);
+      formData.set('forwardedFromUserId', forwardingMessage.senderId);
+    }
 
     try {
       setSending(true);
       setError('');
-      const uploadFiles = await Promise.all(selectedFiles.map((file) => {
+      const uploadFiles = await Promise.all(selectedFiles.map(async (file) => {
         const normalizedFile = normalizeChatFile(file);
-        if (isVideoFile(normalizedFile)) return compressChatVideo(normalizedFile);
-        if (isImageFile(normalizedFile)) return compressImage(normalizedFile);
-        return normalizedFile;
+        try {
+          if (isVideoFile(normalizedFile)) return await compressChatVideo(normalizedFile);
+          if (isImageFile(normalizedFile)) return await compressImage(normalizedFile);
+          return normalizedFile;
+        } catch (compressionError) {
+          if (normalizedFile.size > MAX_TOTAL_FILE_BYTES) {
+            throw new Error(`Файл «${normalizedFile.name}» превышает лимит 100 МБ и не удалось сжать его для отправки.`);
+          }
+          throw compressionError;
+        }
       }));
-      const oversizedVideo = uploadFiles.find((file) => isVideoFile(file) && file.size > MAX_TOTAL_FILE_BYTES);
-      if (oversizedVideo) {
-        throw new Error(`Видео «${oversizedVideo.name}» превышает лимит 25 МБ даже после сжатия. Выберите видео меньшего размера.`);
+      const oversizedFile = uploadFiles.find((file) => file.size > MAX_TOTAL_FILE_BYTES);
+      if (oversizedFile) {
+        throw new Error(`Файл «${oversizedFile.name}» превышает лимит 100 МБ даже после сжатия. Выберите файл меньшего размера.`);
       }
       const totalBytes = uploadFiles.reduce((sum, file) => sum + file.size, 0);
       if (totalBytes > MAX_TOTAL_FILE_BYTES) {
-        throw new Error('Общий размер вложений не должен превышать 25 МБ');
+        throw new Error('Общий размер вложений не должен превышать 100 МБ');
       }
       uploadFiles.forEach((file) => formData.append('files', file));
       const data = await requestJson(`/api/chats/${encodeURIComponent(activeChatId)}/messages`, {
@@ -819,7 +858,7 @@ export default function ChatsPage() {
 
   const openProfile = async (chatId = activeChatId) => {
     if (!chatId) return;
-    setProfileAttachmentsOpen(false);
+    setProfileAttachmentsModalOpen(false);
     setProfileOpen(true);
     try {
       const data = await requestJson(`/api/chats/${encodeURIComponent(chatId)}/attachments`);
@@ -1030,15 +1069,25 @@ export default function ChatsPage() {
       if (typeof MediaRecorder === 'undefined') throw new Error('Запись голоса недоступна в этом браузере');
       startVoiceVisualization(stream);
       const recorder = new MediaRecorder(stream);
-      const chunks = [];
+      voiceChunksRef.current = [];
+      const chunks = voiceChunksRef.current;
       recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) chunks.push(event.data);
+        if (!event.data || event.data.size === 0) return;
+        chunks.push(event.data);
+        if (recorder.state === 'paused') {
+          const previewBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+          const previewUrl = URL.createObjectURL(previewBlob);
+          if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+          voicePreviewUrlRef.current = previewUrl;
+          setVoicePreviewUrl(previewUrl);
+        }
       };
       recorder.onstop = () => {
         if (discardRecordingRef.current) {
           discardRecordingRef.current = false;
           stream.getTracks().forEach((track) => track.stop());
           audioRecorderRef.current = null;
+          voiceChunksRef.current = [];
           stopVoiceVisualization();
           return;
         }
@@ -1047,6 +1096,7 @@ export default function ChatsPage() {
         if (!blob.size) {
           stream.getTracks().forEach((track) => track.stop());
           audioRecorderRef.current = null;
+          voiceChunksRef.current = [];
           stopVoiceVisualization();
           sendVoiceAfterStopRef.current = false;
           setError('Не удалось создать голосовое сообщение: запись пуста');
@@ -1057,6 +1107,13 @@ export default function ChatsPage() {
           type: blob.type || mimeType,
         });
         const url = URL.createObjectURL(blob);
+        voicePreviewAudioRef.current?.pause();
+        setVoicePreviewPlaying(false);
+        if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+        voicePreviewUrlRef.current = '';
+        setVoicePreviewUrl('');
+        voiceChunksRef.current = [];
+        voiceDraftUrlRef.current = url;
         const completedDraft = { file, url, duration: voiceDurationRef.current };
         setVoiceDraft(completedDraft);
         stream.getTracks().forEach((track) => track.stop());
@@ -1071,11 +1128,16 @@ export default function ChatsPage() {
           sendVoiceMessage(completedDraft);
         }
       };
-      recorder.start();
+      recorder.start(500);
       audioRecorderRef.current = recorder;
       setRecordingAudio(true);
       setVoicePaused(false);
       setVoiceDraft(null);
+      if (voiceDraftUrlRef.current) URL.revokeObjectURL(voiceDraftUrlRef.current);
+      voiceDraftUrlRef.current = '';
+      if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+      voicePreviewUrlRef.current = '';
+      setVoicePreviewUrl('');
       setVoiceDuration(0);
       voiceDurationRef.current = 0;
       setVoiceLevels(Array(32).fill(0.08));
@@ -1114,6 +1176,11 @@ export default function ChatsPage() {
     const recorder = audioRecorderRef.current;
     if (!recorder || recorder.state !== 'recording') return;
     recorder.pause();
+    try {
+      recorder.requestData();
+    } catch (requestError) {
+      setError(requestError.message || 'Не удалось подготовить запись для прослушивания');
+    }
     setRecordingAudio(false);
     setVoicePaused(true);
     if (voiceAnimationFrameRef.current) {
@@ -1129,6 +1196,11 @@ export default function ChatsPage() {
   const resumeVoiceRecording = () => {
     const recorder = audioRecorderRef.current;
     if (!recorder || recorder.state !== 'paused') return;
+    voicePreviewAudioRef.current?.pause();
+    setVoicePreviewPlaying(false);
+    if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+    voicePreviewUrlRef.current = '';
+    setVoicePreviewUrl('');
     recorder.resume();
     setRecordingAudio(true);
     setVoicePaused(false);
@@ -1158,6 +1230,19 @@ export default function ChatsPage() {
     }, 1000);
   };
 
+  const toggleVoicePreview = () => {
+    const audio = voicePreviewAudioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().then(() => setVoicePreviewPlaying(true)).catch((playError) => {
+        setError(playError.message || 'Не удалось прослушать запись');
+      });
+    } else {
+      audio.pause();
+      setVoicePreviewPlaying(false);
+    }
+  };
+
   const deleteVoiceRecording = () => {
     const recorder = audioRecorderRef.current;
     sendVoiceAfterStopRef.current = false;
@@ -1174,8 +1259,15 @@ export default function ChatsPage() {
     setRecordingAudio(false);
     setVoicePaused(false);
     stopVoiceVisualization();
-    if (voiceDraft?.url) URL.revokeObjectURL(voiceDraft.url);
+    voicePreviewAudioRef.current?.pause();
+    setVoicePreviewPlaying(false);
+    if (voiceDraftUrlRef.current) URL.revokeObjectURL(voiceDraftUrlRef.current);
+    voiceDraftUrlRef.current = '';
     setVoiceDraft(null);
+    if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+    voicePreviewUrlRef.current = '';
+    setVoicePreviewUrl('');
+    voiceChunksRef.current = [];
     setVoiceDuration(0);
     voiceDurationRef.current = 0;
     if (voiceTimerRef.current) {
@@ -1198,6 +1290,7 @@ export default function ChatsPage() {
       setMessages((current) => [...current, data.message]);
       latestMessageRef.current = data.message.id;
       URL.revokeObjectURL(draftToSend.url);
+      if (voiceDraftUrlRef.current === draftToSend.url) voiceDraftUrlRef.current = '';
       setVoiceDraft(null);
       setReplyingToMessage(null);
       setVoiceDuration(0);
@@ -1227,6 +1320,10 @@ export default function ChatsPage() {
   const activeChatRecipient = activeChat && !activeChat.isGroup
     ? activeChat.participants[0]
     : null;
+  const profileAttachments = useMemo(
+    () => allAttachments.filter((attachment) => attachment.message.sender.id === activeChatRecipient?.id),
+    [activeChatRecipient?.id, allAttachments]
+  );
   const recipientIsOnline = Boolean(activeChatRecipient && chatPresence[activeChatRecipient.id]?.isOnline);
   const recipientStatusText = activeChatRecipient
     ? (recipientIsOnline ? 'В сети' : formatRelativeOnline(activeChatRecipient.lastActive))
@@ -1466,6 +1563,12 @@ export default function ChatsPage() {
                     && !message.body
                     && !message.forwardedBody
                     && message.attachments?.length > 0;
+                  const shortMediaMessage = Boolean(
+                    hasAttachments
+                    && message.body
+                    && message.body.trim().split('\n').length <= 2
+                    && message.body.length <= 60
+                  );
                   const mediaEdgeClass = onlyMedia
                     ? ''
                     : `-mx-3 ${message.replyToMessage || message.forwardedFromUser || (!own && activeChat.isGroup) ? '' : '-mt-2'}`;
@@ -1476,6 +1579,10 @@ export default function ChatsPage() {
                     && message.body.length <= 60
                     && !message.forwardedBody
                   );
+                  const time = <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>;
+                  const receiptColor = message.readByAll ? 'text-sky-600' : 'text-slate-500';
+                  const showMessageActions = own && editingMessageId !== message.id
+                    && (message.canEdit || message.canDelete);
                   return (
                     <div key={message.id}>
                       {startsNewDay && (
@@ -1503,7 +1610,7 @@ export default function ChatsPage() {
                               : (message.sender.name || '?').trim().charAt(0).toUpperCase()}
                           </span>
                         )}
-                        <div className={`min-w-0 ${onlyMedia ? 'relative max-w-[min(50vw,24rem)] overflow-hidden' : `max-w-[88%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] ${hasAttachments ? 'overflow-hidden' : ''} ${own ? 'rounded-br-sm bg-emerald-100 text-emerald-950' : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800'}`}`}>
+                        <div className={`min-w-0 ${onlyMedia ? 'relative max-w-[min(50vw,24rem)] overflow-hidden' : `${shortMediaMessage ? 'max-w-[min(50vw,24rem)]' : 'max-w-[88%] sm:max-w-[75%]'} rounded-2xl px-3 py-2 shadow-sm ${hasAttachments ? 'overflow-hidden' : ''} ${own ? 'rounded-br-sm bg-emerald-100 text-emerald-950' : 'rounded-bl-sm border border-slate-200 bg-white text-slate-800'}`}`}>
                           {!own && activeChat.isGroup && !onlyMedia && (
                             <div className="mb-2 flex items-center gap-1.5 text-[10px] leading-4 text-slate-500">
                               <span className="font-semibold text-slate-600">{message.sender.name}</span>
@@ -1527,7 +1634,7 @@ export default function ChatsPage() {
                                   {message.replyToMessage.body
                                     || (message.replyToMessage.attachments?.length
                                       ? fileKind(message.replyToMessage.attachments[0].mimeType, message.replyToMessage.attachments[0].filename)
-                                      : 'Сообщение удалено')}
+                                      : message.replyToMessage.isDeleted ? 'Сообщение удалено' : 'Вложение')}
                                 </span>
                               </span>
                             </div>
@@ -1558,45 +1665,47 @@ export default function ChatsPage() {
                             <p className="text-sm italic text-slate-500">Сообщение удалено</p>
                           ) : (
                             <>
-                              {!message.forwardedFromUser && message.attachments?.length > 0 && (
-                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2' : ''} grid gap-2 sm:grid-cols-2`}>
+                              {message.attachments?.length > 0 && (
+                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2' : ''} relative grid gap-2 sm:grid-cols-2`}>
                                   {message.attachments.map((attachment) => (
                                     <div key={attachment.id} className="min-w-0">
-                                      <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
+                                      <AttachmentPreview
+                                        attachment={attachment}
+                                        flat={Boolean(message.body)}
+                                        onOpenMedia={openMedia}
+                                      />
                                     </div>
                                   ))}
+                                  <div className={`absolute bottom-1 right-1 z-10 flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[9px] text-white ${onlyMedia ? '' : 'shadow-sm'}`}>
+                                    {time}
+                                    {own && <MessageReadReceipt readByAll={message.readByAll} className="text-white" />}
+                                  </div>
                                 </div>
                               )}
-                              {message.body && !message.forwardedFromUser && (
+                              {message.body && (
                                 <p className={`whitespace-pre-wrap break-words text-sm leading-relaxed ${shortText ? 'inline' : ''}`}>
                                   {message.body}
                                   {isEditedMessage(message) ? <span className="ml-1 text-xs text-slate-500">(изменено)</span> : null}
-                                  {shortText && <time dateTime={message.createdAt} className="ml-2 inline text-[9px] text-slate-500">{formatTime(message.createdAt)}</time>}
+                                  {shortText && (
+                                    <span className="ml-2 inline-flex items-center gap-1 align-baseline text-[9px] text-slate-500">
+                                      {time}
+                                      {own && <MessageReadReceipt readByAll={message.readByAll} className={receiptColor} />}
+                                    </span>
+                                  )}
                                 </p>
-                              )}
-                              {message.forwardedFromUser && message.attachments?.length > 0 && (
-                                <div className={`${mediaEdgeClass} ${message.body ? 'mb-2 mt-1' : 'mt-1'} grid gap-2 sm:grid-cols-2`}>
-                                  {message.attachments.map((attachment) => (
-                                    <div key={attachment.id} className="min-w-0">
-                                      <AttachmentPreview attachment={attachment} onOpenMedia={openMedia} />
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {message.body && message.forwardedFromUser && (
-                                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.body}</p>
                               )}
                             </>
                           )}
-                          <div className={`${onlyMedia ? 'absolute bottom-2 right-2 rounded-full bg-black/55 px-2 py-0.5 text-white' : `${shortText ? 'mt-0.5' : 'mt-1'} text-slate-500`} flex items-center justify-end gap-1 text-[9px]`}>
-                              {(!shortText || onlyMedia) && <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>}
+                          {((!shortText && !hasAttachments) || showMessageActions) && (
+                            <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-slate-500">
+                              {!shortText && !hasAttachments && time}
                               {own && message.canEdit && editingMessageId !== message.id && (
                                 <button
                                   type="button"
                                   onClick={() => { setEditingMessageId(message.id); setEditDraft(message.body || ''); }}
                                   aria-label="Редактировать сообщение"
                                   title="Редактировать"
-                                  className={`ml-1 rounded p-1 ${onlyMedia ? 'text-white hover:bg-black/30' : 'text-slate-500 hover:bg-white hover:text-emerald-800'}`}
+                                  className="ml-1 rounded p-1 text-slate-500 hover:bg-white hover:text-emerald-800"
                                 >
                                   <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                     <path d="m13.5 3.5 3 3M4 16l3.8-.8L17 6a2.1 2.1 0 0 0-3-3L4.8 12.2 4 16Z" />
@@ -1609,31 +1718,18 @@ export default function ChatsPage() {
                                   onClick={() => deleteMessage(message)}
                                   aria-label="Удалить сообщение"
                                   title="Удалить"
-                                  className={`rounded p-1 ${onlyMedia ? 'text-white hover:bg-black/30' : 'text-slate-500 hover:bg-white hover:text-rose-700'}`}
+                                  className="rounded p-1 text-slate-500 hover:bg-white hover:text-rose-700"
                                 >
                                   <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                     <path d="M3.5 5.5h13M8 5.5V3.8h4v1.7m-6.5 0 .7 11h7.6l.7-11M8.2 8.5v5.5m3.6-5.5v5.5" />
                                   </svg>
                                 </button>
                               )}
-                              {own && (
-                                <svg
-                                  aria-label={message.readByAll ? 'Прочитано всеми' : 'Отправлено'}
-                                  role="img"
-                                  viewBox="0 0 18 12"
-                                  className={`h-3 w-[18px] ${onlyMedia ? 'text-white' : message.readByAll ? 'text-sky-600' : 'text-slate-500'}`}
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  {message.readByAll
-                                    ? <path d="m1 6 3.2 3.2L10.8 2M6.5 6l3.2 3.2L17.3 2" />
-                                    : <path d="m3 6 3.2 3.2L12.8 2" />}
-                                </svg>
+                              {own && !shortText && !hasAttachments && (
+                                <MessageReadReceipt readByAll={message.readByAll} className={receiptColor} />
                               )}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </article>
                     </div>
@@ -1725,6 +1821,28 @@ export default function ChatsPage() {
                         ? <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M6 4.5a1 1 0 0 1 1.5-.86l7 4.5a2.2 2.2 0 0 1 0 3.72l-7 4.5A1 1 0 0 1 6 15.5z" /></svg>
                         : <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M5.5 4.5h3v11h-3zm6 0h3v11h-3z" /></svg>}
                     </button>
+                    {voicePaused && voicePreviewUrl && (
+                      <>
+                        <audio
+                          ref={voicePreviewAudioRef}
+                          preload="metadata"
+                          src={voicePreviewUrl}
+                          onEnded={() => setVoicePreviewPlaying(false)}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={toggleVoicePreview}
+                          aria-label={voicePreviewPlaying ? 'Приостановить прослушивание' : 'Прослушать запись'}
+                          title={voicePreviewPlaying ? 'Приостановить прослушивание' : 'Прослушать'}
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-700 hover:bg-slate-300"
+                        >
+                          {voicePreviewPlaying
+                            ? <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M5.5 4.5h3v11h-3zm6 0h3v11h-3z" /></svg>
+                            : <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor"><path d="M6 4.5a1 1 0 0 1 1.5-.86l7 4.5a2.2 2.2 0 0 1 0 3.72l-7 4.5A1 1 0 0 1 6 15.5z" /></svg>}
+                        </button>
+                      </>
+                    )}
                     {voicePaused && (
                       <button type="button" onClick={sendPausedVoiceRecording} disabled={sending} aria-label="Отправить голосовое сообщение" title="Отправить" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-50">
                         <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h13m-5-5 5 5-5 5" /></svg>
@@ -2012,28 +2130,51 @@ export default function ChatsPage() {
                 <button type="button" onClick={() => { setProfileOpen(false); setSettingsOpen(true); }} aria-label="Настройки чата" title="Настройки чата" className="rounded-full px-3 text-lg leading-none text-slate-500 hover:bg-slate-100">⋮</button>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <button type="button" onClick={() => setProfileAttachmentsOpen((open) => !open)} aria-expanded={profileAttachmentsOpen} className="flex w-full items-center justify-between text-left">
-                    <span className="text-sm font-semibold text-slate-700">Вложения</span>
-                    <span aria-hidden="true" className="p-1 text-lg leading-none text-slate-500">{profileAttachmentsOpen ? '⌄' : '›'}</span>
-                  </button>
-                </div>
-                {profileAttachmentsOpen && (
-                  <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto">
-                    {allAttachments.slice(0, 8).map((attachment) => (
-                      <div key={attachment.id} className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                        <AttachmentPreview
-                          attachment={attachment}
-                          compact
-                          onOpenMedia={() => { setProfileOpen(false); openMedia(attachment); }}
-                        />
-                        <p className="px-1.5 py-1 text-[10px] text-slate-500">{formatAttachmentDateTime(attachment.createdAt)}</p>
-                      </div>
-                    ))}
-                    {allAttachments.length === 0 && <p className="col-span-2 py-2 text-xs text-slate-500">Вложений пока нет</p>}
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    setProfileAttachmentsModalOpen(true);
+                  }}
+                  className="flex w-full items-center justify-between text-left text-sm font-semibold text-slate-700 hover:text-emerald-800"
+                >
+                  <span>Вложения{profileAttachments.length ? ` (${profileAttachments.length})` : ''}</span>
+                  <span aria-hidden="true" className="text-lg leading-none text-slate-500">&gt;</span>
+                </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {profileAttachmentsModalOpen && activeChatRecipient && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true" aria-labelledby="profile-attachments-title">
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div>
+                <h2 id="profile-attachments-title" className="font-bold">Вложения пользователя</h2>
+                <p className="text-xs text-slate-500">{activeChatRecipient.name} · {profileAttachments.length} вложений в чате</p>
+              </div>
+              <button type="button" onClick={() => setProfileAttachmentsModalOpen(false)} className="rounded-lg px-3 py-1 text-xl text-slate-500 hover:bg-slate-100" aria-label="Закрыть">×</button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 overflow-y-auto p-4 sm:grid-cols-2 lg:grid-cols-3">
+              {profileAttachments.length === 0
+                ? <p className="col-span-full py-8 text-center text-sm text-slate-500">Вложений пока нет</p>
+                : profileAttachments.map((attachment) => (
+                  <article key={attachment.id} className="min-w-0 space-y-2 rounded-xl border border-slate-200 p-2">
+                    <AttachmentPreview
+                      attachment={attachment}
+                      onOpenMedia={() => {
+                        setProfileAttachmentsModalOpen(false);
+                        openMedia(attachment);
+                      }}
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold" title={attachment.filename}>{attachment.filename}</p>
+                      <p className="text-[11px] text-slate-500">{fileKind(attachment.mimeType)} · {formatAttachmentDateTime(attachment.createdAt)}</p>
+                    </div>
+                  </article>
+                ))}
             </div>
           </div>
         </div>

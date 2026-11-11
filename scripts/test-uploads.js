@@ -226,6 +226,24 @@ async function runUploadsTests() {
     assert(fs.readFileSync(documentPath).equals(documentBuffer), 'Expected saved document bytes to match upload');
     console.log('✅ Test 9 Passed! Generic file uploaded without modifying its contents.');
 
+    // Test 10: Chat uploads may opt in to a 100 MB per-file limit
+    console.log('Test 10: Accepting chat attachment larger than the default 25 MB limit...');
+    const largeChatFileBuffer = Buffer.alloc(26 * 1024 * 1024);
+    let defaultLimitRejected = false;
+    try {
+      await saveUploadedFile(largeChatFileBuffer, { filename: 'large-default-attachment.bin' });
+    } catch (error) {
+      defaultLimitRejected = error.message.includes('25 МБ');
+    }
+    assert(defaultLimitRejected, 'Expected the default 25 MB limit to remain in effect without an override');
+    const largeChatFileUrl = await saveUploadedFile(largeChatFileBuffer, {
+      filename: 'large-chat-attachment.bin',
+      maxSizeBytes: 100 * 1024 * 1024,
+    });
+    const largeChatFilePath = path.join(testUploadsDir, ...largeChatFileUrl.replace('/api/files/', '').split('/'));
+    assert(fs.statSync(largeChatFilePath).size === largeChatFileBuffer.length, 'Expected 26 MB chat attachment to be saved with custom limit');
+    console.log('✅ Test 10 Passed! Custom chat attachment limit overrides the default file-size limit.');
+
     console.log('\n🎉 ALL LOCAL UPLOAD TESTS PASSED SUCCESSFULLY!');
   } finally {
     if (fs.existsSync(testUploadsDir)) {
