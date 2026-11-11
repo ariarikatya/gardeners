@@ -19,6 +19,10 @@ export async function GET(req, { params }) {
           chatId: params.chatId,
           isDeleted: false,
           replyToMessageId: null,
+          OR: [
+            { forwardedFromMessageId: null },
+            { forwardedFromMessage: { is: { chatId: { not: params.chatId } } } },
+          ],
         },
       },
       select: {

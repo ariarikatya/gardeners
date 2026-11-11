@@ -34,9 +34,9 @@ assert.strictEqual(
 
 // Assert: startFromToday is decoupled from useEffect
 assert.strictEqual(
-  adminContent.includes('useEffect(() => {\n    fetchData();\n  }, [currentMonth]);'),
+  adminContent.includes('useEffect(() => {\n    fetchData(true);\n  }, [currentMonth]);'),
   true,
-  'useEffect must not re-fetch from network purely when startFromToday changes'
+  'useEffect must use current-month cache without re-fetching when startFromToday changes'
 );
 
 // Assert: touchOfflineSession and requestStoragePersistence in catch block

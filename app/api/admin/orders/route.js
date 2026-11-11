@@ -141,7 +141,31 @@ export async function GET(req) {
   const [orders, dayComments] = await Promise.all([
     prisma.order.findMany({
       where,
-      include: { gardener: true, service: true },
+      select: {
+        id: true,
+        date: true,
+        clientName: true,
+        address: true,
+        district: true,
+        clientPhone: true,
+        description: true,
+        priceContract: true,
+        priceFact: true,
+        employeeSalary: true,
+        companyShare: true,
+        status: true,
+        comment: true,
+        refusalReason: true,
+        gardenerId: true,
+        serviceId: true,
+        serviceIds: true,
+        isCash: true,
+        orderMedia: true,
+        wasAuction: true,
+        amoDealId: true,
+        gardener: { select: { id: true, name: true } },
+        service: { select: { id: true, name: true } },
+      },
     }),
     prisma.gardenerDayComment.findMany({
       where: (startParam || endParam) ? {
@@ -150,7 +174,14 @@ export async function GET(req) {
           ...(endParam ? { lte: new Date(endParam) } : {}),
         }
       } : {},
-      include: { gardener: true },
+      select: {
+        id: true,
+        date: true,
+        gardenerId: true,
+        text: true,
+        completed: true,
+        gardener: { select: { name: true } },
+      },
       orderBy: { date: 'asc' },
     }),
   ]);
