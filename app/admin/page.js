@@ -3201,7 +3201,7 @@ export default function AdminDashboard() {
 
                         return (
                           <tr key={dateStr} className={`border-b border-slate-200 hover:bg-slate-50 ${holiday ? 'bg-red-50/40' : ''}`}>
-                            <td className={`px-1.5 py-1 font-medium border-r border-slate-200 align-top sticky left-0 z-10 bg-slate-50 shadow-sm text-[12px] ${holiday ? 'text-red-700 bg-red-50' : 'text-slate-700 bg-slate-50'}`}>
+                            <td className={`px-1.5 py-1 font-medium border-r border-slate-200 align-top sticky left-0 ${activeCommentPopup?.dateStr === dateStr ? 'z-40' : 'z-10'} bg-slate-50 shadow-sm text-[12px] ${holiday ? 'text-red-700 bg-red-50' : 'text-slate-700 bg-slate-50'}`}>
                               <span className="flex flex-col gap-0.5">
                                 <span>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} ({dayLabel})</span>
                                 {holiday && <span className="text-[9px] leading-tight text-red-700">Выходной</span>}
@@ -3236,30 +3236,30 @@ export default function AdminDashboard() {
                                           <div
                                             id="active-comment-popup"
                                             onClick={(e) => e.stopPropagation()}
-                                            className="absolute left-0 top-full mt-1 z-50 w-72 max-w-[85vw] bg-slate-900 text-white rounded-xl p-3 shadow-xl border border-slate-700 text-left text-xs max-h-80 overflow-y-auto"
+                                            className="absolute left-0 top-full mt-1 z-50 w-72 max-w-[85vw] bg-white text-slate-700 rounded-xl p-3 shadow-xl border border-slate-200 text-left text-xs max-h-80 overflow-y-auto"
                                           >
-                                            <div className={`flex items-center justify-between font-bold mb-2 pb-1 border-b border-slate-700 ${allCommentsCompleted ? 'text-slate-400' : 'text-emerald-400'}`}>
+                                            <div className={`flex items-center justify-between font-bold mb-2 pb-1 border-b border-slate-200 ${allCommentsCompleted ? 'text-slate-500' : 'text-emerald-700'}`}>
                                               <span>Комментарии ({dateStr}): {dateComments.length}</span>
                                               <button
                                                 type="button"
                                                 onClick={() => setActiveCommentPopup(null)}
-                                                className="text-slate-400 hover:text-white font-normal px-1 text-sm"
+                                                className="text-slate-400 hover:text-slate-700 font-normal px-1 text-sm"
                                               >
                                                 ✕
                                               </button>
                                             </div>
                                             <div className="space-y-2">
                                               {dateComments.map((c, idx) => (
-                                                <div key={c.id || idx} className={`rounded-lg p-2 border ${c.completed ? 'bg-slate-800/50 border-slate-700/40' : 'bg-slate-800/80 border-slate-700/60'}`}>
-                                                  <div className={`font-semibold text-[11px] mb-0.5 ${c.completed ? 'text-slate-400' : 'text-emerald-300'}`}>
+                                                <div key={c.id || idx} className={`rounded-lg p-2 border ${c.completed ? 'bg-slate-50 border-slate-200' : 'bg-emerald-50 border-emerald-100'}`}>
+                                                  <div className={`font-semibold text-[11px] mb-0.5 ${c.completed ? 'text-slate-500' : 'text-emerald-700'}`}>
                                                     {c.gardenerName || 'Садовник'}
                                                   </div>
-                                                  <div className={`leading-snug whitespace-pre-wrap text-[11px] ${c.completed ? 'text-slate-400' : 'text-slate-200'}`}>{c.text}</div>
+                                                  <div className={`leading-snug whitespace-pre-wrap text-[11px] ${c.completed ? 'text-slate-500' : 'text-slate-600'}`}>{c.text}</div>
                                                   <button
                                                     type="button"
                                                     disabled={updatingDayCommentId === c.id}
                                                     onClick={() => handleToggleDayCommentCompleted(c)}
-                                                    className={`mt-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold disabled:opacity-50 ${c.completed ? 'bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'}`}
+                                                    className={`mt-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold disabled:opacity-50 ${c.completed ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                                                   >
                                                     {updatingDayCommentId === c.id ? '...' : c.completed ? '✓ Выполнено' : 'Отметить выполненным'}
                                                   </button>
