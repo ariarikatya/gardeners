@@ -323,7 +323,7 @@ function VoiceMessage({ attachment }) {
   };
 
   const formatTime = (seconds) => {
-    if (!seconds || !Number.isFinite(seconds)) return '0:00';
+    if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${String(secs).padStart(2, '0')}`;
@@ -364,31 +364,48 @@ function VoiceMessage({ attachment }) {
     audio.preload = 'metadata';
     audioRef.current = audio;
 
+    let cancelled = false;
+
     const onLoadedMetadata = () => {
-      setDuration(audio.duration);
-      setLoaded(true);
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration);
+        setLoaded(true);
+      } else {
+        // webm без метаданных — вычисляем через AudioContext
+        fetch(attachment.url)
+          .then((r) => r.arrayBuffer())
+          .then((buf) => {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            const ctx = new Ctx();
+            return ctx.decodeAudioData(buf).then((decoded) => {
+              ctx.close();
+              if (!cancelled) {
+                setDuration(decoded.duration);
+                setLoaded(true);
+              }
+            });
+          })
+          .catch(() => {
+            if (!cancelled) setLoaded(true);
+          });
+      }
     };
-    const onTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-    };
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
     const onEnded = () => {
       setPlaying(false);
       setCurrentTime(0);
       stopProgressTracking();
     };
-    const onError = () => {
-      setLoaded(true);
-    };
+    const onError = () => setLoaded(true);
 
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
-
-    // Принудительно загружаем метаданные
     audio.load();
 
     return () => {
+      cancelled = true;
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
       audio.removeEventListener('timeupdate', onTimeUpdate);
       audio.removeEventListener('ended', onEnded);
@@ -421,17 +438,17 @@ function VoiceMessage({ attachment }) {
       </button>
       
       <div className="flex flex-1 min-w-0 items-center gap-2">
-        <div 
-          className="flex-1 h-1 bg-slate-300 rounded-full relative cursor-pointer"
+        <div
+          className="relative h-2 flex-1 cursor-pointer rounded-full bg-slate-300"
           onClick={handleProgressClick}
         >
-          <div 
-            className="absolute left-0 top-0 h-full bg-emerald-500 rounded-full transition-all duration-100"
+          <div
+            className="absolute left-0 top-0 h-full rounded-full bg-emerald-500"
             style={{ width: `${progressPercentage}%` }}
           />
-          <div 
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-600 rounded-full shadow transition-all duration-100"
-            style={{ left: `calc(${progressPercentage}% - 6px)` }}
+          <div
+            className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-600 shadow"
+            style={{ left: `${progressPercentage}%` }}
           />
         </div>
       </div>
@@ -820,15 +837,9 @@ useEffect(() => {
         });
         return next;
       });
-      setMessages((current) => current.filter((message) => {
-        if (!message.isDeleted) return true;
-        const deletedAt = deletedMessagesMap.get(message.id);
-        if (!deletedAt) return true;
-        return Date.now() - deletedAt < 5 * 60 * 1000;
-      }));
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [deletedMessagesMap]);
+  }, []);
 
   useEffect(() => () => {
     voiceStartVersionRef.current += 1;
@@ -1810,40 +1821,43 @@ useEffect(() => {
                 {!loadingMessages && messages.length === 0 ? (
                   <p className="py-12 text-center text-sm text-slate-500">{messageSearch ? 'Ничего не найдено' : 'Сообщений пока нет. Напишите первым!'}</p>
                 ) : null}
-                {messages.map((message, index) => {
-                  const own = message.senderId === user?.id;
-                  const previousMessage = messages[index - 1];
-                  const startsNewDay = !previousMessage
-                    || new Date(previousMessage.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
-                  const hasAttachments = !message.isDeleted && message.attachments?.length > 0;
-                  const onlyMedia = !message.isDeleted
-                    && !message.body
-                    && !message.forwardedBody
-                    && message.attachments?.length > 0;
-                  const mediaMetadataOverlay = onlyMedia
-                    && message.attachments.every((attachment) => isImageAttachment(attachment) || isVideoAttachment(attachment));
-                  const shortMediaMessage = Boolean(
-                    hasAttachments
-                    && message.body
-                    && message.body.trim().split('\n').length <= 2
-                    && message.body.length <= 60
-                  );
-                  const mediaEdgeClass = onlyMedia
-                    ? ''
-                    : `-mx-3 ${message.replyToMessage || message.forwardedFromUser || (!own && activeChat.isGroup) ? '' : '-mt-2'}`;
-                  const shortText = Boolean(
-                    message.body
-                    && !message.attachments?.length
-                    && message.body.trim().split('\n').length <= 2
-                    && message.body.length <= 60
-                    && !message.forwardedBody
-                  );
-                  const time = <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>;
-                  const receiptColor = message.readByAll ? 'text-sky-600' : 'text-slate-500';
-                  const showMessageActions = own && editingMessageId !== message.id
-                    && (message.canEdit || message.canDelete);
-                  return (
-                    <div key={message.id}>
+{messages.map((message, index) => {
+                    const own = message.senderId === user?.id;
+                    const previousMessage = messages[index - 1];
+                    const startsNewDay = !previousMessage
+                      || new Date(previousMessage.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
+                    const hasAttachments = !message.isDeleted && message.attachments?.length > 0;
+                    const onlyMedia = !message.isDeleted
+                      && !message.body
+                      && !message.forwardedBody
+                      && message.attachments?.length > 0;
+                    const mediaMetadataOverlay = onlyMedia
+                      && message.attachments.every((attachment) => isImageAttachment(attachment) || isVideoAttachment(attachment));
+                    const shortMediaMessage = Boolean(
+                      hasAttachments
+                      && message.body
+                      && message.body.trim().split('\n').length <= 2
+                      && message.body.length <= 60
+                    );
+                    const mediaEdgeClass = onlyMedia
+                      ? ''
+                      : `-mx-3 ${message.replyToMessage || message.forwardedFromUser || (!own && activeChat.isGroup) ? '' : '-mt-2'}`;
+                    const shortText = Boolean(
+                      message.body
+                      && !message.attachments?.length
+                      && message.body.trim().split('\n').length <= 2
+                      && message.body.length <= 60
+                      && !message.forwardedBody
+                    );
+                    const time = <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>;
+                    const receiptColor = message.readByAll ? 'text-sky-600' : 'text-slate-500';
+                    const showMessageActions = own && editingMessageId !== message.id
+                      && (message.canEdit || message.canDelete);
+                    if (message.isDeleted && !deletedMessagesMap.has(message.id)) {
+                      return null;
+                    }
+                    return (
+                      <div key={message.id}>
                       {startsNewDay && (
                         <div className="mb-3 mt-4 flex justify-center">
                           <span className="rounded-full bg-slate-200/80 px-3 py-1 text-[11px] font-medium text-slate-600">
@@ -1921,9 +1935,7 @@ useEffect(() => {
                               </div>
                             </form>
                           ) : message.isDeleted ? (
-                            deletedMessagesMap.has(message.id) ? (
-                              <p className="text-sm italic text-slate-500">Сообщение удалено</p>
-                            ) : null
+                            <p className="text-sm italic text-slate-500">Сообщение удалено</p>
                           ) : (
                             <>
                               {message.attachments?.length > 0 && (
