@@ -385,6 +385,7 @@ function VoiceMessage({ attachment }) {
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
 
+    // Принудительно загружаем метаданные
     audio.load();
 
     return () => {
@@ -425,11 +426,11 @@ function VoiceMessage({ attachment }) {
           onClick={handleProgressClick}
         >
           <div 
-            className="absolute left-0 top-0 h-full bg-emerald-500 rounded-full"
+            className="absolute left-0 top-0 h-full bg-emerald-500 rounded-full transition-all duration-100"
             style={{ width: `${progressPercentage}%` }}
           />
           <div 
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-600 rounded-full shadow"
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-600 rounded-full shadow transition-all duration-100"
             style={{ left: `calc(${progressPercentage}% - 6px)` }}
           />
         </div>
@@ -806,6 +807,28 @@ useEffect(() => {
       window.clearInterval(timer);
     };
   }, [activeChatId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+      setDeletedMessagesMap((prev) => {
+        const next = new Map();
+        prev.forEach((deletedAt, messageId) => {
+          if (deletedAt > fiveMinutesAgo) {
+            next.set(messageId, deletedAt);
+          }
+        });
+        return next;
+      });
+      setMessages((current) => current.filter((message) => {
+        if (!message.isDeleted) return true;
+        const deletedAt = deletedMessagesMap.get(message.id);
+        if (!deletedAt) return true;
+        return Date.now() - deletedAt < 5 * 60 * 1000;
+      }));
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [deletedMessagesMap]);
 
   useEffect(() => () => {
     voiceStartVersionRef.current += 1;
@@ -1898,7 +1921,9 @@ useEffect(() => {
                               </div>
                             </form>
                           ) : message.isDeleted ? (
-                            <p className="text-sm italic text-slate-500">Сообщение удалено</p>
+                            deletedMessagesMap.has(message.id) ? (
+                              <p className="text-sm italic text-slate-500">Сообщение удалено</p>
+                            ) : null
                           ) : (
                             <>
                               {message.attachments?.length > 0 && (
