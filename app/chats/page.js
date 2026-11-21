@@ -340,7 +340,7 @@ function VoiceMessage({ attachment }) {
         if (!audio.paused && audio.duration) {
           setCurrentTime(audio.currentTime);
         }
-      }, 200);
+      }, 100);
     } else {
       audio.pause();
       setPlaying(false);
@@ -348,9 +348,20 @@ function VoiceMessage({ attachment }) {
     }
   };
 
+  const handleProgressClick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    if (audioRef.current && duration > 0) {
+      audioRef.current.currentTime = percentage * duration;
+      setCurrentTime(percentage * duration);
+    }
+  };
+
   useEffect(() => {
     const audio = new Audio(attachment.url);
     audio.dataset.voiceMessage = 'true';
+    audio.preload = 'metadata';
     audioRef.current = audio;
 
     const onLoadedMetadata = () => {
@@ -374,15 +385,7 @@ function VoiceMessage({ attachment }) {
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
 
-    // Принудительно загружаем метаданные
-    audio.preload = 'metadata';
-    
-    if (audio.readyState >= 1) {
-      onLoadedMetadata();
-    } else {
-      // Если метаданные еще не загружены, ждем
-      audio.load();
-    }
+    audio.load();
 
     return () => {
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -394,6 +397,8 @@ function VoiceMessage({ attachment }) {
       audio.src = '';
     };
   }, [attachment.url]);
+
+  const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
     <div className="flex items-center gap-3 rounded-xl bg-slate-100 px-3 py-2 min-w-0 max-w-[min(60vw,22rem)]">
@@ -413,29 +418,23 @@ function VoiceMessage({ attachment }) {
           </svg>
         )}
       </button>
+      
       <div className="flex flex-1 min-w-0 items-center gap-2">
         <div 
           className="flex-1 h-1 bg-slate-300 rounded-full relative cursor-pointer"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const percentage = x / rect.width;
-            if (audioRef.current && duration > 0) {
-              audioRef.current.currentTime = percentage * duration;
-              setCurrentTime(percentage * duration);
-            }
-          }}
+          onClick={handleProgressClick}
         >
           <div 
-            className="absolute left-0 top-0 h-full bg-emerald-500 rounded-full transition-all duration-100"
-            style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}
+            className="absolute left-0 top-0 h-full bg-emerald-500 rounded-full"
+            style={{ width: `${progressPercentage}%` }}
           />
           <div 
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-600 rounded-full shadow transition-all duration-100"
-            style={{ left: duration > 0 ? `calc(${(currentTime / duration) * 100}% - 6px)` : '0px' }}
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-600 rounded-full shadow"
+            style={{ left: `calc(${progressPercentage}% - 6px)` }}
           />
         </div>
       </div>
+      
       <span className="shrink-0 text-xs font-mono tabular-nums text-slate-600 min-w-[3.5ch] text-right">
         {loaded ? formatTime(duration) : '0:00'}
       </span>
@@ -774,7 +773,7 @@ export default function ChatsPage() {
     };
   }, [settingsOpen]);
 
-  useEffect(() => {
+useEffect(() => {
     if (!activeChatId) {
       setChatPresence({});
       setChatSettings(null);
@@ -807,29 +806,6 @@ export default function ChatsPage() {
       window.clearInterval(timer);
     };
   }, [activeChatId]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-      setDeletedMessagesMap((prev) => {
-        const next = new Map();
-        prev.forEach((deletedAt, messageId) => {
-          if (deletedAt > fiveMinutesAgo) {
-            next.set(messageId, deletedAt);
-          }
-        });
-        return next;
-      });
-      // Убираем сообщения из списка, если прошло больше 5 минут
-      setMessages((current) => current.filter((message) => {
-        if (!message.isDeleted) return true;
-        const deletedAt = deletedMessagesMap.get(message.id);
-        if (!deletedAt) return true;
-        return Date.now() - deletedAt < 5 * 60 * 1000;
-      }));
-    }, 30000); // Проверяем каждые 30 секунд
-    return () => window.clearInterval(timer);
-  }, [deletedMessagesMap]);
 
   useEffect(() => () => {
     voiceStartVersionRef.current += 1;
@@ -1167,17 +1143,29 @@ export default function ChatsPage() {
     if (!window.confirm('Удалить сообщение у всех участников?')) return;
     try {
       await requestJson(`/api/chats/messages/${encodeURIComponent(message.id)}`, { method: 'DELETE' });
+      
       setDeletedMessagesMap((prev) => {
         const next = new Map(prev);
         next.set(message.id, Date.now());
         return next;
       });
+      
       setMessages((current) => current.map((item) => (
         item.id === message.id
           ? { ...item, body: null, isDeleted: true, attachments: [], canEdit: false, canDelete: false }
           : item
       )));
+      
       await loadChats();
+      
+      window.setTimeout(() => {
+        setMessages((current) => current.filter((item) => item.id !== message.id));
+        setDeletedMessagesMap((prev) => {
+          const next = new Map(prev);
+          next.delete(message.id);
+          return next;
+        });
+      }, 5 * 60 * 1000);
     } catch (requestError) {
       setError(requestError.message || 'Не удалось удалить сообщение');
     }
@@ -1910,9 +1898,7 @@ export default function ChatsPage() {
                               </div>
                             </form>
                           ) : message.isDeleted ? (
-                            deletedMessagesMap.has(message.id) ? (
-                              <p className="text-sm italic text-slate-500">Сообщение удалено</p>
-                            ) : null
+                            <p className="text-sm italic text-slate-500">Сообщение удалено</p>
                           ) : (
                             <>
                               {message.attachments?.length > 0 && (
