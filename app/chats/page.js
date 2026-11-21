@@ -304,9 +304,6 @@ function VoiceMessage({ attachment }) {
   const audioRef = useRef(null);
   const progressIntervalRef = useRef(null);
 
-  const BAR_COUNT = 15;
-  const barHeights = [40, 70, 30, 90, 50, 80, 35, 95, 45, 75, 40, 85, 50, 70, 45];
-
   const stopProgressTracking = () => {
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current);
@@ -377,8 +374,14 @@ function VoiceMessage({ attachment }) {
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
 
+    // Принудительно загружаем метаданные
+    audio.preload = 'metadata';
+    
     if (audio.readyState >= 1) {
       onLoadedMetadata();
+    } else {
+      // Если метаданные еще не загружены, ждем
+      audio.load();
     }
 
     return () => {
@@ -391,8 +394,6 @@ function VoiceMessage({ attachment }) {
       audio.src = '';
     };
   }, [attachment.url]);
-
-  const activeBars = duration > 0 ? Math.floor((currentTime / duration) * BAR_COUNT) : 0;
 
   return (
     <div className="flex items-center gap-3 rounded-xl bg-slate-100 px-3 py-2 min-w-0 max-w-[min(60vw,22rem)]">
@@ -412,17 +413,28 @@ function VoiceMessage({ attachment }) {
           </svg>
         )}
       </button>
-      <div className="flex flex-1 min-w-0 items-center gap-1.5" style={{ height: '32px' }}>
-        {barHeights.map((height, index) => (
-          <div
-            key={index}
-            className="flex-1 rounded transition-all duration-100"
-            style={{
-              height: `${Math.max(2, Math.round((height / 100) * 32))}px`,
-              backgroundColor: index < activeBars ? 'rgb(16 185 129)' : 'rgba(148 163 184, 0.5)',
-            }}
+      <div className="flex flex-1 min-w-0 items-center gap-2">
+        <div 
+          className="flex-1 h-1 bg-slate-300 rounded-full relative cursor-pointer"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percentage = x / rect.width;
+            if (audioRef.current && duration > 0) {
+              audioRef.current.currentTime = percentage * duration;
+              setCurrentTime(percentage * duration);
+            }
+          }}
+        >
+          <div 
+            className="absolute left-0 top-0 h-full bg-emerald-500 rounded-full transition-all duration-100"
+            style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}
           />
-        ))}
+          <div 
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-600 rounded-full shadow transition-all duration-100"
+            style={{ left: duration > 0 ? `calc(${(currentTime / duration) * 100}% - 6px)` : '0px' }}
+          />
+        </div>
       </div>
       <span className="shrink-0 text-xs font-mono tabular-nums text-slate-600 min-w-[3.5ch] text-right">
         {loaded ? formatTime(duration) : '0:00'}
@@ -526,6 +538,7 @@ export default function ChatsPage() {
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
   const [messageMenu, setMessageMenu] = useState(null);
   const [notificationsDropdownOpen, setNotificationsDropdownOpen] = useState(false);
+  const [deletedMessagesMap, setDeletedMessagesMap] = useState(new Map());
   const voiceTimerRef = useRef(null);
   const voiceAnimationFrameRef = useRef(null);
   const voiceVisualizerRef = useRef(null);
@@ -794,6 +807,29 @@ export default function ChatsPage() {
       window.clearInterval(timer);
     };
   }, [activeChatId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+      setDeletedMessagesMap((prev) => {
+        const next = new Map();
+        prev.forEach((deletedAt, messageId) => {
+          if (deletedAt > fiveMinutesAgo) {
+            next.set(messageId, deletedAt);
+          }
+        });
+        return next;
+      });
+      // Убираем сообщения из списка, если прошло больше 5 минут
+      setMessages((current) => current.filter((message) => {
+        if (!message.isDeleted) return true;
+        const deletedAt = deletedMessagesMap.get(message.id);
+        if (!deletedAt) return true;
+        return Date.now() - deletedAt < 5 * 60 * 1000;
+      }));
+    }, 30000); // Проверяем каждые 30 секунд
+    return () => window.clearInterval(timer);
+  }, [deletedMessagesMap]);
 
   useEffect(() => () => {
     voiceStartVersionRef.current += 1;
@@ -1131,6 +1167,11 @@ export default function ChatsPage() {
     if (!window.confirm('Удалить сообщение у всех участников?')) return;
     try {
       await requestJson(`/api/chats/messages/${encodeURIComponent(message.id)}`, { method: 'DELETE' });
+      setDeletedMessagesMap((prev) => {
+        const next = new Map(prev);
+        next.set(message.id, Date.now());
+        return next;
+      });
       setMessages((current) => current.map((item) => (
         item.id === message.id
           ? { ...item, body: null, isDeleted: true, attachments: [], canEdit: false, canDelete: false }
@@ -1869,7 +1910,9 @@ export default function ChatsPage() {
                               </div>
                             </form>
                           ) : message.isDeleted ? (
-                            <p className="text-sm italic text-slate-500">Сообщение удалено</p>
+                            deletedMessagesMap.has(message.id) ? (
+                              <p className="text-sm italic text-slate-500">Сообщение удалено</p>
+                            ) : null
                           ) : (
                             <>
                               {message.attachments?.length > 0 && (
