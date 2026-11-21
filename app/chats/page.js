@@ -276,9 +276,7 @@ function AttachmentPreview({ attachment, compact = false, flat = false, onOpenMe
     );
   }
   if (isAudioAttachment(attachment)) {
-    return (
-      <audio controls preload="metadata" src={attachment.url} className="h-10 max-w-full" aria-label={attachment.filename} />
-    );
+    return <VoiceMessage attachment={attachment} />;
   }
   return (
     <a
@@ -293,6 +291,141 @@ function AttachmentPreview({ attachment, compact = false, flat = false, onOpenMe
       <span className="min-w-0 break-all">{attachment.filename}</span>
       <span className="shrink-0 text-xs text-slate-400">Скачать</span>
     </a>
+  );
+}
+
+function VoiceMessage({ attachment }) {
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const audioRef = useRef(null);
+  const progressIntervalRef = useRef(null);
+
+  const BAR_COUNT = 15;
+  const barHeights = [40, 70, 30, 90, 50, 80, 35, 95, 45, 75, 40, 85, 50, 70, 45];
+
+  const stopProgressTracking = () => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+  };
+
+  const pauseAllOthers = () => {
+    if (typeof window !== 'undefined') {
+      document.querySelectorAll('audio[data-voice-message]').forEach((el) => {
+        if (el !== audioRef.current) {
+          el.pause();
+          el.currentTime = 0;
+        }
+      });
+    }
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds || !Number.isFinite(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const handlePlayPause = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      pauseAllOthers();
+      audio.play().catch((err) => console.error('Play failed:', err));
+      setPlaying(true);
+      progressIntervalRef.current = setInterval(() => {
+        if (!audio.paused && audio.duration) {
+          setCurrentTime(audio.currentTime);
+        }
+      }, 200);
+    } else {
+      audio.pause();
+      setPlaying(false);
+      stopProgressTracking();
+    }
+  };
+
+  useEffect(() => {
+    const audio = new Audio(attachment.url);
+    audio.dataset.voiceMessage = 'true';
+    audioRef.current = audio;
+
+    const onLoadedMetadata = () => {
+      setDuration(audio.duration);
+      setLoaded(true);
+    };
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+    const onEnded = () => {
+      setPlaying(false);
+      setCurrentTime(0);
+      stopProgressTracking();
+    };
+    const onError = () => {
+      setLoaded(true);
+    };
+
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('error', onError);
+
+    if (audio.readyState >= 1) {
+      onLoadedMetadata();
+    }
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('error', onError);
+      stopProgressTracking();
+      audio.pause();
+      audio.src = '';
+    };
+  }, [attachment.url]);
+
+  const activeBars = duration > 0 ? Math.floor((currentTime / duration) * BAR_COUNT) : 0;
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-slate-100 px-3 py-2 min-w-0 max-w-[min(60vw,22rem)]">
+      <button
+        type="button"
+        onClick={handlePlayPause}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition-colors"
+        aria-label={playing ? 'Приостановить' : 'Воспроизвести'}
+      >
+        {playing ? (
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor">
+            <path d="M5.5 4.5h3v11h-3zm6 0h3v11h-3z" />
+          </svg>
+        ) : (
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4 ml-0.5" fill="currentColor">
+            <path d="M6 4.5a1 1 0 0 1 1.5-.86l7 4.5a2.2 2.2 0 0 1 0 3.72l-7 4.5A1 1 0 0 1 6 15.5z" />
+          </svg>
+        )}
+      </button>
+      <div className="flex flex-1 min-w-0 items-center gap-1.5" style={{ height: '32px' }}>
+        {barHeights.map((height, index) => (
+          <div
+            key={index}
+            className="flex-1 rounded transition-all duration-100"
+            style={{
+              height: `${Math.max(2, Math.round((height / 100) * 32))}px`,
+              backgroundColor: index < activeBars ? 'rgb(16 185 129)' : 'rgba(148 163 184, 0.5)',
+            }}
+          />
+        ))}
+      </div>
+      <span className="shrink-0 text-xs font-mono tabular-nums text-slate-600 min-w-[3.5ch] text-right">
+        {loaded ? formatTime(duration) : '0:00'}
+      </span>
+    </div>
   );
 }
 
