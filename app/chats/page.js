@@ -133,11 +133,13 @@ function isImageAttachment(attachment) {
 }
 
 function isVideoAttachment(attachment) {
+  if (attachment.filename?.startsWith('voice-')) return false;
   return attachment.mimeType?.startsWith('video/') || /\.(3gp|avi|m4v|mkv|mov|mp4|ogv|webm)$/i.test(attachment.filename || '');
 }
 
 function isAudioAttachment(attachment) {
-  return attachment.mimeType?.startsWith('audio/') || /\.(m4a|mp3|oga|ogg|opus|wav|weba|webm)$/i.test(attachment.filename || '');
+  if (attachment.filename?.startsWith('voice-')) return true;
+  return attachment.mimeType?.startsWith('audio/') || /\.(m4a|mp3|oga|ogg|opus|wav|weba)$/i.test(attachment.filename || '');
 }
 
 function isImageFile(file) {
@@ -1318,7 +1320,7 @@ export default function ChatsPage() {
         }
         const extension = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
         const file = new File([blob], `voice-${Date.now()}.${extension}`, {
-          type: blob.type || mimeType,
+          type: 'audio/webm',
         });
         const url = URL.createObjectURL(blob);
         voicePreviewAudioRef.current?.pause();
