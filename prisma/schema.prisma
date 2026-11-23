@@ -11,6 +11,7 @@ enum Role {
   ADMIN
   GARDENER
   LEADER
+  CHAT
 }
 
 model User {

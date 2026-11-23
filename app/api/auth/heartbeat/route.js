@@ -11,6 +11,10 @@ export async function POST(req) {
   const payload = await verifyToken(token);
   if (!payload?.userId) return NextResponse.json({ error: 'Невалидный токен' }, { status: 401 });
 
+  if (payload.role === 'CHAT') {
+    return NextResponse.json({ error: 'Этот аккаунт доступен только в чате: https://chat.anemonagro.ru' }, { status: 401 });
+  }
+
   try {
     await prisma.user.update({
       where: { id: String(payload.userId) },

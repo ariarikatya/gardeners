@@ -38,6 +38,10 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Пользователь с таким номером не найден' }, { status: 404 });
     }
 
+    if (user.role === 'CHAT') {
+      return NextResponse.json({ error: 'Этот аккаунт доступен только в чате: https://chat.anemonagro.ru' }, { status: 401 });
+    }
+
     if ((user.role === 'ADMIN' || user.role === 'LEADER') && !(await hasActiveSessionForUser(req, user))) {
       if (!password) {
         return NextResponse.json({ requiresPassword: true });

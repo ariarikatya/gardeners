@@ -15,6 +15,7 @@ const ROLE_LABELS = {
   ADMIN: 'Диспетчер',
   LEADER: 'Руководитель',
   GARDENER: 'Садовник',
+  CHAT: 'Гость чата',
 };
 
 function formatTime(value) {

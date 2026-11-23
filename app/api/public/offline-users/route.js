@@ -5,6 +5,9 @@ export async function GET() {
   try {
     const [dbUsers, dbGardeners] = await Promise.all([
       prisma.user.findMany({
+        where: {
+          role: { in: ['ADMIN', 'LEADER', 'GARDENER'] },
+        },
         select: {
           phone: true,
           role: true,

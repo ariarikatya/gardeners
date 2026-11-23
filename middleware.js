@@ -76,6 +76,8 @@ export async function middleware(request) {
     if (!isGardenerPage && !isChatPage) {
       redirectUrl = new URL('/gardener', request.url);
     }
+  } else if (payload.role === 'CHAT') {
+    redirectUrl = new URL('https://chat.anemonagro.ru', request.url);
   } else {
     redirectUrl = new URL('/login', request.url);
   }
