@@ -274,7 +274,7 @@ export async function POST(req) {
           const tokenData = await tokenRes.json().catch(() => ({}));
           if (tokenRes.ok && tokenData.access_token) {
             const queryPhone = phoneClean.replace(/\D/g, '');
-            let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}`, {
+            let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(queryPhone)}&order[created_at]=desc`, {
               method: 'GET',
               headers: {
                 'Authorization': `Bearer ${tokenData.access_token}`,

@@ -23,6 +23,8 @@ model User {
   vkId                 String?   // VK user id / peer id for notifications
   notifPermission      String?
   notificationsEnabled Boolean   @default(false)
+  orderNotificationsEnabled Boolean @default(true)
+  chatNotificationsEnabled Boolean @default(true)
   lastActive           DateTime?
   gardenerId           String?   @unique
   gardener             Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)

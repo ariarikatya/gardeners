@@ -1612,9 +1612,32 @@ useEffect(() => {
               <p className="truncate text-xs text-emerald-100">{user?.name || 'Переписка сотрудников'}</p>
             </div>
           </div>
-          <button type="button" onClick={() => { setError(''); setNewChatOpen(true); }} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50">
-            + Новый чат
-          </button>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer" title="Уведомления чата">
+              <input
+                type="checkbox"
+                checked={user?.chatNotificationsEnabled !== false}
+                onChange={async (e) => {
+                  try {
+                    await apiFetch('/api/auth/me', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ chatNotificationsEnabled: e.target.checked }),
+                    });
+                    setUser(prev => prev ? { ...prev, chatNotificationsEnabled: e.target.checked } : null);
+                  } catch (err) {
+                    console.error('Failed to update chatNotificationsEnabled:', err);
+                    e.target.checked = !e.target.checked;
+                  }
+                }}
+                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+              />
+              <span className="text-sm text-white hidden sm:inline">Уведомления чата</span>
+            </label>
+            <button type="button" onClick={() => { setError(''); setNewChatOpen(true); }} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50">
+              + Новый чат
+            </button>
+          </div>
         </div>
       </header>
 

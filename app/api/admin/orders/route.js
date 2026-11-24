@@ -402,7 +402,7 @@ export async function POST(req) {
           let missedUserIds = [];
 
           if (targetUserIds.length > 0) {
-            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true });
+            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true, notificationType: 'order' });
 
             // Вычисляем пользователей, которым не удалось успешно доставить ни одного пуша
             const successfulUserIds = new Set(result?.details?.filter((d) => d.success && d.userId)?.map((d) => d.userId) || []);
@@ -410,11 +410,11 @@ export async function POST(req) {
 
             if (missedUserIds.length > 0) {
               retryFallback = true;
-              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true });
+              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true, notificationType: 'order' });
             }
           } else {
             fallbackAll = true;
-            result = await sendToRoles(['GARDENER'], pushOptions);
+            result = await sendToRoles(['GARDENER'], pushOptions, { notificationType: 'order' });
           }
 
           const totalDelivered = (result?.deliveredCount ?? 0) + (retryResult?.deliveredCount ?? 0);
@@ -429,6 +429,7 @@ export async function POST(req) {
             body: bodyParts,
             tag: order.id,
             url: '/admin',
+            notificationType: 'order'
           });
 
           if (order.gardenerId) {
@@ -439,6 +440,7 @@ export async function POST(req) {
                 body: bodyParts,
                 tag: order.id,
                 url: '/gardener',
+                notificationType: 'order'
               });
             }
           }
@@ -528,7 +530,7 @@ export async function POST(req) {
 
             const tokenData = await tokenRes.json().catch(() => ({}));
             if (tokenRes.ok && tokenData.access_token) {
-              let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(phoneClean)}`, {
+              let searchRes = await fetch(`https://${subdomain}.amocrm.ru/api/v4/leads?query=${encodeURIComponent(phoneClean)}&order[created_at]=desc`, {
                 method: 'GET',
                 headers: {
                   'Authorization': `Bearer ${tokenData.access_token}`,
@@ -652,6 +654,7 @@ export async function POST(req) {
                 body: pBodyParts,
                 tag: partnerOrder.id,
                 url: '/gardener',
+                notificationType: 'order'
               }).catch((err) => console.error('Partner push notification error:', err));
             }
           } catch (err) {
@@ -837,6 +840,7 @@ export async function PUT(req) {
             body: bodyParts,
             tag: order.id,
             url: '/admin',
+            notificationType: 'order'
           });
         } catch (err) {
           console.error('WebPush notification error on order status update:', err.message);
@@ -844,8 +848,32 @@ export async function PUT(req) {
       })();
     }
 
+    // AmoCRM status sync
     try {
-      const amoLeadId = order.amoDealId || existing?.amoDealId;
+      let amoLeadId = order.amoDealId || existing?.amoDealId;
+
+      // If no amoDealId, try to find the deal by clientPhone
+      if (!amoLeadId && order.clientPhone) {
+        try {
+          const phoneClean = String(order.clientPhone).replace(/\D/g, '');
+          if (phoneClean) {
+            const searchRes = await amoApi.apiRequest(`/api/v4/leads?query=${encodeURIComponent(phoneClean)}&order[created_at]=desc`);
+            const leads = searchRes?._embedded?.leads || [];
+            if (leads.length > 0) {
+              amoLeadId = String(leads[0].id);
+              // Save the found amoDealId to the order
+              await prisma.order.update({
+                where: { id: order.id },
+                data: { amoDealId: amoLeadId }
+              });
+              console.log(`✅ Found and saved amoDealId (${amoLeadId}) for order ${order.id} by phone`);
+            }
+          }
+        } catch (searchErr) {
+          console.error(`[external-amocrm] Failed to find deal by phone for order ${order.id}:`, searchErr.message);
+        }
+      }
+
       if (amoLeadId && updateData.status && existing && existing.status !== updateData.status) {
         let action = null;
         if (updateData.status === 'Отказ') action = 'refusal';
@@ -861,29 +889,31 @@ export async function PUT(req) {
         if (action) {
           const svc = order.serviceId ? await prisma.service.findUnique({ where: { id: order.serviceId } }) : null;
           const serviceName = svc ? svc.name : existing?.service?.name || '';
-          console.log('7. Проверяю подключение amoCRM...');
-          console.log('8. Вызываю updateLeadStage с параметрами:', { amoLeadId, serviceName, status: action });
           try {
             await amoApi.updateLeadStage(amoLeadId, serviceName, action);
-            console.log('9. Результат updateLeadStage: успех');
+            console.log(`✅ AmoCRM lead stage updated for order ${order.id}: ${action}`);
             if (action === 'refusal') {
               const reason = updateData.refusalReason || order.refusalReason || '';
               if (reason) await amoApi.addNoteToLead(amoLeadId, 'Отказ: ' + reason);
             }
           } catch (e) {
-            console.log('9. ОШИБКА updateLeadStage:', e.message);
+            console.error(`[external-amocrm] AmoCRM status update failed for order ${order.id}:`, e.message);
           }
         }
       }
 
-      if (updateData.status === 'Отменен' && order.amoDealId) {
+      if (updateData.status === 'Отменен' && amoLeadId) {
         const s = (order.service?.name || '').toLowerCase();
         const isObrezka = s.includes('обрез') || s.includes('выкорч');
         const isService = s.includes('сервис') || s.includes('консервац') || s.includes('стрижк');
-        await amoApi.updateLeadStage(order.amoDealId, order.service?.name, 'refusal');
-        if (!isObrezka && !isService) {
-          const reason = updateData.refusalReason || 'Не указана';
-          await amoApi.addNoteToLead(order.amoDealId, `Отказ: ${reason}`);
+        try {
+          await amoApi.updateLeadStage(amoLeadId, order.service?.name, 'refusal');
+          if (!isObrezka && !isService) {
+            const reason = updateData.refusalReason || 'Не указана';
+            await amoApi.addNoteToLead(amoLeadId, `Отказ: ${reason}`);
+          }
+        } catch (e) {
+          console.error(`[external-amocrm] AmoCRM status update failed for order ${order.id}:`, e.message);
         }
       }
     } catch (e) {
@@ -943,6 +973,7 @@ export async function PUT(req) {
                   body: `Дата: ${order.date ? new Date(order.date).toISOString().split('T')[0] : ''}, Адрес: ${order.address || 'Не указан'}`,
                   tag: partnerOrder.id,
                   url: '/gardener',
+                  notificationType: 'order'
                 }).catch(err => console.error('Partner push error on gardener change:', err));
               }
             } catch (err) {
@@ -1063,7 +1094,7 @@ export async function PUT(req) {
           let missedUserIds = [];
 
           if (targetUserIds.length > 0) {
-            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true });
+            result = await sendToUsers(targetUserIds, pushOptions, { includeUnlinked: true, notificationType: 'order' });
 
             // Вычисляем пользователей, которым не удалось успешно доставить ни одного пуша
             const successfulUserIds = new Set(result?.details?.filter((d) => d.success && d.userId)?.map((d) => d.userId) || []);
@@ -1071,11 +1102,11 @@ export async function PUT(req) {
 
             if (missedUserIds.length > 0) {
               retryFallback = true;
-              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true });
+              retryResult = await sendToUsers(missedUserIds, pushOptions, { includeUnlinked: true, notificationType: 'order' });
             }
           } else {
             fallbackAll = true;
-            result = await sendToRoles(['GARDENER'], pushOptions);
+            result = await sendToRoles(['GARDENER'], pushOptions, { notificationType: 'order' });
           }
 
           const totalDelivered = (result?.deliveredCount ?? 0) + (retryResult?.deliveredCount ?? 0);
@@ -1104,6 +1135,7 @@ export async function PUT(req) {
                 body: `Заказ на ${dateFormatted} отменен. Адрес: ${order.address || 'Не указан'}`,
                 tag: order.id,
                 url: '/gardener',
+                notificationType: 'order'
               });
             }
           }
@@ -1127,6 +1159,7 @@ export async function PUT(req) {
               body: `Заказ перенесен на новую дату: ${newDateFormatted}. Адрес: ${order.address || 'Не указан'}`,
               tag: order.id,
               url: '/gardener',
+              notificationType: 'order'
             });
           }
         }
@@ -1148,6 +1181,7 @@ export async function PUT(req) {
                 body: `Дата: ${dateFormatted}, Адрес: ${order.address || 'Не указан'}`,
                 tag: order.id,
                 url: '/gardener',
+                notificationType: 'order'
               });
             }
           }
@@ -1160,6 +1194,7 @@ export async function PUT(req) {
                 body: `Заказ по адресу (${order.address || 'Не указан'}) передан другому мастеру`,
                 tag: order.id,
                 url: '/gardener',
+                notificationType: 'order'
               });
             }
           }

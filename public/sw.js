@@ -1325,6 +1325,10 @@ self.addEventListener('push', (event) => {
   if (event.data) {
     try { data = event.data.json(); } catch (e) { data = { body: event.data.text() }; }
   }
+  // Ignore chat_message pushes - chat app handles its own notifications
+  if (data.type === 'chat_message') {
+    return;
+  }
   const title = data.title || '🌿 Новое уведомление';
   const options = {
     body: data.body || '',

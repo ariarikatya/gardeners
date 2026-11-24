@@ -38,6 +38,17 @@ function formatHumanRange(startStr, endStr) {
   return `${f(d1)} – ${f(d2)}`;
 }
 
+function formatPhone(phone) {
+  if (!phone) return '';
+  let digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('8') && digits.length === 11) digits = '7' + digits.slice(1);
+  else if (digits.length === 10) digits = '7' + digits;
+  if (digits.length === 11 && digits.startsWith('7')) {
+    return `+7 ${digits.slice(1, 4)} ${digits.slice(4, 7)}-${digits.slice(7, 9)}-${digits.slice(9, 11)}`;
+  }
+  return phone;
+}
+
 const OPERATION_TYPE_LABELS = {
   bonus: 'Премия',
   fine: 'Штраф',
@@ -108,6 +119,8 @@ export default function LeaderDashboard() {
   const [ordersList, setOrdersList] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [ordersModalAllTime, setOrdersModalAllTime] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [leaderScale, setLeaderScale] = useState(1);
   const [leaderTab, setLeaderTab] = useState('finance');
 
@@ -431,7 +444,10 @@ export default function LeaderDashboard() {
       const params = new URLSearchParams();
       if (reqStart) params.set('start', reqStart);
       if (reqEnd) params.set('end', reqEnd);
-      const res = await apiFetch(`/api/leader?${params.toString()}`);
+      const [res, resMe] = await Promise.all([
+        apiFetch(`/api/leader?${params.toString()}`),
+        apiFetch('/api/auth/me')
+      ]);
       if (!res.ok) {
         const errorText = await res.text();
         let errorJson;
@@ -439,6 +455,12 @@ export default function LeaderDashboard() {
         throw new Error((errorJson && errorJson.error) || `Ошибка сервера (${res.status}): ${errorText.slice(0, 100)}`);
       }
       const json = await res.json();
+      if (resMe.ok) {
+        const meData = await resMe.json();
+        if (seq === fetchSeqRef.current) {
+          setCurrentUser(meData.user || null);
+        }
+      }
 
       // Verify that the response period matches the requested period before saving
       const respStart = json.period?.start?.slice(0, 10);
@@ -829,6 +851,30 @@ export default function LeaderDashboard() {
             <button type="button" onClick={() => setLeaderScale(s => Math.min(1, +(s + 0.1).toFixed(1)))} aria-label="Увеличить масштаб" className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 hover:bg-emerald-200">+</button>
           </div>
           <SettingsMenu>
+            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Настройки уведомлений</h2>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={currentUser?.orderNotificationsEnabled !== false}
+                  onChange={async (e) => {
+                    try {
+                      await apiFetch('/api/auth/me', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ orderNotificationsEnabled: e.target.checked }),
+                      });
+                      setCurrentUser(prev => prev ? { ...prev, orderNotificationsEnabled: e.target.checked } : null);
+                    } catch (err) {
+                      console.error('Failed to update orderNotificationsEnabled:', err);
+                      e.target.checked = !e.target.checked;
+                    }
+                  }}
+                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-sm text-slate-700">Уведомления о заказах</span>
+              </label>
+            </div>
             <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 transition-all hover:bg-emerald-200" />
             <button type="button" data-dismiss-settings onClick={() => setLeaderTab('catalog')} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
@@ -1497,14 +1543,25 @@ export default function LeaderDashboard() {
                     };
 
                     return (
-                      <li key={o.id} className="border p-3 rounded-lg">
+                      <li
+                        key={o.id}
+                        className="border p-3 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors"
+                        onClick={() => setSelectedOrder(o)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedOrder(o); }}}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Открыть заказ ${o.id}`}
+                      >
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <div className="text-sm font-medium">{new Date(o.date).toLocaleDateString('ru-RU')} — {o.clientName} — {o.status}</div>
                             {o.address && <div className="text-xs text-slate-600 mt-0.5">📍 <a href={`https://yandex.ru/maps/?text=${encodeURIComponent(o.district ? `${o.district}, ${o.address}` : o.address)}`} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline font-medium">{o.district ? `${o.district} • ${o.address}` : o.address}</a></div>}
                             {o.refusalReason && <div className="text-xs text-rose-600 font-medium mt-0.5">Причина отказа: {o.refusalReason}</div>}
                             {o.completionComment && <div className="text-xs text-emerald-800 font-medium mt-0.5">Комментарий садовника: {o.completionComment}</div>}
-                            <div className="text-xs text-slate-500 mt-1">Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</div>
+                            <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                              <span>Сумма: {Number(o.priceFact || o.priceContract || 0).toLocaleString('ru-RU')} ₽</span>
+                              {o.clientPhone && <span className="text-emerald-700 font-medium">📞 {formatPhone(o.clientPhone)}</span>}
+                            </div>
                             <div className="text-xs text-slate-500 mt-1">Текущий статус: {getPaymentTargetLabel(o.paidTo, o.paid)}</div>
                           </div>
                           <div className="flex flex-col gap-2 sm:mt-0">
@@ -1513,7 +1570,7 @@ export default function LeaderDashboard() {
                               <input
                                 type="checkbox"
                                 checked={selectedTargets.includes('GARDENER')}
-                                onChange={(e) => toggleTarget('GARDENER', e.target.checked)}
+                                onChange={(e) => { e.stopPropagation(); toggleTarget('GARDENER', e.target.checked); }}
                               />
                               {PAYMENT_TARGET_LABELS.GARDENER}
                             </label>
@@ -1521,7 +1578,7 @@ export default function LeaderDashboard() {
                               <input
                                 type="checkbox"
                                 checked={selectedTargets.includes('COMPANY')}
-                                onChange={(e) => toggleTarget('COMPANY', e.target.checked)}
+                                onChange={(e) => { e.stopPropagation(); toggleTarget('COMPANY', e.target.checked); }}
                               />
                               {PAYMENT_TARGET_LABELS.COMPANY}
                             </label>
@@ -1548,6 +1605,68 @@ export default function LeaderDashboard() {
           initialIndex={viewerIndex}
           onClose={() => setIsViewerOpen(false)}
         />
+      )}
+
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setSelectedOrder(null)} role="dialog" aria-modal="true" aria-labelledby="order-detail-title">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+              <h2 id="order-detail-title" className="text-lg font-semibold text-slate-900">Детали заказа</h2>
+              <button onClick={() => setSelectedOrder(null)} className="text-slate-500 hover:text-slate-700 text-2xl leading-none" aria-label="Закрыть">×</button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <span className="text-xs text-slate-500">ID</span>
+                  <p className="font-mono text-sm text-slate-900">{selectedOrder.id}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500">Дата</span>
+                  <p className="text-sm text-slate-900">{new Date(selectedOrder.date).toLocaleDateString('ru-RU')}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500">Клиент</span>
+                  <p className="text-sm text-slate-900">{selectedOrder.clientName}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500">Телефон</span>
+                  <p className="text-sm text-slate-900">{selectedOrder.clientPhone ? formatPhone(selectedOrder.clientPhone) : '—'}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-xs text-slate-500">Адрес</span>
+                  <p className="text-sm text-slate-900">{selectedOrder.district ? `${selectedOrder.district} • ${selectedOrder.address}` : selectedOrder.address || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500">Статус</span>
+                  <p className="text-sm text-slate-900">{selectedOrder.status}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500">Сумма</span>
+                  <p className="text-sm font-medium text-slate-900">{Number(selectedOrder.priceFact || selectedOrder.priceContract || 0).toLocaleString('ru-RU')} ₽</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-xs text-slate-500">Выплата</span>
+                  <p className="text-sm text-slate-900">{getPaymentTargetLabel(selectedOrder.paidTo, selectedOrder.paid)}</p>
+                </div>
+              </div>
+              {selectedOrder.refusalReason && (
+                <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
+                  <span className="text-xs text-rose-700 font-medium">Причина отказа:</span>
+                  <p className="text-sm text-rose-900 mt-1">{selectedOrder.refusalReason}</p>
+                </div>
+              )}
+              {selectedOrder.completionComment && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <span className="text-xs text-emerald-700 font-medium">Комментарий садовника:</span>
+                  <p className="text-sm text-emerald-900 mt-1">{selectedOrder.completionComment}</p>
+                </div>
+              )}
+            </div>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-4 py-3 flex justify-end gap-2">
+              <button onClick={() => setSelectedOrder(null)} className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200">Закрыть</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -365,7 +365,8 @@ export async function POST(req, { params }) {
           body: pushBody,
           tag: `chat-${params.chatId}`,
           url: `/chats?chat=${encodeURIComponent(params.chatId)}`,
-        }
+        },
+        { notificationType: 'chat' }
       );
       if (pushResult.failedCount > 0) {
         console.error(`[Chats] Web Push failed for ${pushResult.failedCount} recipient(s) in chat ${params.chatId}`);
