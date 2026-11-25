@@ -837,6 +837,38 @@ export default function LeaderDashboard() {
     }
   };
 
+  const handleToggleNotifications = async () => {
+    const enabling = !currentUser?.notificationsEnabled;
+    try {
+      if (enabling) {
+        let permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          permission = await Notification.requestPermission();
+        }
+        if (permission === 'denied') {
+          alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
+        }
+        const enabled = permission === 'granted';
+        await apiFetch('/api/push/permission', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notifPermission: permission, notificationsEnabled: enabled }),
+        });
+        setCurrentUser(prev => prev ? { ...prev, notificationsEnabled: enabled, notifPermission: permission } : null);
+      } else {
+        await apiFetch('/api/push/permission', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notificationsEnabled: false }),
+        });
+        setCurrentUser(prev => prev ? { ...prev, notificationsEnabled: false } : null);
+      }
+    } catch (err) {
+      console.error('Failed to toggle notifications:', err);
+      alert(err.message || 'Не удалось изменить настройки уведомлений');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800">
       <header className="bg-emerald-900 text-white px-3 py-3 sm:px-4 sm:py-4 flex flex-wrap items-center justify-between gap-2 shadow md:flex-nowrap">
@@ -851,31 +883,17 @@ export default function LeaderDashboard() {
             <button type="button" onClick={() => setLeaderScale(s => Math.min(1, +(s + 0.1).toFixed(1)))} aria-label="Увеличить масштаб" className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 hover:bg-emerald-200">+</button>
           </div>
           <SettingsMenu>
-            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Настройки уведомлений</h2>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={currentUser?.orderNotificationsEnabled !== false}
-                  onChange={async (e) => {
-                    try {
-                      await apiFetch('/api/auth/me', {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ orderNotificationsEnabled: e.target.checked }),
-                      });
-                      setCurrentUser(prev => prev ? { ...prev, orderNotificationsEnabled: e.target.checked } : null);
-                    } catch (err) {
-                      console.error('Failed to update orderNotificationsEnabled:', err);
-                      e.target.checked = !e.target.checked;
-                    }
-                  }}
-                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span className="text-sm text-slate-700">Уведомления о заказах</span>
-              </label>
-            </div>
-            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Настройки уведомлений</h2>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleToggleNotifications}
+                  className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100"
+                >
+                  {currentUser?.notificationsEnabled ? '🔕 Выключить уведомления' : '🔔 Включить уведомления'}
+                </button>
+              </div>
+              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 transition-all hover:bg-emerald-200" />
             <button type="button" data-dismiss-settings onClick={() => setLeaderTab('catalog')} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
               📦 Справочная база и назначения
@@ -1614,12 +1632,8 @@ export default function LeaderDashboard() {
               <h2 id="order-detail-title" className="text-lg font-semibold text-slate-900">Детали заказа</h2>
               <button onClick={() => setSelectedOrder(null)} className="text-slate-500 hover:text-slate-700 text-2xl leading-none" aria-label="Закрыть">×</button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <span className="text-xs text-slate-500">ID</span>
-                  <p className="font-mono text-sm text-slate-900">{selectedOrder.id}</p>
-                </div>
                 <div>
                   <span className="text-xs text-slate-500">Дата</span>
                   <p className="text-sm text-slate-900">{new Date(selectedOrder.date).toLocaleDateString('ru-RU')}</p>

@@ -1613,27 +1613,6 @@ useEffect(() => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 cursor-pointer" title="Уведомления чата">
-              <input
-                type="checkbox"
-                checked={user?.chatNotificationsEnabled !== false}
-                onChange={async (e) => {
-                  try {
-                    await apiFetch('/api/auth/me', {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ chatNotificationsEnabled: e.target.checked }),
-                    });
-                    setUser(prev => prev ? { ...prev, chatNotificationsEnabled: e.target.checked } : null);
-                  } catch (err) {
-                    console.error('Failed to update chatNotificationsEnabled:', err);
-                    e.target.checked = !e.target.checked;
-                  }
-                }}
-                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
-              />
-              <span className="text-sm text-white hidden sm:inline">Уведомления чата</span>
-            </label>
             <button type="button" onClick={() => { setError(''); setNewChatOpen(true); }} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-50">
               + Новый чат
             </button>
@@ -1673,7 +1652,30 @@ useEffect(() => {
       <div className="mx-auto grid min-h-0 w-full max-w-7xl flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:grid-cols-[320px_minmax(0,1fr)]">
         <aside className={`flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:flex ${activeChatId ? 'hidden' : 'flex'}`}>
           <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="font-semibold">Переписки</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-semibold">Переписки</h2>
+              <label className="flex items-center gap-2 cursor-pointer" title="Уведомления чата">
+                <input
+                  type="checkbox"
+                  checked={user?.chatNotificationsEnabled !== false}
+                  onChange={async (e) => {
+                    try {
+                      await apiFetch('/api/auth/me', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chatNotificationsEnabled: e.target.checked }),
+                      });
+                      setUser(prev => prev ? { ...prev, chatNotificationsEnabled: e.target.checked } : null);
+                    } catch (err) {
+                      console.error('Failed to update chatNotificationsEnabled:', err);
+                      e.target.checked = !e.target.checked;
+                    }
+                  }}
+                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4"
+                />
+                <span className="text-xs text-slate-500 hidden sm:inline">Уведомления чата</span>
+              </label>
+            </div>
             <p className="mt-1 text-xs text-slate-500">Личные и групповые чаты</p>
           </div>
           <div className="flex-1 overflow-y-auto">
