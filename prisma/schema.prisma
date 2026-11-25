@@ -24,7 +24,8 @@ model User {
   notifPermission      String?
   notificationsEnabled Boolean   @default(false)
   orderNotificationsEnabled Boolean @default(true)
-  chatNotificationsEnabled Boolean @default(true)
+   chatNotificationsEnabled Boolean @default(true)
+   hidePhone Boolean?
   lastActive           DateTime?
   gardenerId           String?   @unique
   gardener             Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
@@ -38,9 +39,9 @@ model Chat {
   id         String            @id @default(uuid())
   name       String?
   isGroup    Boolean           @default(false)
-  directKey  String?           @unique
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+   directKey  String?           @unique
+   createdAt DateTime @default(now())
+   updatedAt  DateTime          @updatedAt
   participants ChatParticipant[]
   messages   ChatMessage[]
 
@@ -328,9 +329,8 @@ model PushSubscription {
   p256dh    String
   auth      String
   userId    String?
-  createdAt DateTime @default(now())
-
-  @@unique([userId, endpoint])
+   createdAt DateTime @default(now())
+   updatedAt DateTime @updatedAt
 }
 
 model ClientPushLog {
@@ -363,4 +363,15 @@ model PushClientLog {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+model ChatInvite {
+  id          String    @id @default(uuid())
+  chatId      String?
+  phone       String
+  token       String    @unique
+  createdById String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
 }
