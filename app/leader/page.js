@@ -883,16 +883,6 @@ export default function LeaderDashboard() {
             <button type="button" onClick={() => setLeaderScale(s => Math.min(1, +(s + 0.1).toFixed(1)))} aria-label="Увеличить масштаб" className="rounded bg-emerald-100 px-2 py-1 text-emerald-800 hover:bg-emerald-200">+</button>
           </div>
           <SettingsMenu>
-              <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Настройки уведомлений</h2>
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={handleToggleNotifications}
-                  className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100"
-                >
-                  {currentUser?.notificationsEnabled ? '🔕 Выключить уведомления' : '🔔 Включить уведомления'}
-                </button>
-              </div>
               <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 transition-all hover:bg-emerald-200" />
             <button type="button" data-dismiss-settings onClick={() => setLeaderTab('catalog')} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">

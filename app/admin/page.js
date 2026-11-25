@@ -2582,49 +2582,6 @@ export default function AdminDashboard() {
           ))}
         </div>
       </section>
-      <section className="space-y-2">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Настройки уведомлений</h2>
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const enabling = !currentUser?.notificationsEnabled;
-                if (enabling) {
-                  let permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
-                  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                    permission = await Notification.requestPermission();
-                  }
-                  if (permission === 'denied') {
-                    alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
-                  }
-                  const enabled = permission === 'granted';
-                  const res = await apiFetch('/api/auth/me', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ notificationsEnabled: enabled, chatNotificationsEnabled: enabled }),
-                  });
-                  const data = await res.json();
-                  setCurrentUser(prev => prev ? { ...prev, ...data.user } : data.user);
-                } else {
-                  const res = await apiFetch('/api/auth/me', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ notificationsEnabled: false }),
-                  });
-                  const data = await res.json();
-                  setCurrentUser(prev => prev ? { ...prev, ...data.user } : data.user);
-                }
-              } catch (err) {
-                console.error('Failed to toggle notifications:', err);
-                alert(err.message || 'Не удалось изменить настройки уведомлений');
-              }
-            }}
-            className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100"
-          >
-            {currentUser?.notificationsEnabled ? '🔕 Выключить уведомления' : '🔔 Включить уведомления'}
-          </button>
-        </div>
         <section className="space-y-2">
           <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
         <div className="flex flex-wrap gap-2">
@@ -2684,7 +2641,6 @@ export default function AdminDashboard() {
           )}
         </div>
         <button type="button" onClick={handleLogout} className="w-full rounded-lg bg-rose-50 px-3 py-2 text-left text-sm text-red-600 hover:bg-rose-100">Выйти</button>
-      </section>
       </section>
     </SettingsMenu>
   );
