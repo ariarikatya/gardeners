@@ -49,11 +49,11 @@ export async function PATCH(req) {
 
   try {
     const body = await req.json();
-    const { orderNotificationsEnabled, chatNotificationsEnabled } = body;
+    const { notificationsEnabled, chatNotificationsEnabled } = body;
 
     const updateData = {};
-    if (typeof orderNotificationsEnabled === 'boolean') {
-      updateData.orderNotificationsEnabled = orderNotificationsEnabled;
+    if (typeof notificationsEnabled === 'boolean') {
+      updateData.notificationsEnabled = notificationsEnabled;
     }
     if (typeof chatNotificationsEnabled === 'boolean') {
       updateData.chatNotificationsEnabled = chatNotificationsEnabled;

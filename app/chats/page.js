@@ -1657,15 +1657,42 @@ useEffect(() => {
               <label className="flex items-center gap-2 cursor-pointer" title="Уведомления чата">
                 <input
                   type="checkbox"
-                  checked={user?.chatNotificationsEnabled !== false}
+                  checked={!!(user?.notificationsEnabled && user?.chatNotificationsEnabled)}
                   onChange={async (e) => {
+                    const turningOn = e.target.checked;
                     try {
-                      await apiFetch('/api/auth/me', {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ chatNotificationsEnabled: e.target.checked }),
-                      });
-                      setUser(prev => prev ? { ...prev, chatNotificationsEnabled: e.target.checked } : null);
+                      if (turningOn) {
+                        if (!user?.notificationsEnabled) {
+                          let permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+                          if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                            permission = await Notification.requestPermission();
+                          }
+                          const enabled = permission === 'granted';
+                          const res = await apiFetch('/api/auth/me', {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ notificationsEnabled: enabled, chatNotificationsEnabled: enabled }),
+                          });
+                          const data = await res.json();
+                          setUser(prev => prev ? { ...prev, ...data.user } : data.user);
+                        } else {
+                          const res = await apiFetch('/api/auth/me', {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ chatNotificationsEnabled: true }),
+                          });
+                          const data = await res.json();
+                          setUser(prev => prev ? { ...prev, ...data.user } : data.user);
+                        }
+                      } else {
+                        const res = await apiFetch('/api/auth/me', {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ chatNotificationsEnabled: false }),
+                        });
+                        const data = await res.json();
+                        setUser(prev => prev ? { ...prev, ...data.user } : data.user);
+                      }
                     } catch (err) {
                       console.error('Failed to update chatNotificationsEnabled:', err);
                       e.target.checked = !e.target.checked;
