@@ -19,7 +19,7 @@ export async function GET(req) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, phone: true, name: true, role: true, gardenerId: true, notifPermission: true, notificationsEnabled: true, orderNotificationsEnabled: true, chatNotificationsEnabled: true }
+      select: { id: true, phone: true, name: true, role: true, gardenerId: true, notifPermission: true, notificationsEnabled: true, chatNotificationsEnabled: true }
     });
     if (!user) return NextResponse.json({ user: null });
     await prisma.user.update({
@@ -66,7 +66,7 @@ export async function PATCH(req) {
     const user = await prisma.user.update({
       where: { id: payload.userId },
       data: updateData,
-      select: { id: true, phone: true, name: true, role: true, gardenerId: true, notifPermission: true, notificationsEnabled: true, orderNotificationsEnabled: true, chatNotificationsEnabled: true }
+      select: { id: true, phone: true, name: true, role: true, gardenerId: true, notifPermission: true, notificationsEnabled: true, chatNotificationsEnabled: true }
     });
 
     return NextResponse.json({ user });

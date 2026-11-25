@@ -1403,6 +1403,38 @@ export default function AdminDashboard() {
     return localStorage.getItem('cached_sheet_url') || null;
   };
 
+  const handleToggleNotifications = async () => {
+    const enabling = !currentUser?.notificationsEnabled;
+    try {
+      if (enabling) {
+        let permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          permission = await Notification.requestPermission();
+        }
+        if (permission === 'denied') {
+          alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
+        }
+        const enabled = permission === 'granted';
+        await apiFetch('/api/auth/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notificationsEnabled: enabled, chatNotificationsEnabled: enabled }),
+        });
+        setCurrentUser(prev => prev ? { ...prev, notificationsEnabled: enabled, chatNotificationsEnabled: enabled } : null);
+      } else {
+        await apiFetch('/api/auth/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notificationsEnabled: false }),
+        });
+        setCurrentUser(prev => prev ? { ...prev, notificationsEnabled: false } : null);
+      }
+    } catch (err) {
+      console.error('Failed to toggle notifications:', err);
+      alert(err.message || 'Не удалось изменить настройки уведомлений');
+    }
+  };
+
   const handleSyncSheets = async () => {
     if (syncing) return;
     const isOnlineState = typeof navigator !== 'undefined' && navigator.onLine;
@@ -2586,6 +2618,9 @@ export default function AdminDashboard() {
           <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
         <div className="flex flex-wrap gap-2">
           <a href="/admin/amo-connect" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">amoCRM</a>
+          <button type="button" onClick={handleToggleNotifications} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
+            {currentUser?.notificationsEnabled ? '🔕 Выключить уведомления' : '🔔 Включить уведомления'}
+          </button>
           <PushButton className="flex max-w-full items-center gap-1.5 whitespace-normal break-words rounded-lg bg-emerald-100 px-2.5 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
           <button
             type="button"

@@ -169,6 +169,8 @@ export default function GardenerDashboard() {
   // Оффлайн состояние
   const [isOffline, setIsOffline] = useState(false);
   const [lastCacheTime, setLastCacheTime] = useState(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  useEffect(() => { apiFetch('/api/auth/me').then(r=>r.json()).then(d=>{ if(d?.user) setNotificationsEnabled(!!d.user.notificationsEnabled); }).catch(()=>{}); }, []);
   const [queueCount, setQueueCount] = useState(0);
   const [queuedClaimIds, setQueuedClaimIds] = useState(new Set());
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
@@ -1115,6 +1117,38 @@ export default function GardenerDashboard() {
     }
   };
 
+  const handleToggleNotifications = async () => {
+    const enabling = !notificationsEnabled;
+    try {
+      if (enabling) {
+        let permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          permission = await Notification.requestPermission();
+        }
+        if (permission === 'denied') {
+          alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
+        }
+        const enabled = permission === 'granted';
+        await apiFetch('/api/auth/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notificationsEnabled: enabled, chatNotificationsEnabled: enabled }),
+        });
+        setNotificationsEnabled(enabled);
+      } else {
+        await apiFetch('/api/auth/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notificationsEnabled: false }),
+        });
+        setNotificationsEnabled(false);
+      }
+    } catch (err) {
+      console.error('Failed to toggle notifications:', err);
+      alert(err.message || 'Не удалось изменить настройки уведомлений');
+    }
+  };
+
   const handleLogout = async () => {
     if (typeof window !== 'undefined') {
       try {
@@ -1966,6 +2000,9 @@ export default function GardenerDashboard() {
         <div className="ml-auto flex shrink-0 items-center justify-end gap-3 md:flex-nowrap">
           <SettingsMenu>
             <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+            <button type="button" onClick={handleToggleNotifications} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
+              {notificationsEnabled ? '🔕 Выключить уведомления' : '🔔 Включить уведомления'}
+            </button>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
             <a href="tel:88452650206" className="block rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-800 hover:bg-emerald-200">
               Диспетчер

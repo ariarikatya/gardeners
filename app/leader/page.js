@@ -849,15 +849,15 @@ export default function LeaderDashboard() {
           alert('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
         }
         const enabled = permission === 'granted';
-        await apiFetch('/api/push/permission', {
-          method: 'POST',
+        await apiFetch('/api/auth/me', {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notifPermission: permission, notificationsEnabled: enabled }),
+          body: JSON.stringify({ notificationsEnabled: enabled, chatNotificationsEnabled: enabled }),
         });
-        setCurrentUser(prev => prev ? { ...prev, notificationsEnabled: enabled, notifPermission: permission } : null);
+        setCurrentUser(prev => prev ? { ...prev, notificationsEnabled: enabled, chatNotificationsEnabled: enabled } : null);
       } else {
-        await apiFetch('/api/push/permission', {
-          method: 'POST',
+        await apiFetch('/api/auth/me', {
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ notificationsEnabled: false }),
         });
@@ -884,6 +884,9 @@ export default function LeaderDashboard() {
           </div>
           <SettingsMenu>
               <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+            <button type="button" onClick={handleToggleNotifications} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
+              {currentUser?.notificationsEnabled ? '🔕 Выключить уведомления' : '🔔 Включить уведомления'}
+            </button>
             <PushButton className="max-w-full rounded-lg bg-emerald-100 px-3 py-2 text-left text-sm font-medium leading-tight text-emerald-800 transition-all hover:bg-emerald-200" />
             <button type="button" data-dismiss-settings onClick={() => setLeaderTab('catalog')} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
               📦 Справочная база и назначения
