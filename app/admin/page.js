@@ -2613,31 +2613,28 @@ export default function AdminDashboard() {
             </button>
           ))}
         </div>
-      </section>
-        <section className="space-y-2">
-          <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
-        <div className="flex flex-wrap gap-2">
-          <a href="/admin/amo-connect" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">amoCRM</a>
-            <button type="button" onClick={handleToggleNotifications} className="w-full rounded-lg bg-emerald-50 px-3 py-2 text-left text-sm font-medium text-emerald-800 hover:bg-emerald-100">
-              🔔 Включить уведомления
+</section>
+          <section className="space-y-2">
+            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Действия</h2>
+          <div className="flex flex-wrap gap-2">
+            <a href="/admin/amo-connect" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">amoCRM</a>
+            <PushButton className="flex max-w-full items-center gap-1.5 whitespace-normal break-words rounded-lg bg-emerald-100 px-2.5 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const res = await apiFetch('/api/sync-amo');
+                  const data = await res.json();
+                  alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
+                  window.location.reload();
+                } catch (e) {
+                  alert('Ошибка при синхронизации с amoCRM');
+                }
+              }}
+              className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
+            >
+              Синхронизация
             </button>
-          <PushButton className="flex max-w-full items-center gap-1.5 whitespace-normal break-words rounded-lg bg-emerald-100 px-2.5 py-2 text-left text-sm font-medium leading-tight text-emerald-800 hover:bg-emerald-200" />
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const res = await apiFetch('/api/sync-amo');
-                const data = await res.json();
-                alert(`Синхронизировано: ${data.updated ?? 0} заказов`);
-                window.location.reload();
-              } catch (e) {
-                alert('Ошибка при синхронизации с amoCRM');
-              }
-            }}
-            className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
-          >
-            Синхронизация
-          </button>
           {currentUser?.role === 'LEADER' && <Link href="/leader/users" className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100">Пользователи</Link>}
           <button
             type="button"
