@@ -329,8 +329,10 @@ model PushSubscription {
   p256dh    String
   auth      String
   userId    String?
-   createdAt DateTime @default(now())
-   updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, endpoint])
 }
 
 model ClientPushLog {
