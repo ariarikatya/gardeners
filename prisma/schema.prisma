@@ -326,7 +326,7 @@ model WebLead {
 
 model PushSubscription {
   id        String   @id @default(cuid())
-  endpoint  String
+  endpoint  String @unique
   p256dh    String
   auth      String
   userId    String?
