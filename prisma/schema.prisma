@@ -27,7 +27,6 @@ model User {
   notificationsEnabled Boolean   @default(false)
   orderNotificationsEnabled Boolean @default(true)
    chatNotificationsEnabled Boolean @default(true)
-   hidePhone Boolean?
   lastActive           DateTime?
   gardenerId           String?   @unique
   gardener             Gardener? @relation(fields: [gardenerId], references: [id], onDelete: Cascade)
