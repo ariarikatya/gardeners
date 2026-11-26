@@ -876,7 +876,7 @@ export async function PUT(req) {
 
       if (amoLeadId && updateData.status && existing && existing.status !== updateData.status) {
         let action = null;
-        if (updateData.status === 'Отказ') action = 'refusal';
+        if (updateData.status === 'Отказ' || updateData.status === 'Отменен') action = 'refusal';
         else if (updateData.status === 'Выполнен' || updateData.status === 'Выполнено') action = 'complete';
         else if (updateData.status === 'Новый заказ') action = 'reset';
 
@@ -902,7 +902,7 @@ export async function PUT(req) {
         }
       }
 
-      if (updateData.status === 'Отменен' && amoLeadId) {
+      if (false && updateData.status === 'Отменен' && amoLeadId) { // отключено: теперь обрабатывается action='refusal' выше
         const s = (order.service?.name || '').toLowerCase();
         const isObrezka = s.includes('обрез') || s.includes('выкорч');
         const isService = s.includes('сервис') || s.includes('консервац') || s.includes('стрижк');

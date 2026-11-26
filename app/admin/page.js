@@ -3307,7 +3307,7 @@ export default function AdminDashboard() {
                               </span>
                             </td>
                             {displayGardeners.map(g => {
-                              const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен');
+                              const dayOrdersAll = orders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен' && o.status !== 'Отказ');
                               const dayOrders = filteredOrders.filter(o => o.gardenerId === g.id && o.date.startsWith(dateStr) && o.status !== 'Перенесен');
                               const dayOff = dayOffs.find(d => d.gardenerId === g.id && d.date.startsWith(dateStr));
                               const isBlockedDay = blockedDays.some(b => b.gardenerId === g.id && b.date.startsWith(dateStr));
